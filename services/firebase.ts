@@ -8,7 +8,7 @@ import * as storageModule from 'firebase/storage';
 // Bạn có thể lấy thông tin này từ Firebase Console cho ứng dụng web của mình.
 const firebaseConfig = {
   apiKey: "AIzaSyBB8b-qXKMiOo0dSgDSqM7bS_52mp2WYu8",
-  authDomain: "aistorymind-513eb.web.app",
+  authDomain: "storyreaderai.netlify.app",
   projectId: "aistorymind-513eb",
   storageBucket: "aistorymind-513eb.appspot.com",
   messagingSenderId: "977972360527",
