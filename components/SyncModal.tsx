@@ -15,24 +15,14 @@ const SyncModal: React.FC<SyncModalProps> = ({ onClose, onSync, user }) => {
 
   const handleSignIn = async () => {
     setIsWorking(true);
-    setStatus('Đang mở cửa sổ đăng nhập Google...');
+    setStatus('Đang chuyển hướng đến trang đăng nhập Google...');
     try {
-      await authService.signInWithGooglePopup();
-      // Listener trong App.tsx sẽ xử lý việc cập nhật state
-      setStatus('Đăng nhập thành công! Đang đồng bộ...');
-      await onSync();
-      setStatus('Đồng bộ hoàn tất!');
-    } catch (error: any) {
-      if (error.code === 'auth/popup-closed-by-user') {
-        setStatus('Cửa sổ đăng nhập đã bị đóng.');
-      } else if (error.code === 'auth/unauthorized-domain') {
-        setStatus("Lỗi: Tên miền chưa được ủy quyền. Vui lòng thêm tên miền của ứng dụng này vào mục 'Authorized domains' trong Firebase (Authentication -> Settings).");
-        console.error("Sign-in error: Unauthorized domain. Please add this domain to the Firebase console.", error);
-      } else {
-        setStatus('Đăng nhập thất bại. Vui lòng thử lại.');
-        console.error("Sign-in error", error);
-      }
-    } finally {
+      await authService.signInWithGoogleRedirect();
+      // Sau khi gọi hàm này, trang sẽ được chuyển hướng.
+      // Việc xử lý kết quả sẽ diễn ra ở App.tsx khi trang tải lại.
+    } catch (error) {
+      setStatus('Không thể bắt đầu đăng nhập. Vui lòng thử lại.');
+      console.error("Redirect sign-in error", error);
       setIsWorking(false);
     }
   };

@@ -67,6 +67,19 @@ const App: React.FC = () => {
     const localHistory = getReadingHistory();
     setReadingHistory(localHistory);
     
+    // Xử lý kết quả đăng nhập từ Google Redirect
+    authService.getGoogleRedirectResult().then(user => {
+        if (user) {
+            setGoogleUser(user);
+            // Mở modal sau khi đăng nhập thành công để người dùng biết
+            setIsSyncModalOpen(true);
+            // TODO: Bắt đầu quá trình đồng bộ dữ liệu
+            handleSync(); 
+        }
+    }).catch(error => {
+        console.error("Lỗi xử lý kết quả chuyển hướng:", error);
+    });
+
     // Thiết lập listener để theo dõi trạng thái đăng nhập của Firebase
     const unsubscribe = authService.onAuthChange(user => {
       if (user) {
@@ -75,8 +88,6 @@ const App: React.FC = () => {
           email: user.email || '',
           imageUrl: user.photoURL || ''
         });
-        // TODO: Tải dữ liệu người dùng từ Firestore tại đây
-        handleSync();
       } else {
         setGoogleUser(null);
       }

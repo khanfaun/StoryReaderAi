@@ -1,5 +1,6 @@
 import {
-  signInWithPopup,
+  signInWithRedirect,
+  getRedirectResult,
   GoogleAuthProvider,
   signOut,
   onAuthStateChanged,
@@ -10,25 +11,32 @@ import type { GoogleUser } from '../types';
 
 const provider = new GoogleAuthProvider();
 
-export const signInWithGooglePopup = async (): Promise<GoogleUser | null> => {
+export const signInWithGoogleRedirect = async (): Promise<void> => {
   try {
-    const result = await signInWithPopup(auth, provider);
-    const user = result.user;
-    if (user) {
-        return {
-            name: user.displayName || 'Người dùng',
-            email: user.email || '',
-            imageUrl: user.photoURL || '',
-        };
+    await signInWithRedirect(auth, provider);
+  } catch (error) {
+    console.error('Lỗi khi bắt đầu quá trình đăng nhập chuyển hướng:', error);
+    throw error;
+  }
+};
+
+export const getGoogleRedirectResult = async (): Promise<GoogleUser | null> => {
+  try {
+    const result = await getRedirectResult(auth);
+    if (result && result.user) {
+      const user = result.user;
+      return {
+        name: user.displayName || 'Người dùng',
+        email: user.email || '',
+        imageUrl: user.photoURL || '',
+      };
     }
     return null;
   } catch (error: any) {
-    if (error.code === 'auth/popup-closed-by-user') {
-        console.log('Cửa sổ đăng nhập đã bị đóng bởi người dùng.');
-    } else {
-        console.error("Lỗi khi đăng nhập bằng Google:", error);
+    if (error.code !== 'auth/redirect-cancelled') {
+        console.error('Lỗi khi lấy kết quả chuyển hướng:', error);
     }
-    throw error;
+    return null;
   }
 };
 
