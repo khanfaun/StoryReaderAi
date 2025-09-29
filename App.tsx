@@ -71,6 +71,8 @@ const App: React.FC = () => {
   // State for API Key management
   const [apiKey, setApiKey] = useState<string | null>(apiKeyService.getApiKey());
   const [isApiKeyModalOpen, setIsApiKeyModalOpen] = useState<boolean>(!apiKeyService.hasApiKey());
+  const [tokenUsage, setTokenUsage] = useState<apiKeyService.TokenUsage>(apiKeyService.getTokenUsage());
+
 
   // State for Update Modal
   const [isUpdateModalOpen, setIsUpdateModalOpen] = useState(true);
@@ -137,6 +139,7 @@ const App: React.FC = () => {
     const loadInitialData = async () => {
       setIsLoading(true);
       await reloadDataFromStorage();
+      setTokenUsage(apiKeyService.getTokenUsage());
       setIsLoading(false);
     };
 
@@ -159,6 +162,18 @@ const App: React.FC = () => {
             setIsApiKeyModalOpen(true);
         }
   }, []);
+  
+  const handleTokenUsageUpdate = useCallback((usageData?: { totalTokens: number }) => {
+    if (!usageData || !usageData.totalTokens || usageData.totalTokens === 0) return;
+    if (!apiKey) return; // Cannot update usage without an active key
+
+    setTokenUsage(prevUsage => {
+      const newTotal = prevUsage.totalTokens + usageData.totalTokens;
+      const newUsageState = { ...prevUsage, totalTokens: newTotal };
+      apiKeyService.saveTokenUsage(apiKey, newUsageState);
+      return newUsageState;
+    });
+  }, [apiKey]);
 
   const fetchChapter = useCallback(async (storyToLoad: Story, chapterIndex: number) => {
     if (!storyToLoad || !storyToLoad.chapters || chapterIndex < 0 || chapterIndex >= storyToLoad.chapters.length) return;
@@ -223,7 +238,8 @@ const App: React.FC = () => {
         setIsAnalyzing(true);
         try {
             const currentStats = getStoryState(storyToLoad.url) ?? {};
-            const chapterStats = await analyzeChapterForCharacterStats(apiKey, content, currentStats);
+            const { data: chapterStats, usage } = await analyzeChapterForCharacterStats(apiKey, content, currentStats);
+            handleTokenUsageUpdate(usage);
             const newState = mergeChapterStats(currentStats, chapterStats ?? {});
             setCumulativeStats(newState);
             saveStoryState(storyToLoad.url, newState);
@@ -240,7 +256,7 @@ const App: React.FC = () => {
     } finally {
         setIsChapterLoading(false);
     }
-  }, [readChapters, saveStoryState, ebookInstance, apiKey, handleApiError]);
+  }, [readChapters, saveStoryState, ebookInstance, apiKey, handleApiError, handleTokenUsageUpdate]);
 
   const handleSearch = useCallback(async (query: string) => {
     setIsDataLoading(true);
@@ -569,15 +585,19 @@ const App: React.FC = () => {
     setIsChatLoading(true);
 
     try {
-      let response = '';
+      let responseText: string;
       if (story.source === 'Ebook' && ebookInstance?.zip) {
-        response = await chatWithEbook(apiKey, message, ebookInstance.zip, story.chapters || []);
+        const { text, usage } = await chatWithEbook(apiKey, message, ebookInstance.zip, story.chapters || []);
+        handleTokenUsageUpdate(usage);
+        responseText = text;
       } else if (chapterContent) {
-        response = await chatWithChapterContent(apiKey, message, chapterContent, story.title);
+        const { text, usage } = await chatWithChapterContent(apiKey, message, chapterContent, story.title);
+        handleTokenUsageUpdate(usage);
+        responseText = text;
       } else {
-        response = "Không có nội dung để trò chuyện. Vui lòng tải một chương hoặc Ebook.";
+        responseText = "Không có nội dung để trò chuyện. Vui lòng tải một chương hoặc Ebook.";
       }
-      const newModelMessage: ChatMessage = { role: 'model', content: response };
+      const newModelMessage: ChatMessage = { role: 'model', content: responseText };
       setChatMessages(prev => [...prev, newModelMessage]);
     } catch (err) {
         handleApiError(err);
@@ -587,12 +607,13 @@ const App: React.FC = () => {
     } finally {
       setIsChatLoading(false);
     }
-  }, [isChatLoading, story, ebookInstance, chapterContent, apiKey, handleApiError]);
+  }, [isChatLoading, story, ebookInstance, chapterContent, apiKey, handleApiError, handleTokenUsageUpdate]);
 
   const handleValidateAndSaveApiKey = async (key: string): Promise<true | string> => {
     if (apiKeyService.isAiStudio()) {
         apiKeyService.saveApiKey(key);
         setApiKey(key);
+        setTokenUsage(apiKeyService.getTokenUsage()); // Refresh token usage for the new key
         setIsApiKeyModalOpen(false);
         return true;
     }
@@ -600,6 +621,7 @@ const App: React.FC = () => {
         await validateApiKey(key);
         apiKeyService.saveApiKey(key);
         setApiKey(key);
+        setTokenUsage(apiKeyService.getTokenUsage()); // Refresh token usage for the new key
         setIsApiKeyModalOpen(false);
         return true;
     } catch (err) {
@@ -611,6 +633,8 @@ const App: React.FC = () => {
   const handleDeleteApiKey = () => {
       apiKeyService.clearApiKey();
       setApiKey(null);
+      // After clearing the active key, the token usage should reflect a zeroed state.
+      setTokenUsage(apiKeyService.getTokenUsage());
   };
 
   const handleReanalyzePrimary = useCallback(async () => {
@@ -620,7 +644,8 @@ const App: React.FC = () => {
     setError(null);
     try {
         const currentStats = getStoryState(story.url) ?? {};
-        const newPrimaryDelta = await analyzeChapterForPrimaryCharacter(apiKey, chapterContent, currentStats);
+        const { data: newPrimaryDelta, usage } = await analyzeChapterForPrimaryCharacter(apiKey, chapterContent, currentStats);
+        handleTokenUsageUpdate(usage);
         
         if (newPrimaryDelta) {
             const newState = mergeChapterStats(currentStats, newPrimaryDelta);
@@ -638,7 +663,7 @@ const App: React.FC = () => {
     } finally {
         setIsAnalyzing(false);
     }
-  }, [apiKey, chapterContent, story, selectedChapterIndex, handleApiError, saveStoryState]);
+  }, [apiKey, chapterContent, story, selectedChapterIndex, handleApiError, saveStoryState, handleTokenUsageUpdate]);
 
   const handleReanalyzeWorld = useCallback(async () => {
     if (!apiKey || !chapterContent || !story || selectedChapterIndex === null) return;
@@ -647,7 +672,8 @@ const App: React.FC = () => {
     setError(null);
     try {
         const currentStats = getStoryState(story.url) ?? {};
-        const newWorldDelta = await analyzeChapterForWorldInfo(apiKey, chapterContent, currentStats);
+        const { data: newWorldDelta, usage } = await analyzeChapterForWorldInfo(apiKey, chapterContent, currentStats);
+        handleTokenUsageUpdate(usage);
 
         if (newWorldDelta) {
             const newState = mergeChapterStats(currentStats, newWorldDelta);
@@ -665,7 +691,7 @@ const App: React.FC = () => {
     } finally {
         setIsAnalyzing(false);
     }
-  }, [apiKey, chapterContent, story, selectedChapterIndex, handleApiError, saveStoryState]);
+  }, [apiKey, chapterContent, story, selectedChapterIndex, handleApiError, saveStoryState, handleTokenUsageUpdate]);
 
   const renderMainContent = () => {
     if (isLoading || isDataLoading) return <LoadingSpinner />;
@@ -795,6 +821,7 @@ const App: React.FC = () => {
         onValidateAndSave={handleValidateAndSaveApiKey}
         onDelete={handleDeleteApiKey}
         currentKey={apiKey}
+        tokenUsage={tokenUsage}
       />
       
        <ConfirmationModal

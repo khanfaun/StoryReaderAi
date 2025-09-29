@@ -233,7 +233,7 @@ Khi mô tả một mối quan hệ trong trường \`moTa\`, hãy sử dụng c�
 **NỘI DUNG CHƯƠNG MỚI:**
 "{chapterContent}"`;
 
-async function executeAnalysis(apiKey: string, prompt: string, schema: any): Promise<any> {
+async function executeAnalysis(apiKey: string, prompt: string, schema: any): Promise<{ data: any; usage: { totalTokens: number } }> {
     try {
         const geminiClient = getAiClient(apiKey);
         const response = await geminiClient.models.generateContent({
@@ -245,7 +245,13 @@ async function executeAnalysis(apiKey: string, prompt: string, schema: any): Pro
             },
         });
         const jsonText = response.text.trim();
-        return jsonText ? JSON.parse(jsonText) : null;
+        const usage = response.usageMetadata || { totalTokenCount: 0 };
+        return {
+            data: jsonText ? JSON.parse(jsonText) : null,
+            usage: {
+                totalTokens: usage.totalTokenCount || 0
+            }
+        };
     } catch (error) {
         console.error("Lỗi khi thực hiện phân tích:", error);
         if (error instanceof Error && error.message.includes('API key not valid')) {
@@ -255,7 +261,7 @@ async function executeAnalysis(apiKey: string, prompt: string, schema: any): Pro
     }
 }
 
-export const analyzeChapterForPrimaryCharacter = async (apiKey: string, chapterContent: string, previousStats: CharacterStats | null): Promise<Partial<CharacterStats> | null> => {
+export const analyzeChapterForPrimaryCharacter = async (apiKey: string, chapterContent: string, previousStats: CharacterStats | null): Promise<{ data: Partial<CharacterStats> | null, usage: { totalTokens: number }}> => {
     const taskPrompt = `**NHIỆM VỤ:**\nĐọc nội dung **CHƯƠNG MỚI** và chỉ trích xuất những thông tin **MỚI** hoặc **THAY ĐỔI** liên quan đến **TRẠNG THÁI CỦA NHÂN VẬT CHÍNH** (tên, cảnh giới, cấp độ, vật phẩm, công pháp, trang bị, tư chất).`;
     const fullPrompt = BASE_PROMPT
         .replace('{previousStats}', JSON.stringify(previousStats ?? {}, null, 2))
@@ -264,7 +270,7 @@ export const analyzeChapterForPrimaryCharacter = async (apiKey: string, chapterC
     return executeAnalysis(apiKey, fullPrompt, primaryCharacterSchema);
 };
 
-export const analyzeChapterForWorldInfo = async (apiKey: string, chapterContent: string, previousStats: CharacterStats | null): Promise<Partial<CharacterStats> | null> => {
+export const analyzeChapterForWorldInfo = async (apiKey: string, chapterContent: string, previousStats: CharacterStats | null): Promise<{ data: Partial<CharacterStats> | null, usage: { totalTokens: number }}> => {
     const taskPrompt = `**NHIỆM VỤ:**\nĐọc nội dung **CHƯƠNG MỚI** và chỉ trích xuất những thông tin **MỚI** hoặc **THAY ĐỔI** liên quan đến **THẾ GIỚI TRUYỆN** (nhân vật phụ, thế lực, địa điểm, vị trí hiện tại của nhân vật chính).`;
     const fullPrompt = BASE_PROMPT
         .replace('{previousStats}', JSON.stringify(previousStats ?? {}, null, 2))
@@ -273,16 +279,16 @@ export const analyzeChapterForWorldInfo = async (apiKey: string, chapterContent:
     return executeAnalysis(apiKey, fullPrompt, worldInfoSchema);
 };
 
-export const analyzeChapterForCharacterStats = async (apiKey: string, chapterContent: string, previousStats: CharacterStats | null): Promise<CharacterStats | null> => {
+export const analyzeChapterForCharacterStats = async (apiKey: string, chapterContent: string, previousStats: CharacterStats | null): Promise<{ data: CharacterStats | null, usage: { totalTokens: number }}> => {
     const taskPrompt = `**NHIỆM VỤ:**\nĐọc nội dung **CHƯƠNG MỚI** và chỉ trích xuất những thông tin **MỚI** hoặc **THAY ĐỔI** so với "DỮ LIỆU HIỆN TẠI".`;
      const fullPrompt = BASE_PROMPT
         .replace('{previousStats}', JSON.stringify(previousStats ?? {}, null, 2))
         .replace('**NHIỆM VỤ:**', taskPrompt)
         .replace('{chapterContent}', chapterContent.substring(0, 15000));
         
-    const stats = await executeAnalysis(apiKey, fullPrompt, characterStatsSchema) as CharacterStats | null;
+    const { data: stats, usage } = await executeAnalysis(apiKey, fullPrompt, characterStatsSchema);
     
-    if (!stats) return null;
+    if (!stats) return { data: null, usage };
 
     const hasData = 
         (stats.canhGioi && stats.canhGioi.trim() !== "") ||
@@ -297,7 +303,8 @@ export const analyzeChapterForCharacterStats = async (apiKey: string, chapterCon
         (stats.diaDiem && stats.diaDiem.length > 0) ||
         (stats.quanHe && stats.quanHe.length > 0);
 
-    return hasData ? stats : null;
+    const dataToReturn = hasData ? stats : null;
+    return { data: dataToReturn, usage };
 };
 
 
@@ -309,7 +316,7 @@ export const analyzeChapterForCharacterStats = async (apiKey: string, chapterCon
  * @param storyTitle Tiêu đề của truyện để cung cấp ngữ cảnh.
  * @returns Câu trả lời từ AI.
  */
-export const chatWithChapterContent = async (apiKey: string, prompt: string, chapterContent: string, storyTitle: string): Promise<string> => {
+export const chatWithChapterContent = async (apiKey: string, prompt: string, chapterContent: string, storyTitle: string): Promise<{ text: string, usage: { totalTokens: number }}> => {
   try {
     const geminiClient = getAiClient(apiKey);
     const response = await geminiClient.models.generateContent({
@@ -326,7 +333,13 @@ export const chatWithChapterContent = async (apiKey: string, prompt: string, cha
 
         **Câu trả lời của bạn:**`,
     });
-    return response.text;
+    const usage = response.usageMetadata || { totalTokenCount: 0 };
+    return {
+      text: response.text,
+      usage: {
+        totalTokens: usage.totalTokenCount || 0
+      }
+    };
   } catch (error) {
     console.error("Lỗi khi trò chuyện về nội dung chương:", error);
     if (error instanceof Error && error.message.includes('API key not valid')) {
@@ -346,7 +359,7 @@ export const chatWithChapterContent = async (apiKey: string, prompt: string, cha
  * @param chapterList Danh sách các chương trong Ebook.
  * @returns Câu trả lời từ AI.
  */
-export const chatWithEbook = async (apiKey: string, prompt: string, zipInstance: any, chapterList: Chapter[]): Promise<string> => {
+export const chatWithEbook = async (apiKey: string, prompt: string, zipInstance: any, chapterList: Chapter[]): Promise<{ text: string, usage: { totalTokens: number }}> => {
   const geminiClient = getAiClient(apiKey);
   try {
     // === BƯỚC 1: Xác định các chương có liên quan ===
@@ -381,7 +394,10 @@ export const chatWithEbook = async (apiKey: string, prompt: string, zipInstance:
     const relevantFiles = relevantFilesData.relevant_files;
 
     if (!relevantFiles || relevantFiles.length === 0) {
-      return "Tôi không tìm thấy chương nào có vẻ liên quan đến câu hỏi của bạn trong Ebook này.";
+      return { 
+        text: "Tôi không tìm thấy chương nào có vẻ liên quan đến câu hỏi của bạn trong Ebook này.",
+        usage: { totalTokens: chapterSelectionResponse.usageMetadata?.totalTokenCount || 0 }
+      };
     }
 
     // === BƯỚC 2: Trích xuất nội dung và trả lời câu hỏi ===
@@ -402,7 +418,10 @@ export const chatWithEbook = async (apiKey: string, prompt: string, zipInstance:
     }
 
     if (!contextContent.trim()) {
-      return "Tôi đã xác định được các chương liên quan nhưng không thể trích xuất nội dung từ chúng. File Ebook có thể bị lỗi.";
+      return {
+        text: "Tôi đã xác định được các chương liên quan nhưng không thể trích xuất nội dung từ chúng. File Ebook có thể bị lỗi.",
+        usage: { totalTokens: chapterSelectionResponse.usageMetadata?.totalTokenCount || 0 }
+      };
     }
 
     const finalAnswerResponse = await geminiClient.models.generateContent({
@@ -417,7 +436,15 @@ export const chatWithEbook = async (apiKey: string, prompt: string, zipInstance:
         **Câu trả lời của bạn:**`,
     });
     
-    return finalAnswerResponse.text;
+    const usage1 = chapterSelectionResponse.usageMetadata || { totalTokenCount: 0 };
+    const usage2 = finalAnswerResponse.usageMetadata || { totalTokenCount: 0 };
+
+    return {
+      text: finalAnswerResponse.text,
+      usage: {
+        totalTokens: (usage1.totalTokenCount || 0) + (usage2.totalTokenCount || 0)
+      }
+    };
 
   } catch (error) {
     console.error("Lỗi khi trò chuyện về Ebook:", error);
