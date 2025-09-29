@@ -35,6 +35,44 @@ const getAiClient = (apiKey: string): GoogleGenAI => {
 };
 
 
+/**
+ * Validates a Gemini API key by making a minimal, low-cost call.
+ * Throws an error if the key is invalid or the request fails.
+ * @param {string} apiKey The API key to validate.
+ */
+export const validateApiKey = async (apiKey: string): Promise<void> => {
+  if (!apiKey || apiKey.trim() === '') {
+    throw new Error("API Key không được để trống.");
+  }
+  
+  // Do not use the cached client. Create a new one with the key to be tested.
+  const validationClient = new GoogleGenAI({ apiKey });
+
+  try {
+    // Perform a simple, low-cost query to check if the key is valid.
+    await validationClient.models.generateContent({
+        model: "gemini-2.5-flash",
+        contents: "Validate",
+        config: {
+            thinkingConfig: { thinkingBudget: 0 }, // Disable thinking for faster validation
+        },
+    });
+  } catch (error) {
+    console.error("Lỗi xác thực API Key:", error);
+    if (error instanceof Error) {
+      if (error.message.includes('API key not valid')) {
+        throw new Error("API Key không hợp lệ. Vui lòng kiểm tra lại.");
+      }
+      if (error.message.includes('IAM permission')) {
+         throw new Error("API Key không có quyền truy cập. Vui lòng kiểm tra quyền của key.");
+      }
+    }
+    // Generic error for network issues, etc.
+    throw new Error("Không thể xác thực API Key. Vui lòng kiểm tra lại hoặc thử lại sau.");
+  }
+};
+
+
 const infoItemArraySchema = {
   type: Type.ARRAY,
   items: {

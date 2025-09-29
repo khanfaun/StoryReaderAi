@@ -2,7 +2,7 @@
 import React, { useState, useCallback, useEffect, useRef } from 'react';
 import type { Story, Chapter, CharacterStats, ReadingSettings, ReadingHistoryItem, GoogleUser, ChatMessage } from './types';
 import { searchStory, getChapterContent, getStoryDetails, getStoryFromUrl } from './services/truyenfullService';
-import { analyzeChapterForCharacterStats, chatWithEbook, chatWithChapterContent } from './services/geminiService';
+import { analyzeChapterForCharacterStats, chatWithEbook, chatWithChapterContent, validateApiKey } from './services/geminiService';
 import { getCachedChapter, setCachedChapter } from './services/cacheService';
 import { getStoryState, saveStoryState as saveStoryStateLocal, mergeChapterStats } from './services/storyStateService';
 import { useReadingSettings } from './hooks/useReadingSettings';
@@ -166,6 +166,18 @@ const App: React.FC = () => {
     setIsChatLoading(false);
   };
 
+  const handleApiError = useCallback((error: unknown) => {
+        const errorMessage = error instanceof Error ? error.message : "Đã xảy ra lỗi không xác định.";
+        setError(errorMessage);
+
+        // If a saved key becomes invalid, clear it and force re-entry.
+        if (errorMessage.includes('API Key không hợp lệ')) {
+            apiKeyService.clearApiKey();
+            setApiKey(null);
+            setIsApiKeyModalOpen(true);
+        }
+  }, []);
+
   const fetchChapter = useCallback(async (storyToLoad: Story, chapterIndex: number) => {
     if (!storyToLoad || !storyToLoad.chapters || chapterIndex < 0 || chapterIndex >= storyToLoad.chapters.length) return;
     
@@ -236,17 +248,17 @@ const App: React.FC = () => {
             setCachedChapter(storyToLoad.url, chapter.url, { content, stats: chapterStats });
         } catch (analysisError) {
             console.error("Analysis error, caching content only", analysisError);
-            setError(analysisError instanceof Error ? analysisError.message : "Lỗi khi phân tích chương.");
+            handleApiError(analysisError);
             setCachedChapter(storyToLoad.url, chapter.url, { content, stats: null });
         } finally {
             setIsAnalyzing(false);
         }
     } catch (err) {
-        setError(err instanceof Error ? err.message : "Không thể tải nội dung chương.");
+        handleApiError(err);
     } finally {
         setIsChapterLoading(false);
     }
-  }, [readChapters, saveStoryState, ebookInstance, apiKey]);
+  }, [readChapters, saveStoryState, ebookInstance, apiKey, handleApiError]);
 
   const handleSearch = useCallback(async (query: string) => {
     setIsDataLoading(true);
@@ -586,19 +598,33 @@ const App: React.FC = () => {
       const newModelMessage: ChatMessage = { role: 'model', content: response };
       setChatMessages(prev => [...prev, newModelMessage]);
     } catch (err) {
-      const errorMessage = err instanceof Error ? err.message : "Đã xảy ra lỗi khi trò chuyện với AI.";
-      const newErrorMessage: ChatMessage = { role: 'model', content: `Lỗi: ${errorMessage}` };
-      setChatMessages(prev => [...prev, newErrorMessage]);
+        handleApiError(err);
+        const errorMessage = err instanceof Error ? err.message : "Đã xảy ra lỗi khi trò chuyện với AI.";
+        const newErrorMessage: ChatMessage = { role: 'model', content: `Lỗi: ${errorMessage}` };
+        setChatMessages(prev => [...prev, newErrorMessage]);
     } finally {
       setIsChatLoading(false);
     }
-  }, [isChatLoading, story, ebookInstance, chapterContent, apiKey]);
+  }, [isChatLoading, story, ebookInstance, chapterContent, apiKey, handleApiError]);
 
-  const handleSaveApiKey = (key: string) => {
-      apiKeyService.saveApiKey(key);
-      setApiKey(key);
-      setIsApiKeyModalOpen(false);
+  const handleValidateAndSaveApiKey = async (key: string): Promise<true | string> => {
+    if (apiKeyService.isAiStudio()) {
+        apiKeyService.saveApiKey(key);
+        setApiKey(key);
+        setIsApiKeyModalOpen(false);
+        return true;
+    }
+    try {
+        await validateApiKey(key);
+        apiKeyService.saveApiKey(key);
+        setApiKey(key);
+        setIsApiKeyModalOpen(false);
+        return true;
+    } catch (err) {
+        return err instanceof Error ? err.message : "Đã xảy ra lỗi không xác định.";
+    }
   };
+
 
   const handleDeleteApiKey = () => {
       apiKeyService.clearApiKey();
@@ -731,7 +757,7 @@ const App: React.FC = () => {
       <ApiKeyModal
         isOpen={isApiKeyModalOpen}
         onClose={() => setIsApiKeyModalOpen(false)}
-        onSave={handleSaveApiKey}
+        onValidateAndSave={handleValidateAndSaveApiKey}
         onDelete={handleDeleteApiKey}
         currentKey={apiKey}
       />

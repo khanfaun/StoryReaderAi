@@ -1,32 +1,42 @@
 
 import React, { useState, useEffect } from 'react';
 import { isAiStudio } from '../services/apiKeyService';
-import { CloseIcon } from './icons';
+import { CloseIcon, SpinnerIcon } from './icons';
 
 interface ApiKeyModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onSave: (key: string) => void;
+  onValidateAndSave: (key: string) => Promise<true | string>;
   onDelete: () => void;
   currentKey: string | null;
 }
 
-const ApiKeyModal: React.FC<ApiKeyModalProps> = ({ isOpen, onClose, onSave, onDelete, currentKey }) => {
+const ApiKeyModal: React.FC<ApiKeyModalProps> = ({ isOpen, onClose, onValidateAndSave, onDelete, currentKey }) => {
   const [apiKey, setApiKey] = useState('');
   const [isEditing, setIsEditing] = useState(!currentKey);
+  const [isValidating, setIsValidating] = useState(false);
+  const [validationError, setValidationError] = useState<string | null>(null);
 
   useEffect(() => {
     if (isOpen) {
         setIsEditing(!currentKey);
         setApiKey('');
+        setValidationError(null);
     }
   }, [isOpen, currentKey]);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (apiKey.trim()) {
-      onSave(apiKey.trim());
+    setValidationError(null);
+    setIsValidating(true);
+    
+    const result = await onValidateAndSave(apiKey.trim());
+    
+    if (result !== true) {
+        setValidationError(result);
     }
+    // On success, the parent component closes the modal, so no further action is needed here.
+    setIsValidating(false);
   };
 
   const handleDelete = () => {
@@ -78,11 +88,17 @@ const ApiKeyModal: React.FC<ApiKeyModalProps> = ({ isOpen, onClose, onSave, onDe
                   className="sync-modal-form__input"
                   placeholder={inAiStudio ? "Nhập giá trị bất kỳ để tiếp tục" : "Dán API Key của bạn vào đây"}
                   required
+                  disabled={isValidating}
                 />
               </div>
+              {validationError && (
+                  <p className="text-sm text-rose-400 mt-2">{validationError}</p>
+              )}
               <div className="sync-modal-form__actions">
-                {currentKey && <button type="button" onClick={() => setIsEditing(false)} className="sync-modal-form__button sync-modal-form__button--secondary">Hủy</button>}
-                <button type="submit" className="sync-modal-form__button sync-modal-form__button--primary">Lưu Key</button>
+                {currentKey && <button type="button" onClick={() => setIsEditing(false)} className="sync-modal-form__button sync-modal-form__button--secondary" disabled={isValidating}>Hủy</button>}
+                <button type="submit" className="sync-modal-form__button sync-modal-form__button--primary" disabled={isValidating}>
+                  {isValidating ? <SpinnerIcon className="sync-modal-form__spinner" /> : 'Lưu & Xác thực'}
+                </button>
               </div>
             </form>
           ) : (
