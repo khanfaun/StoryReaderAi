@@ -12,11 +12,12 @@ interface Entity {
 interface EntityTooltipProps {
   entity: Entity;
   children: React.ReactNode;
+  noUnderline?: boolean;
 }
 
 const popoverRoot = document.getElementById('popover-root');
 
-const EntityTooltip: React.FC<EntityTooltipProps> = ({ entity, children }) => {
+const EntityTooltip: React.FC<EntityTooltipProps> = ({ entity, children, noUnderline = false }) => {
   const [isPopoverVisible, setIsPopoverVisible] = useState(false);
   const [popoverStyle, setPopoverStyle] = useState<React.CSSProperties>({});
   const [popoverPosition, setPopoverPosition] = useState<'top' | 'bottom'>('top');
@@ -105,13 +106,17 @@ const EntityTooltip: React.FC<EntityTooltipProps> = ({ entity, children }) => {
     </div>,
     popoverRoot
   ) : null;
+  
+  const className = noUnderline
+    ? "cursor-pointer"
+    : "cursor-pointer border-b border-dashed border-[var(--theme-accent-primary)]/70 hover:border-solid hover:border-[var(--theme-accent-primary)] transition-colors";
 
   return (
     <>
       <span
         ref={spanRef}
         onClick={() => setIsPopoverVisible(!isPopoverVisible)}
-        className="cursor-pointer border-b border-dashed border-[var(--theme-accent-primary)]/70 hover:border-solid hover:border-[var(--theme-accent-primary)] transition-colors"
+        className={className}
         role="button"
         tabIndex={0}
         aria-haspopup="true"

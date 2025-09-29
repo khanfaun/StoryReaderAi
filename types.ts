@@ -20,6 +20,7 @@ export interface ReadingHistoryItem {
   source: string;
   imageUrl: string;
   lastChapterUrl: string;
+  lastChapterTitle: string;
   lastReadTimestamp: number;
 }
 
@@ -33,10 +34,18 @@ export interface CharacterStatus {
   tuChat?: TuChat[]; // Danh sách các tư chất, đặc tính của nhân vật
 }
 
+export interface NPCRelationship {
+  nhanVatKhac: string; // Tên của nhân vật khác trong mối quan hệ
+  moTa: string; // Mô tả mối quan hệ, ví dụ: "Đồng minh", "Kẻ thù"
+}
+
 export interface NPC {
   ten:string;
   moTa: string; // Mô tả vai trò, phe phái, hoặc mối quan-hệ với nhân vật chính
   status?: 'active' | 'dead';
+  mucDoThanThiet?: string; // Mức độ thân thiết với nhân vật chính
+  hienThiQuanHe?: boolean; // Có hiển thị trên sơ đồ quan hệ không
+  quanHeVoiNhanVatKhac?: NPCRelationship[]; // Mối quan hệ của NPC này với các nhân vật khác
 }
 
 export interface TheLuc { // Môn phái, Gia tộc, Thế lực
@@ -98,4 +107,10 @@ export interface GoogleUser {
   name: string;
   email: string;
   imageUrl: string;
+}
+
+// FIX: Define and export the ChatMessage interface.
+export interface ChatMessage {
+  role: 'user' | 'model';
+  content: string;
 }

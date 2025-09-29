@@ -6,9 +6,10 @@ interface StoryDetailProps {
   onSelectChapter: (chapter: Chapter) => void;
   readChapters: Set<string>;
   lastReadChapterIndex: number | null;
+  onBack: () => void;
 }
 
-const StoryDetail: React.FC<StoryDetailProps> = ({ story, onSelectChapter, readChapters, lastReadChapterIndex }) => {
+const StoryDetail: React.FC<StoryDetailProps> = ({ story, onSelectChapter, readChapters, lastReadChapterIndex, onBack }) => {
   // Pagination state
   const [currentPage, setCurrentPage] = useState(1);
   const chaptersPerPage = 100; // Hiển thị 100 chương mỗi trang
@@ -27,6 +28,13 @@ const StoryDetail: React.FC<StoryDetailProps> = ({ story, onSelectChapter, readC
 
   return (
     <div className="bg-[var(--theme-bg-surface)] rounded-lg shadow-xl p-6 animate-fade-in border border-[var(--theme-border)]">
+      <button
+        onClick={onBack}
+        className="mb-6 bg-[var(--theme-accent-primary)] hover:brightness-90 text-white font-bold py-2 px-4 rounded-lg transition-colors duration-300"
+      >
+        &larr; Quay lại
+      </button>
+
       {/* Story info without image */}
       <div className="mb-6">
           <h2 className="text-3xl font-bold text-[var(--theme-text-primary)] mb-2">{story.title}</h2>

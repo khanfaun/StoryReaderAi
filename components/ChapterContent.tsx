@@ -3,6 +3,7 @@ import type { Story, Chapter, ReadingSettings, CharacterStats } from '../types';
 import ChapterListModal from './ChapterListModal';
 import SettingsPanel from './SettingsPanel';
 import EntityTooltip from './EntityTooltip';
+import { ListIcon } from './icons';
 
 interface ChapterContentProps {
   story: Story;
@@ -17,9 +18,10 @@ interface ChapterContentProps {
   onSettingsChange: (settings: ReadingSettings) => void;
   onNavBarVisibilityChange: (isVisible: boolean) => void;
   cumulativeStats: CharacterStats | null;
+  onStatsChange: (newStats: CharacterStats) => void;
 }
 
-const ChapterContent: React.FC<ChapterContentProps> = ({ story, currentChapterIndex, content, onBack, onPrev, onNext, onSelectChapter, readChapters, settings, onSettingsChange, onNavBarVisibilityChange, cumulativeStats }) => {
+const ChapterContent: React.FC<ChapterContentProps> = ({ story, currentChapterIndex, content, onBack, onPrev, onNext, onSelectChapter, readChapters, settings, onSettingsChange, onNavBarVisibilityChange, cumulativeStats, onStatsChange }) => {
   const [isListVisible, setIsListVisible] = useState(false);
   const [isNavBarVisible, setIsNavBarVisible] = useState(true);
   const [isSettingsVisible, setIsSettingsVisible] = useState(false);
@@ -48,6 +50,7 @@ const ChapterContent: React.FC<ChapterContentProps> = ({ story, currentChapterIn
         scrollIntervalRef.current = null;
     }
     setIsAutoScrolling(false);
+    setIsNavBarVisible(true); // Hiển thị lại thanh điều hướng khi dừng cuộn
   }, []);
   
   const startAutoScroll = useCallback(() => {
@@ -57,7 +60,8 @@ const ChapterContent: React.FC<ChapterContentProps> = ({ story, currentChapterIn
         stopAutoScroll();
         return;
     }
-
+    
+    setIsNavBarVisible(false); // Tự động ẩn thanh điều hướng khi bắt đầu cuộn
     setIsAutoScrolling(true);
     
     let frameCount = 0;
@@ -211,6 +215,7 @@ const ChapterContent: React.FC<ChapterContentProps> = ({ story, currentChapterIn
         ));
     }
 
+    // FIX: Swapped `pIndex` and `paragraph` arguments. `map` provides the element first, then the index.
     return text.split('\n').map((paragraph, pIndex) => {
         if (!paragraph.trim()) return <p key={pIndex} className="mb-4" />;
         
@@ -272,18 +277,20 @@ const ChapterContent: React.FC<ChapterContentProps> = ({ story, currentChapterIn
   const navButtons = (target: 'top' | 'bottom') => {
     const ref = target === 'top' ? autoScrollButtonRefTop : autoScrollButtonRefBottom;
     return (
-        <div className="container mx-auto px-4 flex justify-center items-center gap-2 sm:gap-4 flex-wrap">
-          <button onClick={onPrev} disabled={isFirstChapter} className="bg-[var(--theme-bg-surface)] brightness-125 hover:brightness-150 text-[var(--theme-text-primary)] font-bold py-2 px-4 rounded-lg transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed">Chương trước</button>
-          <button onClick={() => setIsListVisible(true)} className="bg-[var(--theme-text-primary)] text-[var(--theme-bg-surface)] hover:brightness-90 font-bold py-2 px-4 rounded-lg transition-all duration-300">Danh sách chương</button>
-          <button onClick={onNext} disabled={isLastChapter} className="bg-[var(--theme-bg-surface)] brightness-125 hover:brightness-150 text-[var(--theme-text-primary)] font-bold py-2 px-4 rounded-lg transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed">Chương sau</button>
-          <button onClick={() => setIsSettingsVisible(true)} className="bg-[var(--theme-bg-surface)] brightness-125 hover:brightness-150 text-[var(--theme-text-primary)] p-2 rounded-lg transition-all duration-300">
+        <div className="container mx-auto px-2 flex justify-center items-center gap-1 sm:gap-2">
+          <button onClick={onPrev} disabled={isFirstChapter} className="whitespace-nowrap bg-[var(--theme-bg-surface)] brightness-125 hover:brightness-150 text-[var(--theme-text-primary)] font-bold text-xs sm:text-sm py-2 px-3 sm:px-4 rounded-lg transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed">Chương trước</button>
+          <button onClick={() => setIsListVisible(true)} className="flex-shrink-0 bg-[var(--theme-text-primary)] text-[var(--theme-bg-surface)] hover:brightness-90 font-bold p-2 rounded-lg transition-all duration-300" aria-label="Danh sách chương">
+            <ListIcon className="h-6 w-6" />
+          </button>
+          <button onClick={onNext} disabled={isLastChapter} className="whitespace-nowrap bg-[var(--theme-bg-surface)] brightness-125 hover:brightness-150 text-[var(--theme-text-primary)] font-bold text-xs sm:text-sm py-2 px-3 sm:px-4 rounded-lg transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed">Chương sau</button>
+          <button onClick={() => setIsSettingsVisible(true)} className="flex-shrink-0 bg-[var(--theme-bg-surface)] brightness-125 hover:brightness-150 text-[var(--theme-text-primary)] p-2 rounded-lg transition-all duration-300">
             <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
             </svg>
           </button>
           {/* Nút tự động cuộn và popover */}
-          <div ref={ref} className="relative">
+          <div ref={ref} className="relative flex-shrink-0">
             <button 
                 onClick={() => handleAutoScrollButtonClick(target)} 
                 className={`p-2 rounded-lg transition-all duration-300 ${isAutoScrolling ? 'bg-[var(--theme-accent-primary)] text-white' : 'bg-[var(--theme-bg-surface)] brightness-125 hover:brightness-150 text-[var(--theme-text-primary)]'}`}
@@ -313,7 +320,7 @@ const ChapterContent: React.FC<ChapterContentProps> = ({ story, currentChapterIn
           onClick={onBack}
           className="mb-6 bg-[var(--theme-accent-primary)] hover:brightness-90 text-white font-bold py-2 px-4 rounded-lg transition-colors duration-300"
         >
-          &larr; Quay lại danh sách chương
+          &larr; Quay lại
         </button>
 
         <h2 className="text-3xl font-bold text-center text-[var(--reader-title)] mb-4">{chapterTitle}</h2>

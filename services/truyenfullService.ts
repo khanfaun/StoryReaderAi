@@ -125,8 +125,9 @@ async function getDetailsForTruyenFull(storyUrl: string) {
     // 3. Trích xuất các chương từ trang đầu tiên
     const chapters: Chapter[] = [];
     doc.querySelectorAll('#list-chapter .list-chapter li a').forEach(el => {
-        const chapterUrl = el.getAttribute('href');
-        if (chapterUrl && el.textContent) {
+        const chapterHref = el.getAttribute('href');
+        if (chapterHref && el.textContent) {
+            const chapterUrl = new URL(chapterHref, storyUrl).href;
             chapters.push({ title: el.textContent.trim(), url: chapterUrl });
         }
     });
@@ -169,8 +170,9 @@ async function getDetailsForTruyenFull(storyUrl: string) {
                 // Tải tuần tự từng trang để tránh bị giới hạn tốc độ hoặc chặn
                 const pageDoc = await fetchAndParse(pageUrl);
                 pageDoc.querySelectorAll('#list-chapter .list-chapter li a').forEach(el => {
-                    const chapterUrl = el.getAttribute('href');
-                    if (chapterUrl && el.textContent) {
+                    const chapterHref = el.getAttribute('href');
+                    if (chapterHref && el.textContent) {
+                        const chapterUrl = new URL(chapterHref, storyUrl).href;
                         chapters.push({ title: el.textContent.trim(), url: chapterUrl });
                     }
                 });
@@ -284,8 +286,9 @@ async function getDetailsForTangThuVien(storyUrl: string) {
     const chapterDoc = await fetchAndParse(chapterListUrl);
     
     chapterDoc.querySelectorAll('#j-bookCatalogPage ul li a').forEach(el => {
-        const chapterUrl = el.getAttribute('href');
-        if (chapterUrl && el.textContent) {
+        const chapterHref = el.getAttribute('href');
+        if (chapterHref && el.textContent) {
+            const chapterUrl = new URL(chapterHref, chapterListUrl).href;
             chapters.push({ title: el.textContent.trim(), url: chapterUrl });
         }
     });
@@ -335,8 +338,9 @@ async function getDetailsForTruyenHdt(storyUrl: string) {
     const description = doc.querySelector('#story-info-detail .description')?.textContent?.trim() ?? 'Không có mô tả.';
     const chapters: Chapter[] = [];
     doc.querySelectorAll('#list-chapter ul.list-group li a').forEach(el => {
-        const chapterUrl = el.getAttribute('href');
-        if (chapterUrl && el.textContent) {
+        const chapterHref = el.getAttribute('href');
+        if (chapterHref && el.textContent) {
+            const chapterUrl = new URL(chapterHref, storyUrl).href;
             chapters.push({ title: el.textContent.trim(), url: chapterUrl });
         }
     });
@@ -393,8 +397,9 @@ async function getDetailsForKhoDocSach(storyUrl: string) {
         const pageUrl = `${storyUrl}?page=${i}`;
         const pageDoc = (i === 1) ? doc : await fetchAndParse(pageUrl);
         pageDoc.querySelectorAll('#chapters .chapter-list a').forEach(el => {
-            const chapterUrl = el.getAttribute('href');
-            if (chapterUrl && el.textContent) {
+            const chapterHref = el.getAttribute('href');
+            if (chapterHref && el.textContent) {
+                const chapterUrl = new URL(chapterHref, pageUrl).href;
                 chapters.push({ title: el.textContent.trim(), url: chapterUrl });
             }
         });
@@ -445,8 +450,9 @@ async function getDetailsForTruyenYy(storyUrl: string) {
     const description = doc.querySelector('#book-info #book-intro')?.textContent?.trim() ?? 'Không có mô tả.';
     const chapters: Chapter[] = [];
     doc.querySelectorAll('#chapters-area .chapter-item a').forEach(el => {
-        const chapterUrl = el.getAttribute('href');
-        if (chapterUrl && el.textContent) {
+        const chapterHref = el.getAttribute('href');
+        if (chapterHref && el.textContent) {
+            const chapterUrl = new URL(chapterHref, storyUrl).href;
             chapters.push({ title: el.textContent.trim(), url: chapterUrl });
         }
     });
@@ -572,6 +578,10 @@ export async function getChapterContent(chapter: Chapter, source: string): Promi
     const scraper = scrapers[source as keyof typeof scrapers];
 
     if (!scraper) {
+        // Prevent trying to parse non-http URLs like Ebook paths
+        if (!chapter.url.startsWith('http')) {
+            throw new Error(`Nguồn không được hỗ trợ hoặc URL chương không hợp lệ cho: ${source}`);
+        }
         const hostname = new URL(chapter.url).hostname;
         // Logic dự phòng nếu source không được truyền đúng cách
         for (const key in scrapers) {

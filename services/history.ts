@@ -1,4 +1,4 @@
-import type { Story, ReadingHistoryItem } from '../types';
+import type { Story, ReadingHistoryItem, Chapter } from '../types';
 import { saveHistoryToDrive } from './sync';
 
 const HISTORY_KEY = 'novel_reader_history';
@@ -9,6 +9,7 @@ export function getReadingHistory(): ReadingHistoryItem[] {
     const rawHistory = localStorage.getItem(HISTORY_KEY);
     if (!rawHistory) return [];
     const history = JSON.parse(rawHistory) as ReadingHistoryItem[];
+    // Sắp xếp lại vì dữ liệu cũ có thể không được sắp xếp
     return history.sort((a, b) => b.lastReadTimestamp - a.lastReadTimestamp);
   } catch (error) {
     console.error("Error reading history:", error);
@@ -27,16 +28,16 @@ export function saveReadingHistory(history: ReadingHistoryItem[]): void {
     const rawHistory = JSON.stringify(sortedHistory);
     localStorage.setItem(HISTORY_KEY, rawHistory);
 
-    // Sync to drive in the background
-    saveHistoryToDrive(sortedHistory).catch(err => {
-      console.error("Drive Sync: Background push failed:", err);
-    });
+    // Sync to drive in the background (deprecated)
+    // saveHistoryToDrive(sortedHistory).catch(err => {
+    //   console.warn("Drive Sync (deprecated): Background push failed:", err);
+    // });
   } catch (error) {
     console.error("Error saving history:", error);
   }
 }
 
-export function updateReadingHistory(story: Story, lastChapterUrl: string): ReadingHistoryItem[] {
+export function updateReadingHistory(story: Story, chapter: Chapter): ReadingHistoryItem[] {
   const history = getReadingHistory();
   const now = Date.now();
 
@@ -44,7 +45,8 @@ export function updateReadingHistory(story: Story, lastChapterUrl: string): Read
 
   if (existingIndex > -1) {
     const item = history[existingIndex];
-    item.lastChapterUrl = lastChapterUrl;
+    item.lastChapterUrl = chapter.url;
+    item.lastChapterTitle = chapter.title;
     item.lastReadTimestamp = now;
     // Move to top by removing and re-adding
     history.splice(existingIndex, 1);
@@ -56,7 +58,8 @@ export function updateReadingHistory(story: Story, lastChapterUrl: string): Read
       url: story.url,
       source: story.source,
       imageUrl: story.imageUrl,
-      lastChapterUrl: lastChapterUrl,
+      lastChapterUrl: chapter.url,
+      lastChapterTitle: chapter.title,
       lastReadTimestamp: now,
     };
     history.unshift(newItem);

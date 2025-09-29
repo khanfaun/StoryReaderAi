@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { createPortal } from 'react-dom';
+import { EditIcon, TrashIcon } from './icons';
 
 interface InfoItem {
   ten: string;
@@ -11,11 +12,14 @@ interface InfoItem {
 
 interface InfoItemDisplayProps {
   item: InfoItem;
+  onEdit: () => void;
+  onDelete: () => void;
+  isSimpleString?: boolean; // To handle heThongCanhGioi
 }
 
 const popoverRoot = document.getElementById('popover-root');
 
-const InfoItemDisplay: React.FC<InfoItemDisplayProps> = ({ item }) => {
+const InfoItemDisplay: React.FC<InfoItemDisplayProps> = ({ item, onEdit, onDelete, isSimpleString = false }) => {
   const [isPopoverVisible, setIsPopoverVisible] = useState(false);
   const [popoverStyle, setPopoverStyle] = useState<React.CSSProperties>({});
   const [popoverPosition, setPopoverPosition] = useState<'top' | 'bottom'>('top');
@@ -84,7 +88,7 @@ const InfoItemDisplay: React.FC<InfoItemDisplayProps> = ({ item }) => {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, [isPopoverVisible]);
 
-  const popoverContent = isPopoverVisible && popoverRoot ? createPortal(
+  const popoverContent = (isPopoverVisible && popoverRoot && !isSimpleString) ? createPortal(
     <div
       ref={popoverRef}
       style={popoverStyle}
@@ -104,13 +108,13 @@ const InfoItemDisplay: React.FC<InfoItemDisplayProps> = ({ item }) => {
   ) : null;
 
   return (
-    <div className="w-full">
+    <div className="w-full relative group">
       <button
         ref={buttonRef}
         onClick={() => setIsPopoverVisible(!isPopoverVisible)}
         className={`w-full text-left px-4 py-2 rounded-md text-sm font-medium transition-all duration-200 border
                     ${isInactive 
-                      ? 'bg-[var(--theme-text-primary)]/10 text-[var(--theme-text-primary)]/50 border-[var(--theme-text-primary)]/30 line-through cursor-pointer'
+                      ? 'bg-[var(--theme-text-primary)]/10 text-[var(--theme-text-primary)]/50 border-[var(--theme-text-primary)]/30 line-through cursor-default'
                       : 'bg-[var(--theme-text-primary)] border-[var(--theme-text-primary)] text-[var(--theme-bg-surface)] hover:brightness-90 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-[var(--theme-bg-surface)] focus:ring-[var(--theme-accent-secondary)]'
                     }`}
         aria-haspopup="true"
@@ -119,6 +123,24 @@ const InfoItemDisplay: React.FC<InfoItemDisplayProps> = ({ item }) => {
         {item.ten}
       </button>
       {popoverContent}
+       <div className="absolute top-1/2 -translate-y-1/2 right-2 hidden group-hover:flex items-center gap-1 bg-[var(--theme-text-primary)]/90 rounded-full px-1 py-0.5">
+          <button
+            onClick={(e) => { e.stopPropagation(); onEdit(); }}
+            className="p-1.5 text-[var(--theme-bg-surface)] hover:text-cyan-400 rounded-full transition-colors"
+            aria-label={`Sửa ${item.ten}`}
+            title="Sửa"
+          >
+            <EditIcon className="w-4 h-4" />
+          </button>
+          <button
+            onClick={(e) => { e.stopPropagation(); onDelete(); }}
+            className="p-1.5 text-[var(--theme-bg-surface)] hover:text-rose-500 rounded-full transition-colors"
+            aria-label={`Xóa ${item.ten}`}
+            title="Xóa"
+          >
+            <TrashIcon className="w-4 h-4" />
+          </button>
+      </div>
     </div>
   );
 };

@@ -1,7 +1,39 @@
-import { GoogleGenAI, Type } from "@google/genai";
-import type { CharacterStats, Story } from "../types";
 
-const ai = new GoogleGenAI({ apiKey: import.meta.env.VITE_API_KEY! });
+import { GoogleGenAI, Type } from "@google/genai";
+import type { CharacterStats, Story, Chapter } from "../types";
+import { isAiStudio } from './apiKeyService';
+
+// The AI client instance is now managed dynamically based on the provided API key.
+let ai: GoogleGenAI | undefined;
+let currentKey: string | undefined;
+
+/**
+ * Gets an instance of the GoogleGenAI client, creating or re-creating it if the API key has changed.
+ * This function handles the environment-specific key usage (user-provided vs. AI Studio environment).
+ * @param {string} apiKey - The API key provided by the user from local storage.
+ * @throws {Error} if the API key is not available.
+ * @returns {GoogleGenAI} The initialized GoogleGenAI client.
+ */
+const getAiClient = (apiKey: string): GoogleGenAI => {
+    // In AI Studio, always use the environment variable key.
+    // On the web, use the key provided by the user.
+    const keyToUse = isAiStudio() ? process.env.API_KEY! : apiKey;
+  
+    // If we have an instance and the key hasn't changed, reuse it.
+    if (ai && currentKey === keyToUse) {
+      return ai;
+    }
+  
+    if (!keyToUse) {
+      throw new Error("API Key is not provided or configured.");
+    }
+  
+    // Create a new instance if the key has changed or it's the first time.
+    ai = new GoogleGenAI({ apiKey: keyToUse });
+    currentKey = keyToUse;
+    return ai;
+};
+
 
 const infoItemArraySchema = {
   type: Type.ARRAY,
@@ -66,8 +98,22 @@ const characterStatsSchema = {
         type: Type.OBJECT,
         properties: {
           ten: { type: Type.STRING, description: "Tên của nhân vật phụ." },
-          moTa: { type: Type.STRING, description: "Mô tả ngắn gọn về vai trò, phe phái, hoặc mối quan-hệ của họ với nhân vật chính." },
-          status: { type: Type.STRING, description: "Trạng thái: 'active' nếu còn sống, 'dead' nếu đã chết." }
+          moTa: { type: Type.STRING, description: "Mô tả ngắn gọn về vai trò, phe phái, hoặc ngoại hình của họ." },
+          status: { type: Type.STRING, description: "Trạng thái: 'active' nếu còn sống, 'dead' nếu đã chết." },
+          mucDoThanThiet: { type: Type.STRING, description: "Mức độ thân thiết với NHÂN VẬT CHÍNH, sử dụng một giá trị từ thang đo quan hệ (ví dụ: 'Đồng Minh', 'Kẻ Thù')." },
+          hienThiQuanHe: { type: Type.BOOLEAN, description: "Đặt là true nếu mối quan hệ giữa NPC này và nhân vật chính là quan trọng và nên được hiển thị trên sơ đồ quan hệ." },
+          quanHeVoiNhanVatKhac: {
+            type: Type.ARRAY,
+            description: "Mối quan hệ của NPC này với các nhân vật phụ khác.",
+            items: {
+                type: Type.OBJECT,
+                properties: {
+                    nhanVatKhac: { type: Type.STRING, description: "Tên của nhân vật phụ khác." },
+                    moTa: { type: Type.STRING, description: "Mô tả mối quan hệ, sử dụng một giá trị từ thang đo quan hệ (ví dụ: 'Đồng Minh', 'Kẻ Thù')." }
+                },
+                required: ["nhanVatKhac", "moTa"]
+            }
+          }
         },
         required: ["ten", "moTa"]
       }
@@ -100,19 +146,6 @@ const characterStatsSchema = {
         required: ["ten", "moTa"]
       }
     },
-    quanHe: {
-      type: Type.ARRAY,
-      description: "Danh sách các mối quan hệ giữa các nhân vật được đề cập trong chương. Chỉ bao gồm các mối quan-hệ được nêu rõ ràng.",
-      items: {
-        type: Type.OBJECT,
-        properties: {
-          nhanVat1: { type: Type.STRING, description: "Tên của nhân vật thứ nhất." },
-          nhanVat2: { type: Type.STRING, description: "Tên của nhân vật thứ hai." },
-          moTa: { type: Type.STRING, description: "Mô tả mối quan hệ (ví dụ: Đồng minh, Kẻ thù, Sư đồ, Gia tộc, Giao dịch...). Cố gắng ngắn gọn." }
-        },
-        required: ["nhanVat1", "nhanVat2", "moTa"]
-      }
-    },
     viTriHienTai: {
         type: Type.STRING,
         description: "Tên của địa điểm cụ thể và chi tiết nhất nơi nhân vật chính đang ở. Giá trị này PHẢI khớp với một trong các tên trong danh sách 'diaDiem'.",
@@ -122,14 +155,15 @@ const characterStatsSchema = {
 
 /**
  * Phân tích nội dung chương truyện để trích xuất thông tin nhân vật chính.
+ * @param apiKey API Key của người dùng.
  * @param chapterContent Nội dung văn bản của chương truyện.
  * @param previousStats Dữ liệu tích lũy từ các chương trước.
  * @returns Một đối tượng CharacterStats chứa thông tin được trích xuất.
  */
-export const analyzeChapterForCharacterStats = async (chapterContent: string, previousStats: CharacterStats | null): Promise<CharacterStats | null> => {
+export const analyzeChapterForCharacterStats = async (apiKey: string, chapterContent: string, previousStats: CharacterStats | null): Promise<CharacterStats | null> => {
     const contents = `Bạn là một trợ lý phân tích truyện tiên hiệp chuyên nghiệp, có khả năng duy trì và cập nhật trạng thái của thế giới truyện qua từng chương.
 
-**DỮ LIỆU HIỆN TẠI:**
+**DỮ LIệu HIỆN TẠI:**
 Dưới đây là thông tin đã biết về nhân vật và thế giới truyện cho đến trước chương này.
 \`\`\`json
 ${JSON.stringify(previousStats ?? {}, null, 2)}
@@ -139,12 +173,17 @@ ${JSON.stringify(previousStats ?? {}, null, 2)}
 Đọc nội dung **CHƯƠNG MỚI** và chỉ trích xuất những thông tin **MỚI** hoặc **THAY ĐỔI** so với "DỮ LIỆU HIỆN TẠI".
 
 **QUY TẮC CẬP NHẬT (RẤT QUAN TRỌNG):**
-1.  **CHỈ CẬP NHẬT:** Không lặp lại thông tin đã có. Nếu nhân vật đột phá, chỉ trả về \`canhGioi\` mới. Nếu có NPC mới, chỉ thêm NPC đó vào mảng \`npcs\`. Nếu một NPC đã có chết đi, cập nhật \`status\` của họ.
-2.  **LIÊN KẾT DANH XƯNG VÀ TÊN THẬT:** Chú ý các trường hợp một nhân vật được giới thiệu bằng một danh xưng hoặc mô tả (ví dụ: 'lão già áo xám', 'thiếu nữ xinh đẹp') rồi sau đó mới tiết lộ tên thật. Hãy liên kết mô tả đó với tên thật và chỉ ghi nhận nhân vật bằng tên thật của họ. Ví dụ: Nếu truyện viết 'Một thanh niên gầy gò bước ra và nói: "Ta là Hứa Bảo Tài"', chỉ cần ghi nhận NPC tên là "Hứa Bảo Tài" và có thể thêm mô tả "thanh niên gầy gò" vào phần mô tả của NPC đó.
-3.  **XÁC ĐỊNH NHÂN VẬT QUẦN CHÚNG:** Phân biệt rõ ràng giữa nhân vật phụ (NPC) có vai trò và nhân vật quần chúng (extras). KHÔNG đưa nhân vật quần chúng (ví dụ: lính gác, người qua đường, tiểu nhị không có vai trò) vào danh sách \`npcs\` hoặc \`quanHe\`.
-4.  **LỌC QUAN HỆ CÓ Ý NGHĨA:** Chỉ đưa một mối quan hệ vào mảng \`quanHe\` nếu nó liên quan MẬT THIẾT đến nhân vật chính và được thể hiện rõ ràng trong chương. Các tương tác thoáng qua hoặc không có ý nghĩa quan hệ (ví dụ: một đường chủ họ Chu xuất hiện nhiều nhưng không có tương tác trực tiếp) thì KHÔNG đưa vào. Mối quan hệ phải thuộc một trong các cấp độ trong thang đo.
-5.  **TRỌNG TÂM LÀ THAY ĐỔI:** Hệ thống sẽ tự động hợp nhất các thay đổi. Không cần trả lại toàn bộ danh sách cũ.
-6.  **VỊ TRÍ HIỆN TẠI:** \`viTriHienTai\` phải khớp chính xác với một địa điểm trong \`diaDiem\` của chương này.
+1.  **CHỈ CẬP NHẬT:** Chỉ trả về những thông tin MỚI hoặc BỊ THAY ĐỔI.
+    *   **Trường đơn lẻ:** Nếu nhân vật đột phá, chỉ trả về \`canhGioi\` mới.
+    *   **Thêm mục mới:** Nếu có NPC mới, chỉ thêm NPC đó vào mảng \`npcs\`.
+    *   **Cập nhật mục đã có:** Nếu một NPC đã tồn tại có sự thay đổi (ví dụ: trạng thái đổi thành 'dead' hoặc có thêm mối quan hệ mới), bạn PHẢI trả về TOÀN BỘ đối tượng NPC đó với đầy đủ thông tin (cũ và mới).
+2.  **LIÊN KẾT DANH XƯNG VÀ TÊN THẬT:** Chú ý các trường hợp một nhân vật được giới thiệu bằng một danh xưng (ví dụ: 'lão già áo xám') rồi sau đó mới tiết lộ tên thật. Hãy liên kết mô tả đó với tên thật và chỉ ghi nhận nhân vật bằng tên thật của họ.
+3.  **XÁC ĐỊNH NHÂN VẬT QUẦN CHÚNG:** Phân biệt rõ ràng giữa nhân vật phụ (NPC) có vai trò và nhân vật quần chúng. KHÔNG đưa nhân vật quần chúng (ví dụ: lính gác, người qua đường không có vai trò) vào danh sách \`npcs\`.
+4.  **QUẢN LÝ QUAN HỆ NPC:** Toàn bộ thông tin quan hệ giờ đây được quản lý BÊN TRONG từng đối tượng NPC.
+    *   **\`mucDoThanThiet\`**: Mô tả mối quan hệ của NPC với **NHÂN VẬT CHÍNH**. Bắt buộc sử dụng một giá trị từ "THANG ĐO MÔ TẢ QUAN HỆ" (ví dụ: 'Đồng Minh', 'Kẻ Thù').
+    *   **\`hienThiQuanHe\`**: Đặt là \`true\` nếu mối quan hệ với nhân vật chính đủ quan trọng để hiển thị trên sơ đồ (thường là bất cứ mức độ nào khác 'Trung Lập').
+    *   **\`quanHeVoiNhanVatKhac\`**: Mô tả mối quan hệ của NPC này với các **NPC khác**. Cũng sử dụng "THANG ĐO MÔ TẢ QUAN HỆ" cho trường \`moTa\`.
+5.  **VỊ TRÍ HIỆN TẠI:** \`viTriHienTai\` phải khớp chính xác với một địa điểm trong \`diaDiem\` của chương này.
 
 **THANG ĐO MÔ TẢ QUAN HỆ (RẤT QUAN TRỌNG):**
 Khi mô tả một mối quan hệ trong trường \`moTa\`, hãy sử dụng các từ khóa sau để thể hiện chính xác sắc thái và mức độ của mối quan hệ đó. Đây là cơ sở để hệ thống hiển thị màu sắc tương ứng theo thứ tự từ cao đến thấp.
@@ -188,7 +227,8 @@ Khi mô tả một mối quan hệ trong trường \`moTa\`, hãy sử dụng c�
 "${chapterContent.substring(0, 15000)}"`;
 
   try {
-    const response = await ai.models.generateContent({
+    const geminiClient = getAiClient(apiKey);
+    const response = await geminiClient.models.generateContent({
       model: "gemini-2.5-flash",
       contents: contents,
       config: {
@@ -224,7 +264,138 @@ Khi mô tả một mối quan hệ trong trường \`moTa\`, hãy sử dụng c�
   } catch (error)
  {
     console.error("Lỗi khi phân tích chỉ số nhân vật:", error);
-    // Không ném lỗi ra ngoài để không làm gián đoạn trải nghiệm đọc
-    return null;
+    // Propagate the error to be handled by the UI
+    if (error instanceof Error && error.message.includes('API key not valid')) {
+        throw new Error("API Key không hợp lệ. Vui lòng kiểm tra lại trong mục cài đặt.");
+    }
+    throw error;
+  }
+};
+
+
+/**
+ * Trò chuyện với AI về nội dung của một chương cụ thể.
+ * @param apiKey API Key của người dùng.
+ * @param prompt Câu hỏi của người dùng.
+ * @param chapterContent Nội dung văn bản của chương hiện tại.
+ * @param storyTitle Tiêu đề của truyện để cung cấp ngữ cảnh.
+ * @returns Câu trả lời từ AI.
+ */
+export const chatWithChapterContent = async (apiKey: string, prompt: string, chapterContent: string, storyTitle: string): Promise<string> => {
+  try {
+    const geminiClient = getAiClient(apiKey);
+    const response = await geminiClient.models.generateContent({
+        model: "gemini-2.5-flash",
+        contents: `**Bối cảnh:** Bạn là một trợ lý AI hữu ích, đang thảo luận về cuốn sách "${storyTitle}".
+        **Nhiệm vụ:** Trả lời câu hỏi của người dùng chỉ dựa vào nội dung được cung cấp từ chương truyện hiện tại. Nếu câu trả lời không có trong văn bản, hãy nói rằng bạn không tìm thấy thông tin trong đoạn trích này.
+
+        **Nội dung chương:**
+        ---
+        ${chapterContent.substring(0, 15000)}
+        ---
+
+        **Câu hỏi của người dùng:** "${prompt}"
+
+        **Câu trả lời của bạn:**`,
+    });
+    return response.text;
+  } catch (error) {
+    console.error("Lỗi khi trò chuyện về nội dung chương:", error);
+    if (error instanceof Error && error.message.includes('API key not valid')) {
+        throw new Error("API Key không hợp lệ. Vui lòng kiểm tra lại.");
+    }
+    throw new Error("Không thể nhận phản hồi từ AI. Vui lòng thử lại.");
+  }
+};
+
+
+/**
+ * Trò chuyện với AI về nội dung của toàn bộ Ebook.
+ * Sử dụng quy trình hai bước: 1. Xác định các chương liên quan. 2. Trả lời câu hỏi dựa trên nội dung các chương đó.
+ * @param apiKey API Key của người dùng.
+ * @param prompt Câu hỏi của người dùng.
+ * @param zipInstance Instance JSZip của file Ebook.
+ * @param chapterList Danh sách các chương trong Ebook.
+ * @returns Câu trả lời từ AI.
+ */
+export const chatWithEbook = async (apiKey: string, prompt: string, zipInstance: any, chapterList: Chapter[]): Promise<string> => {
+  const geminiClient = getAiClient(apiKey);
+  try {
+    // === BƯỚC 1: Xác định các chương có liên quan ===
+    const chapterListText = chapterList.map((c, i) => `${i + 1}. Tiêu đề: "${c.title}", Tên file: "${c.url}"`).join('\n');
+    
+    const chapterSelectionResponse = await geminiClient.models.generateContent({
+        model: "gemini-2.5-flash",
+        contents: `Người dùng đang hỏi câu này về một cuốn sách: "${prompt}".
+        
+        Dựa vào danh sách chương dưới đây, hãy xác định những chương có khả năng chứa câu trả lời nhất.
+        
+        Danh sách chương:
+        ${chapterListText}
+
+        Hãy trả về một danh sách các tên file (filename) có liên quan nhất. Chỉ bao gồm tối đa 5 file có liên quan nhất.`,
+        config: {
+            responseMimeType: "application/json",
+            responseSchema: {
+                type: Type.OBJECT,
+                properties: {
+                    relevant_files: {
+                        type: Type.ARRAY,
+                        description: "Một mảng các chuỗi tên file (url) từ danh sách chương được cung cấp.",
+                        items: { type: Type.STRING }
+                    }
+                }
+            }
+        }
+    });
+
+    const relevantFilesData = JSON.parse(chapterSelectionResponse.text) as { relevant_files: string[] };
+    const relevantFiles = relevantFilesData.relevant_files;
+
+    if (!relevantFiles || relevantFiles.length === 0) {
+      return "Tôi không tìm thấy chương nào có vẻ liên quan đến câu hỏi của bạn trong Ebook này.";
+    }
+
+    // === BƯỚC 2: Trích xuất nội dung và trả lời câu hỏi ===
+    let contextContent = "";
+    const parser = new DOMParser();
+
+    for (const filePath of relevantFiles) {
+      const decodedPath = decodeURIComponent(filePath);
+      const chapterFile = zipInstance.file(decodedPath);
+      if (chapterFile) {
+        const rawHtml = await chapterFile.async('string');
+        const doc = parser.parseFromString(rawHtml, 'text/html');
+        const contentEl = doc.body;
+        contentEl.querySelectorAll('a, sup, sub, script, style, img, svg').forEach((el: HTMLElement) => el.remove());
+        const text = (contentEl.textContent ?? '').trim();
+        contextContent += `--- Nội dung từ file: ${decodedPath} ---\n${text}\n\n`;
+      }
+    }
+
+    if (!contextContent.trim()) {
+      return "Tôi đã xác định được các chương liên quan nhưng không thể trích xuất nội dung từ chúng. File Ebook có thể bị lỗi.";
+    }
+
+    const finalAnswerResponse = await geminiClient.models.generateContent({
+        model: "gemini-2.5-flash",
+        contents: `**Nhiệm vụ:** Trả lời câu hỏi của người dùng một cách ngắn gọn và súc tích, chỉ dựa vào nội dung được cung cấp dưới đây. Nếu câu trả lời không có trong văn bản, hãy nói rằng bạn không tìm thấy thông tin trong đoạn trích này.
+        
+        **Nội dung được cung cấp:**
+        ${contextContent.substring(0, 20000)}
+
+        **Câu hỏi của người dùng:** "${prompt}"
+
+        **Câu trả lời của bạn:**`,
+    });
+    
+    return finalAnswerResponse.text;
+
+  } catch (error) {
+    console.error("Lỗi khi trò chuyện về Ebook:", error);
+    if (error instanceof Error && error.message.includes('API key not valid')) {
+        throw new Error("API Key không hợp lệ. Vui lòng kiểm tra lại.");
+    }
+    throw new Error("Không thể nhận phản hồi từ AI. Vui lòng thử lại.");
   }
 };
