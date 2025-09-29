@@ -1,4 +1,3 @@
-
 import { GoogleGenAI, Type } from "@google/genai";
 import type { CharacterStats, Story, Chapter } from "../types";
 import { isAiStudio } from './apiKeyService';
@@ -86,9 +85,7 @@ const infoItemArraySchema = {
   }
 };
 
-const characterStatsSchema = {
-  type: Type.OBJECT,
-  properties: {
+const primaryCharacterSchemaProperties = {
     trangThai: {
       type: Type.OBJECT,
       description: "Thông tin cơ bản và các đặc tính của nhân vật chính.",
@@ -129,6 +126,9 @@ const characterStatsSchema = {
         ...infoItemArraySchema,
         description: "Danh sách các trang bị nhân vật đang mặc trên người được đề cập trong chương này.",
     },
+};
+
+const worldInfoSchemaProperties = {
     npcs: {
       type: Type.ARRAY,
       description: "Danh sách các nhân vật phụ (NPC) quan trọng xuất hiện hoặc được nhắc đến, cùng với mô tả và trạng thái của họ.",
@@ -188,27 +188,20 @@ const characterStatsSchema = {
         type: Type.STRING,
         description: "Tên của địa điểm cụ thể và chi tiết nhất nơi nhân vật chính đang ở. Giá trị này PHẢI khớp với một trong các tên trong danh sách 'diaDiem'.",
     }
-  },
 };
 
-/**
- * Phân tích nội dung chương truyện để trích xuất thông tin nhân vật chính.
- * @param apiKey API Key của người dùng.
- * @param chapterContent Nội dung văn bản của chương truyện.
- * @param previousStats Dữ liệu tích lũy từ các chương trước.
- * @returns Một đối tượng CharacterStats chứa thông tin được trích xuất.
- */
-export const analyzeChapterForCharacterStats = async (apiKey: string, chapterContent: string, previousStats: CharacterStats | null): Promise<CharacterStats | null> => {
-    const contents = `Bạn là một trợ lý phân tích truyện tiên hiệp chuyên nghiệp, có khả năng duy trì và cập nhật trạng thái của thế giới truyện qua từng chương.
+const primaryCharacterSchema = { type: Type.OBJECT, properties: primaryCharacterSchemaProperties };
+const worldInfoSchema = { type: Type.OBJECT, properties: worldInfoSchemaProperties };
+const characterStatsSchema = { type: Type.OBJECT, properties: { ...primaryCharacterSchemaProperties, ...worldInfoSchemaProperties }};
 
-**DỮ LIệu HIỆN TẠI:**
+
+const BASE_PROMPT = `Bạn là một trợ lý phân tích truyện tiên hiệp chuyên nghiệp, có khả năng duy trì và cập nhật trạng thái của thế giới truyện qua từng chương.
+
+**DỮ LIỆU HIỆN TẠI:**
 Dưới đây là thông tin đã biết về nhân vật và thế giới truyện cho đến trước chương này.
 \`\`\`json
-${JSON.stringify(previousStats ?? {}, null, 2)}
+{previousStats}
 \`\`\`
-
-**NHIỆM VỤ:**
-Đọc nội dung **CHƯƠNG MỚI** và chỉ trích xuất những thông tin **MỚI** hoặc **THAY ĐỔI** so với "DỮ LIỆU HIỆN TẠI".
 
 **QUY TẮC CẬP NHẬT (RẤT QUAN TRỌNG):**
 1.  **CHỈ CẬP NHẬT:** Chỉ trả về những thông tin MỚI hoặc BỊ THAY ĐỔI.
@@ -225,36 +218,12 @@ ${JSON.stringify(previousStats ?? {}, null, 2)}
 
 **THANG ĐO MÔ TẢ QUAN HỆ (RẤT QUAN TRỌNG):**
 Khi mô tả một mối quan hệ trong trường \`moTa\`, hãy sử dụng các từ khóa sau để thể hiện chính xác sắc thái và mức độ của mối quan hệ đó. Đây là cơ sở để hệ thống hiển thị màu sắc tương ứng theo thứ tự từ cao đến thấp.
-
-*   **Cấp 6: Thân Thiết Tột Cùng (Màu Xanh Lá)**
-    *   **Mô tả:** Mối quan hệ gắn bó sâu sắc, cốt lõi, không thể phá vỡ, hoặc tình cảm cực kỳ thân thiết.
-    *   **Từ khóa:** \`sư đồ\`, \`phu thê\`, \`tri kỷ\`, \`huynh đệ kết nghĩa\`, \`gia tộc thân cận\`, \`sống chết có nhau\`, \`trung thành tuyệt đối\`, \`ân nhân cứu mạng\`.
-    *   *Ví dụ:* "Sư đồ truyền thừa", "Phu thê đồng lòng".
-
-*   **Cấp 5: Đồng Minh / Tích Cực (Màu Xanh Ngọc)**
-    *   **Mô tả:** Quan hệ tích cực, có thiện chí, tin tưởng lẫn nhau.
-    *   **Từ khóa:** \`đồng minh\`, \`bằng hữu\`, \`đồng môn\`, \`thân hữu\`, \`giúp đỡ\`, \`cảm kích\`, \`tiền bối đáng kính\`.
-    *   *Ví dụ:* "Đồng minh trong bí cảnh", "Bằng hữu cùng chiến tuyến".
-
-*   **Cấp 4: Trung Lập (Màu Vàng)**
-    *   **Mô tả:** Không thiên vị, hoặc quan hệ dựa trên lợi ích, giao dịch.
-    *   **Từ khóa:** \`giao dịch\`, \`hợp tác tạm thời\`, \`quen biết sơ\`, \`người qua đường\`.
-    *   *Ví dụ:* "Giao dịch mua bán vật phẩm", "Hợp tác tạm thời để vượt ải".
-
-*   **Cấp 3: Mâu Thuẫn / Cạnh Tranh (Màu Cam)**
-    *   **Mô tả:** Tiêu cực ở mức độ nhẹ, cạnh tranh, không ưa nhau nhưng chưa có ý định hãm hại nghiêm trọng.
-    *   **Từ khóa:** \`đối thủ cạnh tranh\`, \`coi thường\`, \`chán ghét\`, \`xung đột lợi ích\`, \`gây sự\`.
-    *   *Ví dụ:* "Đối thủ cạnh tranh trong môn phái", "Chán ghét vì tính cách kiêu ngạo".
-
-*   **Cấp 2: Thù Địch (Màu Đỏ Hồng)**
-    *   **Mô tả:** Đối đầu trực tiếp, có ý định hoặc hành động hãm hại, phản bội.
-    *   **Từ khóa:** \`kẻ thù\`, \`đối địch\`, \`phản bội\`, \`hãm hại\`, \`âm mưu\`, \`ghen ghét\`.
-    *   *Ví dụ:* "Kẻ thù đã phản bội nhân vật chính", "Âm mưu hãm hại để đoạt bảo vật".
-
-*   **Cấp 1: Sinh Tử Đại Địch (Màu Đỏ Sẫm)**
-    *   **Mô tả:** Mối thù không thể hóa giải, liên quan đến sinh tử, huyết thù.
-    *   **Từ khóa:** \`huyết hải thâm thù\`, \`truy sát đến cùng\`, \`sinh tử đại địch\`, \`diệt tộc\`, \`thù không đội trời chung\`.
-    *   *Ví dụ:* "Huyết hải thâm thù vì bị diệt cả gia tộc".
+*   **Cấp 6: Thân Thiết Tột Cùng (Màu Xanh Lá):** \`sư đồ\`, \`phu thê\`, \`tri kỷ\`, \`huynh đệ kết nghĩa\`, \`gia tộc thân cận\`, \`sống chết có nhau\`, \`trung thành tuyệt đối\`, \`ân nhân cứu mạng\`.
+*   **Cấp 5: Đồng Minh / Tích Cực (Màu Xanh Ngọc):** \`đồng minh\`, \`bằng hữu\`, \`đồng môn\`, \`thân hữu\`, \`giúp đỡ\`, \`cảm kích\`, \`tiền bối đáng kính\`.
+*   **Cấp 4: Trung Lập (Màu Vàng):** \`giao dịch\`, \`hợp tác tạm thời\`, \`quen biết sơ\`, \`người qua đường\`.
+*   **Cấp 3: Mâu Thuẫn / Cạnh Tranh (Màu Cam):** \`đối thủ cạnh tranh\`, \`coi thường\`, \`chán ghét\`, \`xung đột lợi ích\`, \`gây sự\`.
+*   **Cấp 2: Thù Địch (Màu Đỏ Hồng):** \`kẻ thù\`, \`đối địch\`, \`phản bội\`, \`hãm hại\`, \`âm mưu\`, \`ghen ghét\`.
+*   **Cấp 1: Sinh Tử Đại Địch (Màu Đỏ Sẫm):** \`huyết hải thâm thù\`, \`truy sát đến cùng\`, \`sinh tử đại địch\`, \`diệt tộc\`, \`thù không đội trời chung\`.
 
 **QUY TẮC PHÂN BIỆT (CỰC KỲ QUAN TRỌNG):**
 - **CAM (Mâu thuẫn):** Chỉ dùng cho sự cạnh tranh, không ưa nhau, xung đột nhỏ. **KHÔNG** có ý định gây hại nghiêm trọng.
@@ -262,27 +231,59 @@ Khi mô tả một mối quan hệ trong trường \`moTa\`, hãy sử dụng c�
 - **ĐỎ SẪM (Sinh tử):** **CHỈ** dùng cho mối thù sinh tử, không thể hóa giải.
 
 **NỘI DUNG CHƯƠNG MỚI:**
-"${chapterContent.substring(0, 15000)}"`;
+"{chapterContent}"`;
 
-  try {
-    const geminiClient = getAiClient(apiKey);
-    const response = await geminiClient.models.generateContent({
-      model: "gemini-2.5-flash",
-      contents: contents,
-      config: {
-        responseMimeType: "application/json",
-        responseSchema: characterStatsSchema,
-      },
-    });
-
-    const jsonText = response.text.trim();
-    if (!jsonText) {
-        return null;
+async function executeAnalysis(apiKey: string, prompt: string, schema: any): Promise<any> {
+    try {
+        const geminiClient = getAiClient(apiKey);
+        const response = await geminiClient.models.generateContent({
+            model: "gemini-2.5-flash",
+            contents: prompt,
+            config: {
+                responseMimeType: "application/json",
+                responseSchema: schema,
+            },
+        });
+        const jsonText = response.text.trim();
+        return jsonText ? JSON.parse(jsonText) : null;
+    } catch (error) {
+        console.error("Lỗi khi thực hiện phân tích:", error);
+        if (error instanceof Error && error.message.includes('API key not valid')) {
+            throw new Error("API Key không hợp lệ. Vui lòng kiểm tra lại trong mục cài đặt.");
+        }
+        throw error;
     }
+}
 
-    const stats = JSON.parse(jsonText) as CharacterStats;
+export const analyzeChapterForPrimaryCharacter = async (apiKey: string, chapterContent: string, previousStats: CharacterStats | null): Promise<Partial<CharacterStats> | null> => {
+    const taskPrompt = `**NHIỆM VỤ:**\nĐọc nội dung **CHƯƠNG MỚI** và chỉ trích xuất những thông tin **MỚI** hoặc **THAY ĐỔI** liên quan đến **TRẠNG THÁI CỦA NHÂN VẬT CHÍNH** (tên, cảnh giới, cấp độ, vật phẩm, công pháp, trang bị, tư chất).`;
+    const fullPrompt = BASE_PROMPT
+        .replace('{previousStats}', JSON.stringify(previousStats ?? {}, null, 2))
+        .replace('**NHIỆM VỤ:**', taskPrompt)
+        .replace('{chapterContent}', chapterContent.substring(0, 15000));
+    return executeAnalysis(apiKey, fullPrompt, primaryCharacterSchema);
+};
+
+export const analyzeChapterForWorldInfo = async (apiKey: string, chapterContent: string, previousStats: CharacterStats | null): Promise<Partial<CharacterStats> | null> => {
+    const taskPrompt = `**NHIỆM VỤ:**\nĐọc nội dung **CHƯƠNG MỚI** và chỉ trích xuất những thông tin **MỚI** hoặc **THAY ĐỔI** liên quan đến **THẾ GIỚI TRUYỆN** (nhân vật phụ, thế lực, địa điểm, vị trí hiện tại của nhân vật chính).`;
+    const fullPrompt = BASE_PROMPT
+        .replace('{previousStats}', JSON.stringify(previousStats ?? {}, null, 2))
+        .replace('**NHIỆM VỤ:**', taskPrompt)
+        .replace('{chapterContent}', chapterContent.substring(0, 15000));
+    return executeAnalysis(apiKey, fullPrompt, worldInfoSchema);
+};
+
+export const analyzeChapterForCharacterStats = async (apiKey: string, chapterContent: string, previousStats: CharacterStats | null): Promise<CharacterStats | null> => {
+    const taskPrompt = `**NHIỆM VỤ:**\nĐọc nội dung **CHƯƠNG MỚI** và chỉ trích xuất những thông tin **MỚI** hoặc **THAY ĐỔI** so với "DỮ LIỆU HIỆN TẠI".`;
+     const fullPrompt = BASE_PROMPT
+        .replace('{previousStats}', JSON.stringify(previousStats ?? {}, null, 2))
+        .replace('**NHIỆM VỤ:**', taskPrompt)
+        .replace('{chapterContent}', chapterContent.substring(0, 15000));
+        
+    const stats = await executeAnalysis(apiKey, fullPrompt, characterStatsSchema) as CharacterStats | null;
     
-    // Lọc ra các mảng rỗng hoặc các đối tượng trạng thái rỗng
+    if (!stats) return null;
+
     const hasData = 
         (stats.canhGioi && stats.canhGioi.trim() !== "") ||
         (stats.viTriHienTai && stats.viTriHienTai.trim() !== "") ||
@@ -296,18 +297,7 @@ Khi mô tả một mối quan hệ trong trường \`moTa\`, hãy sử dụng c�
         (stats.diaDiem && stats.diaDiem.length > 0) ||
         (stats.quanHe && stats.quanHe.length > 0);
 
-
     return hasData ? stats : null;
-
-  } catch (error)
- {
-    console.error("Lỗi khi phân tích chỉ số nhân vật:", error);
-    // Propagate the error to be handled by the UI
-    if (error instanceof Error && error.message.includes('API key not valid')) {
-        throw new Error("API Key không hợp lệ. Vui lòng kiểm tra lại trong mục cài đặt.");
-    }
-    throw error;
-  }
 };
 
 

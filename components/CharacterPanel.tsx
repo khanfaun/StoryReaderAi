@@ -16,6 +16,7 @@ interface CharacterPanelProps {
   isSidebar?: boolean;
   onStatsChange: (newStats: CharacterStats) => void;
   onDataLoaded: () => void;
+  onReanalyze: () => void;
 }
 
 type Tab = 'status' | 'realmSystem' | 'inventory' | 'skills' | 'equipment' | 'npcs' | 'relationships' | 'factions' | 'locations' | 'data';
@@ -333,7 +334,7 @@ const RelationshipGraph: React.FC<RelationshipGraphProps> = ({ relations, mainCh
 };
 
 
-const CharacterPanel: React.FC<CharacterPanelProps> = ({ stats, isOpen, onClose, isAnalyzing, isSidebar = false, onStatsChange, onDataLoaded }) => {
+const CharacterPanel: React.FC<CharacterPanelProps> = ({ stats, isOpen, onClose, isAnalyzing, isSidebar = false, onStatsChange, onDataLoaded, onReanalyze }) => {
   const [activeTab, setActiveTab] = useState<Tab>(isSidebar ? 'npcs' : 'status');
   const [modalState, setModalState] = useState<{ isOpen: boolean; type: EntityType | null; data: any | null }>({ isOpen: false, type: null, data: null });
   const [deleteConfirmation, setDeleteConfirmation] = useState<{ type: EntityType; entity: any; } | null>(null);
@@ -770,19 +771,33 @@ const CharacterPanel: React.FC<CharacterPanelProps> = ({ stats, isOpen, onClose,
   const panelInnerContent = (
     <>
         <div className="flex justify-between items-center p-4 border-b border-[var(--theme-border)]">
-          <h2 className="text-xl font-bold text-[var(--theme-text-primary)] flex items-center">
-             {isSidebar ? 'Thông Tin Thế Giới' : 'Bảng Nhân Vật'}
+          <div className="flex items-center gap-3">
+             <h2 className="text-xl font-bold text-[var(--theme-text-primary)]">
+               {isSidebar ? 'Thông Tin Thế Giới' : 'Bảng Nhân Vật'}
+             </h2>
             {isAnalyzing && (
-                <svg className="animate-spin ml-3 h-5 w-5 text-[var(--theme-accent-primary)]" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                <svg className="animate-spin h-5 w-5 text-[var(--theme-accent-primary)]" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
                     <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
                     <path className="opacity-75" fill="currentColor" d="M4 12a8 8
  0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
                 </svg>
             )}
-          </h2>
-          {!isSidebar && (
-            <button onClick={onClose} className="text-[var(--theme-text-secondary)] hover:text-[var(--theme-text-primary)] text-3xl leading-none">&times;</button>
-          )}
+          </div>
+          <div className="flex items-center gap-2">
+              {!isAnalyzing && (
+                <button 
+                  onClick={onReanalyze} 
+                  className="bg-[var(--theme-accent-secondary)] text-slate-900 font-semibold text-xs px-3 py-1 rounded-md hover:brightness-110 transition-colors"
+                  aria-label="Phân tích lại thông tin thế giới"
+                  title="Phân tích lại"
+                >
+                  Phân tích lại
+                </button>
+              )}
+              {!isSidebar && (
+                <button onClick={onClose} className="text-[var(--theme-text-secondary)] hover:text-[var(--theme-text-primary)] text-3xl leading-none">&times;</button>
+              )}
+          </div>
         </div>
         
         <div className="p-4 flex flex-wrap gap-2 border-b border-[var(--theme-border)] bg-[var(--theme-bg-base)]/50">
