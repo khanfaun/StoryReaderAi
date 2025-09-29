@@ -57,7 +57,9 @@ const EntityEditModal: React.FC<EntityEditModalProps> = ({ isOpen, onClose, onSa
             setFormData({ ten: entityData || '' });
         } else if (entityType === 'diaDiem') {
              const isCurrent = typeof entityData === 'object' && entityData !== null && 'ten' in entityData && entityData.ten === currentLocationName;
-             setFormData({ ...(entityData || { ten: '', moTa: ''}), isCurrentLocation: isCurrent });
+             // FIX: The entityData can be a string, which cannot be spread into an object. This ensures we only spread an object.
+             const baseData = typeof entityData === 'object' ? entityData : null;
+             setFormData({ ...(baseData || { ten: '', moTa: ''}), isCurrentLocation: isCurrent });
         } else if (entityType === 'npcs') {
             const npcData = (entityData || {}) as Partial<NPC>;
             setFormData({

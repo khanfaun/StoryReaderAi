@@ -91,17 +91,6 @@
       .sync-modal-form__spinner { width: 1.25rem; height: 1.25rem; animation: spin 1s linear infinite; }
       .sync-modal__status { padding: 1rem 1.5rem; font-size: 0.875rem; text-align: center; color: var(--theme-text-secondary); min-height: 2.5rem; }
     </style>
-    <script type="module">
-      // Tự động tạo một import map duy nhất, phù hợp với môi trường.
-      import { getModuleImports } from '/services/firebaseLoader.ts';
-
-      const script = document.createElement('script');
-      script.type = 'importmap';
-      script.textContent = JSON.stringify({
-        imports: getModuleImports()
-      });
-      document.head.append(script);
-    </script>
   <script type="importmap">
 {
   "imports": {
@@ -110,8 +99,7 @@
     "react/": "https://aistudiocdn.com/react@^19.1.1/",
     "@google/genai": "https://aistudiocdn.com/@google/genai@^1.20.0",
     "react-dom": "https://aistudiocdn.com/react-dom@^19.1.1",
-    "firebase/": "https://aistudiocdn.com/firebase@^12.3.0/",
-    "jszip": "https://aistudiocdn.com/jszip@^3.10.1"
+    "firebase/": "https://aistudiocdn.com/firebase@^12.3.0/"
   }
 }
 </script>

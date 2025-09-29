@@ -104,14 +104,15 @@ export interface ReadingSettings {
   fontFamily: string;
 }
 
-export interface GoogleUser {
-  name: string;
-  email: string;
-  imageUrl: string;
-}
-
 // FIX: Define and export the ChatMessage interface.
 export interface ChatMessage {
   role: 'user' | 'model';
   content: string;
+}
+
+// FIX: Add missing 'GoogleUser' type definition.
+export interface GoogleUser {
+  name: string;
+  email: string;
+  imageUrl: string;
 }
