@@ -1,6 +1,6 @@
 import React, { useState, useCallback, useEffect, useRef } from 'react';
 import type { Story, Chapter, CharacterStats, ReadingSettings, ReadingHistoryItem, ChatMessage } from './types';
-import { searchStory, getChapterContent, getStoryDetails, getStoryFromUrl } from './services/truyenfullService';
+import { searchStory, getChapterContent, getStoryDetails, getSourceInfo, parseHtml, ManualImportRequiredError, getChaptersForTangThuVien } from './services/truyenfullService';
 import { analyzeChapterForCharacterStats, chatWithEbook, chatWithChapterContent, validateApiKey, analyzeChapterForPrimaryCharacter, analyzeChapterForWorldInfo } from './services/geminiService';
 import { getCachedChapter, setCachedChapter } from './services/cacheService';
 import { getStoryState, saveStoryState as saveStoryStateLocal, mergeChapterStats } from './services/storyStateService';
@@ -27,12 +27,23 @@ import ConfirmationModal from './components/ConfirmationModal';
 import ApiKeyModal from './components/ApiKeyModal';
 import UpdateModal from './components/UpdateModal';
 import HelpModal from './components/HelpModal';
+import ManualImportModal from './components/ManualImportModal';
 
 
 declare var JSZip: any;
 
 interface EbookHandler {
   zip: any; // JSZip instance
+}
+
+type ManualImportType = 'story_details' | 'chapter_list' | 'chapter_content';
+
+interface ManualImportState {
+    isOpen: boolean;
+    urlToImport: string;
+    message: string;
+    importType: ManualImportType | null;
+    onFileSelected: (file: File) => Promise<void>;
 }
 
 const App: React.FC = () => {
@@ -81,6 +92,15 @@ const App: React.FC = () => {
   // State for Help Modal
   const [isHelpModalOpen, setIsHelpModalOpen] = useState(false);
 
+  // State for Manual Import Modal
+  const [manualImportState, setManualImportState] = useState<ManualImportState>({
+    isOpen: false,
+    urlToImport: '',
+    message: '',
+    importType: null,
+    onFileSelected: async () => {},
+  });
+
 
   const saveStoryState = useCallback((storyUrl: string, state: CharacterStats) => {
     saveStoryStateLocal(storyUrl, state);
@@ -95,20 +115,15 @@ const App: React.FC = () => {
   
   const reloadDataFromStorage = useCallback(async () => {
     setIsDataLoading(true);
-    
-    // Reset view to main screen to reflect changes immediately
     setStory(null);
     setSelectedChapterIndex(null);
     setChapterContent(null);
     setSearchResults(null);
     setError(null);
-    
-    // Reload history by combining localStorage and IndexedDB (for Ebooks)
     const localHistory = getReadingHistory();
     const dbStories = await dbService.getAllStories();
     const dbEbooks = dbStories.filter(s => s.source === 'Ebook');
     const historyMap = new Map(localHistory.map(item => [item.url, item]));
-    
     dbEbooks.forEach(ebook => {
       if (!historyMap.has(ebook.url)) {
         const placeholderItem: ReadingHistoryItem = {
@@ -123,13 +138,11 @@ const App: React.FC = () => {
     });
     const combinedHistory = Array.from(historyMap.values()).sort((a, b) => b.lastReadTimestamp - a.lastReadTimestamp);
     setReadingHistory(combinedHistory);
-    
-    // Reload reading settings from localStorage
     const savedSettingsRaw = localStorage.getItem('truyenReaderSettings');
     if (savedSettingsRaw) {
         try {
             const savedSettings = JSON.parse(savedSettingsRaw);
-            setSettings(savedSettings); // This function is from the useReadingSettings hook
+            setSettings(savedSettings);
         } catch (e) {
             console.error("Failed to parse settings from loaded file", e);
         }
@@ -158,8 +171,6 @@ const App: React.FC = () => {
   const handleApiError = useCallback((error: unknown) => {
         const errorMessage = error instanceof Error ? error.message : "Đã xảy ra lỗi không xác định.";
         setError(errorMessage);
-
-        // If a saved key becomes invalid, clear it and force re-entry.
         if (errorMessage.includes('API Key không hợp lệ')) {
             apiKeyService.clearApiKey();
             setApiKey(null);
@@ -169,8 +180,7 @@ const App: React.FC = () => {
   
   const handleTokenUsageUpdate = useCallback((usageData?: { totalTokens: number }) => {
     if (!usageData || !usageData.totalTokens || usageData.totalTokens === 0) return;
-    if (!apiKey) return; // Cannot update usage without an active key
-
+    if (!apiKey) return;
     setTokenUsage(prevUsage => {
       const newTotal = prevUsage.totalTokens + usageData.totalTokens;
       const newUsageState = { ...prevUsage, totalTokens: newTotal };
@@ -178,6 +188,34 @@ const App: React.FC = () => {
       return newUsageState;
     });
   }, [apiKey]);
+    
+  // Central function to process content and run AI analysis
+  const processAndAnalyzeContent = useCallback(async (storyToLoad: Story, chapterUrl: string, content: string) => {
+    setChapterContent(content);
+    if (!apiKey) {
+      setError("Vui lòng thiết lập API Key để sử dụng tính năng phân tích nhân vật.");
+      setIsApiKeyModalOpen(true);
+      setCachedChapter(storyToLoad.url, chapterUrl, { content, stats: null });
+      return;
+    }
+
+    setIsAnalyzing(true);
+    try {
+      const currentStats = getStoryState(storyToLoad.url) ?? {};
+      const { data: chapterStats, usage } = await analyzeChapterForCharacterStats(apiKey, content, currentStats);
+      handleTokenUsageUpdate(usage);
+      const newState = mergeChapterStats(currentStats, chapterStats ?? {});
+      setCumulativeStats(newState);
+      saveStoryState(storyToLoad.url, newState);
+      setCachedChapter(storyToLoad.url, chapterUrl, { content, stats: chapterStats });
+    } catch (analysisError) {
+      console.error("Analysis error, caching content only", analysisError);
+      handleApiError(analysisError);
+      setCachedChapter(storyToLoad.url, chapterUrl, { content, stats: null });
+    } finally {
+      setIsAnalyzing(false);
+    }
+  }, [apiKey, handleApiError, handleTokenUsageUpdate, saveStoryState]);
 
   const fetchChapter = useCallback(async (storyToLoad: Story, chapterIndex: number) => {
     if (!storyToLoad || !storyToLoad.chapters || chapterIndex < 0 || chapterIndex >= storyToLoad.chapters.length) return;
@@ -195,7 +233,6 @@ const App: React.FC = () => {
     let cachedData = getCachedChapter(storyToLoad.url, chapter.url);
     if (cachedData) {
         setChapterContent(cachedData.content);
-        // Also load stats from cache if available
         if (cachedData.stats) {
             const currentStats = getStoryState(storyToLoad.url) ?? {};
             const newState = mergeChapterStats(currentStats, cachedData.stats);
@@ -209,58 +246,60 @@ const App: React.FC = () => {
     setError(null);
     setChapterContent(null);
     
+    const sourceInfo = getSourceInfo(chapter.url);
+    
     try {
-        let content: string;
         if (storyToLoad.source === 'Ebook' && ebookInstance) {
             const { zip } = ebookInstance;
             const decodedUrl = decodeURIComponent(chapter.url);
             const chapterFile = zip.file(decodedUrl);
             if (!chapterFile) throw new Error(`Không thể tìm thấy tệp tin của chương "${decodedUrl}" bên trong Ebook.`);
             const rawHtml = await chapterFile.async('string');
-            const parser = new DOMParser();
-            const doc = parser.parseFromString(rawHtml, 'text/html');
+            const doc = parseHtml(rawHtml);
             const contentEl = doc.body;
             contentEl.querySelectorAll('a, sup, sub, script, style, img, svg').forEach((el: HTMLElement) => el.remove());
             contentEl.innerHTML = contentEl.innerHTML.replace(/<br\s*\/?>/gi, '\n');
             let text = (contentEl.textContent ?? '').trim();
             if (!text) text = "Nội dung chương trống.";
-            content = text.replace(/\n\s*\n/g, '\n\n');
+            await processAndAnalyzeContent(storyToLoad, chapter.url, text.replace(/\n\s*\n/g, '\n\n'));
+        } else if (sourceInfo && !sourceInfo.direct) {
+            // Blocked source, require manual import
+            throw new ManualImportRequiredError(
+                "Để đọc chương này, vui lòng truy cập trang chương, lưu lại (Ctrl+S), và nhập file HTML.",
+                chapter.url
+            );
         } else {
-             content = await getChapterContent(chapter, storyToLoad.source);
-        }
-        
-        setChapterContent(content);
-
-        if (!apiKey) {
-            setError("Vui lòng thiết lập API Key để sử dụng tính năng phân tích nhân vật.");
-            setIsApiKeyModalOpen(true);
-            setIsAnalyzing(false);
-            setCachedChapter(storyToLoad.url, chapter.url, { content, stats: null });
-            return;
-        }
-
-        setIsAnalyzing(true);
-        try {
-            const currentStats = getStoryState(storyToLoad.url) ?? {};
-            const { data: chapterStats, usage } = await analyzeChapterForCharacterStats(apiKey, content, currentStats);
-            handleTokenUsageUpdate(usage);
-            const newState = mergeChapterStats(currentStats, chapterStats ?? {});
-            setCumulativeStats(newState);
-            saveStoryState(storyToLoad.url, newState);
-            setCachedChapter(storyToLoad.url, chapter.url, { content, stats: chapterStats });
-        } catch (analysisError) {
-            console.error("Analysis error, caching content only", analysisError);
-            handleApiError(analysisError);
-            setCachedChapter(storyToLoad.url, chapter.url, { content, stats: null });
-        } finally {
-            setIsAnalyzing(false);
+             // This path is now only for whitelisted sources
+            const fetchUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(chapter.url)}`;
+            const response = await fetch(fetchUrl);
+            if (!response.ok) throw new Error(`Không thể tải nội dung chương từ nguồn trực tiếp.`);
+            const htmlText = await response.text();
+            const doc = parseHtml(htmlText);
+            const content = getChapterContent(doc, storyToLoad.source);
+            await processAndAnalyzeContent(storyToLoad, chapter.url, content);
         }
     } catch (err) {
-        handleApiError(err);
+        if (err instanceof ManualImportRequiredError) {
+            setManualImportState({
+                isOpen: true,
+                urlToImport: err.url,
+                message: err.message,
+                importType: 'chapter_content',
+                onFileSelected: async (file) => {
+                    const htmlText = await file.text();
+                    const doc = parseHtml(htmlText);
+                    const content = getChapterContent(doc, storyToLoad.source);
+                    await processAndAnalyzeContent(storyToLoad, chapter.url, content);
+                    setManualImportState({ ...manualImportState, isOpen: false });
+                }
+            });
+        } else {
+            handleApiError(err);
+        }
     } finally {
         setIsChapterLoading(false);
     }
-  }, [readChapters, saveStoryState, ebookInstance, apiKey, handleApiError, handleTokenUsageUpdate]);
+  }, [readChapters, saveStoryState, ebookInstance, processAndAnalyzeContent, handleApiError]);
 
   const handleSearch = useCallback(async (query: string) => {
     setIsDataLoading(true);
@@ -277,18 +316,118 @@ const App: React.FC = () => {
     try {
       const urlRegex = /^(https?):\/\/[^\s$.?#].[^\s]*$/i;
       if (urlRegex.test(query)) {
-        const fullStory = await getStoryFromUrl(query);
+        const sourceInfo = getSourceInfo(query);
+        if (!sourceInfo) {
+            throw new Error(`URL từ trang '${new URL(query).hostname}' không được hỗ trợ.`);
+        }
+        
+        if (!sourceInfo.direct) {
+            // For blocked sources, immediately ask for manual import
+            throw new ManualImportRequiredError(
+                `Trang này (${sourceInfo.source}) không hỗ trợ tải trực tiếp. Vui lòng lưu trang truyện (Ctrl+S) và nhập file HTML.`,
+                query
+            );
+        }
+
+        // Only direct sources will be fetched
+        const fetchUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(query)}`;
+        const response = await fetch(fetchUrl);
+        if (!response.ok) throw new Error(`Proxy fetch failed for ${query}`);
+        const htmlText = await response.text();
+        const doc = parseHtml(htmlText);
+        const details = await getStoryDetails(doc, query, sourceInfo.source);
+        
+        const fullStory: Story = {
+            title: details.title || 'Không có tiêu đề',
+            author: details.author || 'Không rõ tác giả',
+            imageUrl: details.imageUrl || '',
+            description: details.description,
+            chapters: details.chapters,
+            url: query,
+            source: sourceInfo.source,
+        };
+        
         setStory(fullStory);
-        let storyState = getStoryState(fullStory.url);
-        setCumulativeStats(storyState ?? {});
+        setCumulativeStats(getStoryState(fullStory.url) ?? {});
         const savedRead = localStorage.getItem(`readChapters_${fullStory.url}`);
         if (savedRead) setReadChapters(new Set(JSON.parse(savedRead)));
+
       } else {
         const results = await searchStory(query);
         setSearchResults(results);
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : "An unknown error occurred.");
+      if (err instanceof ManualImportRequiredError) {
+          const sourceInfo = getSourceInfo(err.url)!;
+          setManualImportState({
+              isOpen: true,
+              urlToImport: err.url,
+              message: err.message,
+              importType: 'story_details',
+              onFileSelected: async (file) => {
+                  try {
+                      setIsDataLoading(true);
+                      const htmlText = await file.text();
+                      const doc = parseHtml(htmlText);
+                      
+                      // This might throw another ManualImportRequiredError for chapter lists (e.g., TTV)
+                      try {
+                          const details = await getStoryDetails(doc, err.url, sourceInfo.source);
+                          const fullStory: Story = {
+                              title: details.title || 'Không có tiêu đề',
+                              author: details.author || 'Không rõ tác giả',
+                              imageUrl: details.imageUrl || '',
+                              description: details.description,
+                              chapters: details.chapters,
+                              url: err.url,
+                              source: sourceInfo.source,
+                          };
+                          setStory(fullStory);
+                          setCumulativeStats(getStoryState(fullStory.url) ?? {});
+                          setManualImportState({ ...manualImportState, isOpen: false });
+                      } catch (innerErr) {
+                           if (innerErr instanceof ManualImportRequiredError) {
+                              // Handle the nested request for the chapter list
+                              const tempStory: Story = {
+                                  title: doc.querySelector('.book-info h1')?.textContent?.trim() ?? 'Đang tải...',
+                                  author: doc.querySelector('.book-info .tag a.blue')?.textContent?.trim() ?? 'Đang tải...',
+                                  imageUrl: doc.querySelector('div.book-img > img')?.getAttribute('src') ?? '',
+                                  description: 'Đang chờ tải danh sách chương...',
+                                  url: err.url,
+                                  source: sourceInfo.source,
+                                  chapters: [],
+                              };
+                              setStory(tempStory); // Set temporary story
+                              setCumulativeStats(getStoryState(tempStory.url) ?? {});
+                              
+                              setManualImportState({
+                                  isOpen: true,
+                                  urlToImport: innerErr.url,
+                                  message: innerErr.message,
+                                  importType: 'chapter_list',
+                                  onFileSelected: async (chapterListFile) => {
+                                      const chapterHtml = await chapterListFile.text();
+                                      const chapterDoc = parseHtml(chapterHtml);
+                                      const chapters = getChaptersForTangThuVien(chapterDoc, innerErr.url);
+                                      setStory({ ...tempStory, chapters, description: doc.querySelector('.book-intro')?.textContent?.trim() });
+                                      setManualImportState({ ...manualImportState, isOpen: false });
+                                  }
+                              });
+                           } else {
+                              throw innerErr; // Re-throw other errors
+                           }
+                      }
+                  } catch (importError) {
+                      setError(importError instanceof Error ? importError.message : "Lỗi khi xử lý file HTML.");
+                      setManualImportState({ ...manualImportState, isOpen: false });
+                  } finally {
+                      setIsDataLoading(false);
+                  }
+              }
+          });
+      } else {
+        setError(err instanceof Error ? err.message : "An unknown error occurred.");
+      }
     } finally {
       setIsDataLoading(false);
     }
@@ -303,10 +442,18 @@ const App: React.FC = () => {
     resetChat();
     
     try {
-        const fullStory = await getStoryDetails(selectedStory);
+        // Direct fetching is only for whitelisted sites now
+        const sourceInfo = getSourceInfo(selectedStory.url)!;
+        const fetchUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(selectedStory.url)}`;
+        const response = await fetch(fetchUrl);
+        if (!response.ok) throw new Error("Proxy fetch failed");
+        const htmlText = await response.text();
+        const doc = parseHtml(htmlText);
+        const details = await getStoryDetails(doc, selectedStory.url, sourceInfo.source);
+        const fullStory = { ...selectedStory, ...details };
+
         setStory(fullStory);
-        let storyState = getStoryState(fullStory.url);
-        setCumulativeStats(storyState ?? {});
+        setCumulativeStats(getStoryState(fullStory.url) ?? {});
         const savedRead = localStorage.getItem(`readChapters_${fullStory.url}`);
         if (savedRead) setReadChapters(new Set(JSON.parse(savedRead)));
         else setReadChapters(new Set());
@@ -480,7 +627,6 @@ const App: React.FC = () => {
     setStory(null);
     setSelectedChapterIndex(null);
     setChapterContent(null);
-    // Giữ lại searchResults để người dùng có thể chọn truyện khác
   };
   
   const handlePrevChapter = () => {
@@ -517,19 +663,20 @@ const App: React.FC = () => {
             setEbookInstance({ zip });
             storyToLoad = dbStory;
         } else {
-            const tempStory: Story = { title: item.title, author: item.author, url: item.url, source: item.source, imageUrl: item.imageUrl };
-            storyToLoad = await getStoryDetails(tempStory);
+            // Re-trigger the fetch/import flow for web stories
+            await handleSearch(item.url);
+            // The rest of the logic is handled within handleSearch, so we can exit early.
+            setIsDataLoading(false);
+            return;
         }
 
         setStory(storyToLoad);
-        let storyState = getStoryState(storyToLoad.url);
-        setCumulativeStats(storyState ?? {});
+        setCumulativeStats(getStoryState(storyToLoad.url) ?? {});
         
         const savedRead = localStorage.getItem(`readChapters_${storyToLoad.url}`);
         if (savedRead) setReadChapters(new Set(JSON.parse(savedRead)));
         else setReadChapters(new Set());
 
-        // FIX: Robustly find chapter index by decoding URIs to prevent mismatches.
         const chapterIndex = storyToLoad.chapters?.findIndex(c => 
             decodeURIComponent(c.url) === decodeURIComponent(item.lastChapterUrl)
         );
@@ -537,15 +684,19 @@ const App: React.FC = () => {
         if (chapterIndex !== -1 && chapterIndex !== undefined) {
             await fetchChapter(storyToLoad, chapterIndex);
         } else if (storyToLoad.chapters?.length) {
-            // Fallback to first chapter if last read is not found
             await fetchChapter(storyToLoad, 0);
         }
     } catch (err) {
-        setError(err instanceof Error ? err.message : "Không thể tải truyện từ lịch sử.");
+        if (err instanceof ManualImportRequiredError) {
+            // Also handle manual import from history
+            await handleSearch(item.url);
+        } else {
+            setError(err instanceof Error ? err.message : "Không thể tải truyện từ lịch sử.");
+        }
     } finally {
         setIsDataLoading(false);
     }
-  }, [fetchChapter]);
+  }, [fetchChapter, handleSearch]);
   
   const handleRequestDeleteEbook = (item: ReadingHistoryItem) => {
     setDeleteConfirmation({ isOpen: true, item });
@@ -568,7 +719,6 @@ const App: React.FC = () => {
           }
       } catch (err) {
           setError("Không thể xóa Ebook.");
-          console.error(err);
       } finally {
           setDeleteConfirmation({ isOpen: false });
       }
@@ -617,7 +767,7 @@ const App: React.FC = () => {
     if (apiKeyService.isAiStudio()) {
         apiKeyService.saveApiKey(key);
         setApiKey(key);
-        setTokenUsage(apiKeyService.getTokenUsage()); // Refresh token usage for the new key
+        setTokenUsage(apiKeyService.getTokenUsage());
         setIsApiKeyModalOpen(false);
         return true;
     }
@@ -625,7 +775,7 @@ const App: React.FC = () => {
         await validateApiKey(key);
         apiKeyService.saveApiKey(key);
         setApiKey(key);
-        setTokenUsage(apiKeyService.getTokenUsage()); // Refresh token usage for the new key
+        setTokenUsage(apiKeyService.getTokenUsage());
         setIsApiKeyModalOpen(false);
         return true;
     } catch (err) {
@@ -637,7 +787,6 @@ const App: React.FC = () => {
   const handleDeleteApiKey = () => {
       apiKeyService.clearApiKey();
       setApiKey(null);
-      // After clearing the active key, the token usage should reflect a zeroed state.
       setTokenUsage(apiKeyService.getTokenUsage());
   };
 
@@ -658,7 +807,6 @@ const App: React.FC = () => {
 
             const chapter = story.chapters![selectedChapterIndex];
             const oldCachedData = getCachedChapter(story.url, chapter.url);
-            // Cập nhật delta trong cache: giữ delta cũ của world, thay thế delta của primary
             const newCachedStats = { ...(oldCachedData?.stats || {}), ...newPrimaryDelta };
             setCachedChapter(story.url, chapter.url, { content: chapterContent, stats: newCachedStats });
         }
@@ -686,7 +834,6 @@ const App: React.FC = () => {
 
             const chapter = story.chapters![selectedChapterIndex];
             const oldCachedData = getCachedChapter(story.url, chapter.url);
-            // Cập nhật delta trong cache: giữ delta cũ của primary, thay thế delta của world
             const newCachedStats = { ...(oldCachedData?.stats || {}), ...newWorldDelta };
             setCachedChapter(story.url, chapter.url, { content: chapterContent, stats: newCachedStats });
         }
@@ -752,8 +899,7 @@ const App: React.FC = () => {
     ? "w-full px-4 sm:px-8 py-8 sm:py-12 flex-grow"
     : "max-w-screen-2xl mx-auto px-4 py-8 sm:py-12 flex-grow";
   
-  // Blur the app if API key is required and modal is open
-  const appContentClass = (isApiKeyModalOpen && !apiKey) || isUpdateModalOpen || isHelpModalOpen ? 'blur-sm pointer-events-none' : '';
+  const appContentClass = (isApiKeyModalOpen && !apiKey) || isUpdateModalOpen || isHelpModalOpen || manualImportState.isOpen ? 'blur-sm pointer-events-none' : '';
 
   return (
     <div className="bg-[var(--theme-bg-base)] text-[var(--theme-text-primary)] min-h-screen flex flex-col">
@@ -825,6 +971,14 @@ const App: React.FC = () => {
       <UpdateModal isOpen={isUpdateModalOpen} onClose={() => setIsUpdateModalOpen(false)} />
       
       <HelpModal isOpen={isHelpModalOpen} onClose={() => setIsHelpModalOpen(false)} />
+
+       <ManualImportModal 
+            isOpen={manualImportState.isOpen}
+            onClose={() => setManualImportState({ ...manualImportState, isOpen: false })}
+            urlToImport={manualImportState.urlToImport}
+            message={manualImportState.message}
+            onFileSelected={manualImportState.onFileSelected}
+        />
 
       <ApiKeyModal
         isOpen={isApiKeyModalOpen}

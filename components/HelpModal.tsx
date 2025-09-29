@@ -34,7 +34,7 @@ const HelpModal: React.FC<HelpModalProps> = ({ isOpen, onClose }) => {
             </div>
           </div>
            <p className="text-sm text-[var(--theme-text-secondary)]">
-            Sao chép đường dẫn từ trang truyện bạn muốn đọc (ví dụ: từ TruyenFull, TruyenYY, Tàng Thư Viện...) và dán vào ô tìm kiếm sẽ cho kết quả ngay lập tức, thay vì phải tìm kiếm theo từ khóa.
+            Sao chép đường dẫn từ trang truyện bạn muốn đọc (Nên chọn truyện từ truyenfull.vision để tối ưu nhất hiện tại) và dán vào ô tìm kiếm sẽ cho kết quả ngay lập tức, thay vì phải tìm kiếm theo từ khóa.
           </p>
         </div>
         

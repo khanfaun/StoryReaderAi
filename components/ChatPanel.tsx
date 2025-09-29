@@ -1,6 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
-// FIX: Correctly import ChatMessage from the central types file.
 import type { ChatMessage } from '../types';
 import { CloseIcon, SpinnerIcon } from './icons';
 

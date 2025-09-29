@@ -38,8 +38,6 @@ function openDB(): Promise<IDBDatabase> {
 }
 
 export async function saveEbook(id: string, file: File): Promise<void> {
-    // FIX: Perform the async file reading *before* starting the transaction
-    // to prevent it from closing prematurely.
     const arrayBuffer = await file.arrayBuffer();
     const db = await openDB();
     const transaction = db.transaction(EBOOK_STORE, 'readwrite');

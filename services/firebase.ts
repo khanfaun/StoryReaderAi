@@ -1,7 +1,6 @@
 import { initializeApp } from 'firebase/app';
 import { getAuth } from 'firebase/auth';
 import { getFirestore } from 'firebase/firestore';
-// FIX: Changed to a namespace import to resolve an issue where 'getStorage' could not be found as a named export.
 import * as storageModule from 'firebase/storage';
 
 // TODO: THAY THẾ BẰNG CẤU HÌNH DỰ ÁN FIREBASE THỰC TẾ CỦA BẠN
@@ -22,5 +21,4 @@ const app = initializeApp(firebaseConfig);
 // Xuất các dịch vụ đã được khởi tạo để sử dụng trong toàn bộ ứng dụng
 export const auth = getAuth(app);
 export const db = getFirestore(app);
-// FIX: Access getStorage from the imported namespace module.
 export const storage = storageModule.getStorage(app);

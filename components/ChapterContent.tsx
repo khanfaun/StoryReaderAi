@@ -215,7 +215,6 @@ const ChapterContent: React.FC<ChapterContentProps> = ({ story, currentChapterIn
         ));
     }
 
-    // FIX: Swapped `pIndex` and `paragraph` arguments. `map` provides the element first, then the index.
     return text.split('\n').map((paragraph, pIndex) => {
         if (!paragraph.trim()) return <p key={pIndex} className="mb-4" />;
         

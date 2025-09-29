@@ -1,4 +1,3 @@
-
 export interface Chapter {
   title: string;
   url: string;
@@ -12,6 +11,7 @@ export interface Story {
   url: string; // URL của trang chính của truyện
   description?: string;
   chapters?: Chapter[];
+  isSearchLink?: boolean; // Cờ để xác định đây là link tìm kiếm, không phải truyện
 }
 
 export interface ReadingHistoryItem {
@@ -104,13 +104,11 @@ export interface ReadingSettings {
   fontFamily: string;
 }
 
-// FIX: Define and export the ChatMessage interface.
 export interface ChatMessage {
   role: 'user' | 'model';
   content: string;
 }
 
-// FIX: Add missing 'GoogleUser' type definition.
 export interface GoogleUser {
   name: string;
   email: string;
