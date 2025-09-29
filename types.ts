@@ -14,6 +14,8 @@ export interface Story {
   isSearchLink?: boolean; // Cờ để xác định đây là link tìm kiếm, không phải truyện
 }
 
+export type PartialStory = Omit<Story, 'chapters'>;
+
 export interface ReadingHistoryItem {
   title: string;
   author: string;

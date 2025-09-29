@@ -1,4 +1,4 @@
-import type { Story, Chapter } from '../types';
+import type { Story, Chapter, PartialStory } from '../types';
 
 // =================================================================
 // SHARED UTILITIES
@@ -71,6 +71,16 @@ async function fetchAndParse(url: string): Promise<Document> {
   throw new Error(`Không thể tải dữ liệu từ ${url} sau khi thử tất cả các proxy. Nguồn truyện có thể đang chặn truy cập hoặc không khả dụng. Lỗi cuối cùng: ${lastError?.message}`);
 }
 
+/**
+ * Phân tích một chuỗi HTML thành một đối tượng Document.
+ * Cần thiết cho việc xử lý các file HTML do người dùng nhập thủ công.
+ * @param htmlString Chuỗi HTML để phân tích.
+ * @returns Một đối tượng Document.
+ */
+export function parseHtml(htmlString: string): Document {
+  const parser = new DOMParser();
+  return parser.parseFromString(htmlString, 'text/html');
+}
 
 function normalizeString(str: string): string {
   if (!str) return '';
@@ -125,9 +135,8 @@ async function getDetailsForTruyenFull(storyUrl: string) {
     // 3. Trích xuất các chương từ trang đầu tiên
     const chapters: Chapter[] = [];
     doc.querySelectorAll('#list-chapter .list-chapter li a').forEach(el => {
-        const chapterHref = el.getAttribute('href');
-        if (chapterHref && el.textContent) {
-            const chapterUrl = new URL(chapterHref, storyUrl).href;
+        const chapterUrl = el.getAttribute('href');
+        if (chapterUrl && el.textContent) {
             chapters.push({ title: el.textContent.trim(), url: chapterUrl });
         }
     });
@@ -170,9 +179,8 @@ async function getDetailsForTruyenFull(storyUrl: string) {
                 // Tải tuần tự từng trang để tránh bị giới hạn tốc độ hoặc chặn
                 const pageDoc = await fetchAndParse(pageUrl);
                 pageDoc.querySelectorAll('#list-chapter .list-chapter li a').forEach(el => {
-                    const chapterHref = el.getAttribute('href');
-                    if (chapterHref && el.textContent) {
-                        const chapterUrl = new URL(chapterHref, storyUrl).href;
+                    const chapterUrl = el.getAttribute('href');
+                    if (chapterUrl && el.textContent) {
                         chapters.push({ title: el.textContent.trim(), url: chapterUrl });
                     }
                 });
@@ -253,6 +261,27 @@ async function searchOnTangThuVien(query: string): Promise<Story[]> {
     return stories;
 }
 
+/**
+ * Trích xuất danh sách chương từ một Document của trang mục lục Tàng Thư Viện.
+ * @param doc Đối tượng Document của trang HTML.
+ * @param storyUrl URL của truyện (dành cho ngữ cảnh, hiện không dùng).
+ * @returns Một mảng các đối tượng Chapter.
+ */
+function getChaptersForTangThuVien(doc: Document, storyUrl: string): Chapter[] {
+    const chapters: Chapter[] = [];
+    doc.querySelectorAll('#j-bookCatalogPage ul li a').forEach(el => {
+        const chapterUrl = el.getAttribute('href');
+        if (chapterUrl && el.textContent) {
+            chapters.push({ title: el.textContent.trim(), url: chapterUrl });
+        }
+    });
+    if (chapters.length === 0) {
+        throw new Error("File HTML không chứa danh sách chương hợp lệ cho Tàng Thư Viện.");
+    }
+    return chapters;
+}
+
+
 async function getDetailsForTangThuVien(storyUrl: string) {
     const doc = await fetchAndParse(storyUrl);
     const title = doc.querySelector('.book-info h1')?.textContent?.trim() ?? '';
@@ -262,8 +291,7 @@ async function getDetailsForTangThuVien(storyUrl: string) {
         .map(p => p.textContent?.trim())
         .filter(Boolean)
         .join('\n\n') || 'Không có mô tả.';
-    const chapters: Chapter[] = [];
-
+    
     // Cố gắng lấy ID truyện từ nhiều nguồn có thể
     let bookId: string | null = null;
     const urlMatch = storyUrl.match(/\/(?:doc-truyen|story)\/(\d+)/);
@@ -279,20 +307,25 @@ async function getDetailsForTangThuVien(storyUrl: string) {
     }
 
     if (!bookId) {
-        throw new Error('Không tìm thấy ID truyện cho danh sách chương của Tàng Thư Viện.');
+        throw new Error('Không tìm thấy ID truyện để tải danh sách chương từ Tàng Thư Viện.');
     }
 
     const chapterListUrl = `https://truyen.tangthuvien.net/doc-truyen/${bookId}/muc-luc`;
-    const chapterDoc = await fetchAndParse(chapterListUrl);
     
-    chapterDoc.querySelectorAll('#j-bookCatalogPage ul li a').forEach(el => {
-        const chapterHref = el.getAttribute('href');
-        if (chapterHref && el.textContent) {
-            const chapterUrl = new URL(chapterHref, chapterListUrl).href;
-            chapters.push({ title: el.textContent.trim(), url: chapterUrl });
+    try {
+        const chapterDoc = await fetchAndParse(chapterListUrl);
+        const chapters = getChaptersForTangThuVien(chapterDoc, storyUrl);
+        
+        if (chapters.length === 0) {
+          throw new Error("Trang mục lục không chứa chương nào.");
         }
-    });
-    return { title, author, imageUrl, description, chapters };
+        
+        return { title, author, imageUrl, description, chapters };
+
+    } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : "Lỗi không xác định";
+        throw new Error(`Không thể tải danh sách chương từ Tàng Thư Viện. Lỗi: ${errorMessage}.`);
+    }
 }
 
 
@@ -338,9 +371,8 @@ async function getDetailsForTruyenHdt(storyUrl: string) {
     const description = doc.querySelector('#story-info-detail .description')?.textContent?.trim() ?? 'Không có mô tả.';
     const chapters: Chapter[] = [];
     doc.querySelectorAll('#list-chapter ul.list-group li a').forEach(el => {
-        const chapterHref = el.getAttribute('href');
-        if (chapterHref && el.textContent) {
-            const chapterUrl = new URL(chapterHref, storyUrl).href;
+        const chapterUrl = el.getAttribute('href');
+        if (chapterUrl && el.textContent) {
             chapters.push({ title: el.textContent.trim(), url: chapterUrl });
         }
     });
@@ -397,9 +429,8 @@ async function getDetailsForKhoDocSach(storyUrl: string) {
         const pageUrl = `${storyUrl}?page=${i}`;
         const pageDoc = (i === 1) ? doc : await fetchAndParse(pageUrl);
         pageDoc.querySelectorAll('#chapters .chapter-list a').forEach(el => {
-            const chapterHref = el.getAttribute('href');
-            if (chapterHref && el.textContent) {
-                const chapterUrl = new URL(chapterHref, pageUrl).href;
+            const chapterUrl = el.getAttribute('href');
+            if (chapterUrl && el.textContent) {
                 chapters.push({ title: el.textContent.trim(), url: chapterUrl });
             }
         });
@@ -450,9 +481,8 @@ async function getDetailsForTruyenYy(storyUrl: string) {
     const description = doc.querySelector('#book-info #book-intro')?.textContent?.trim() ?? 'Không có mô tả.';
     const chapters: Chapter[] = [];
     doc.querySelectorAll('#chapters-area .chapter-item a').forEach(el => {
-        const chapterHref = el.getAttribute('href');
-        if (chapterHref && el.textContent) {
-            const chapterUrl = new URL(chapterHref, storyUrl).href;
+        const chapterUrl = el.getAttribute('href');
+        if (chapterUrl && el.textContent) {
             chapters.push({ title: el.textContent.trim(), url: chapterUrl });
         }
     });
@@ -578,10 +608,6 @@ export async function getChapterContent(chapter: Chapter, source: string): Promi
     const scraper = scrapers[source as keyof typeof scrapers];
 
     if (!scraper) {
-        // Prevent trying to parse non-http URLs like Ebook paths
-        if (!chapter.url.startsWith('http')) {
-            throw new Error(`Nguồn không được hỗ trợ hoặc URL chương không hợp lệ cho: ${source}`);
-        }
         const hostname = new URL(chapter.url).hostname;
         // Logic dự phòng nếu source không được truyền đúng cách
         for (const key in scrapers) {
