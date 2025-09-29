@@ -1,3 +1,4 @@
+
 import type { Story, Chapter } from '../types';
 
 // =================================================================
@@ -19,12 +20,17 @@ const CORS_PROXIES = [
         name: 'CORSProxy.io',
         // proxy này lấy URL thô làm tham số truy vấn.
         buildUrl: (url: string) => `https://corsproxy.io/?${url}`
+    },
+    {
+        name: 'CodeTabs',
+        buildUrl: (url: string) => `https://api.codetabs.com/v1/proxy/?quest=${encodeURIComponent(url)}`
     }
 ];
 
 // Sắp xếp lại proxy để thử những proxy có khả năng đáng tin cậy/ít nghiêm ngặt hơn trước.
 const ORDERED_PROXIES = [
     CORS_PROXIES[1], // CORS.EU.ORG
+    CORS_PROXIES[3], // CodeTabs
     CORS_PROXIES[2], // CORSProxy.io
     CORS_PROXIES[0]  // AllOrigins
 ];
@@ -304,33 +310,33 @@ async function getChapterFromTangThuVien(chapterUrl: string) {
     return contentEl;
 }
 
-// --- TRUYENHDT.COM ---
-const TRUYENHDT_SOURCE = 'TruyenHDT.com';
+// --- TRUYENKK.COM (Formerly TruyenHDT.com) ---
+const TRUYENKK_SOURCE = 'TruyenKK.com';
 
-async function searchOnTruyenHdt(query: string): Promise<Story[]> {
-    const BASE_URL = 'https://truyenhdt.com';
-    const searchUrl = `${BASE_URL}/tim-kiem.html?key=${encodeURIComponent(query)}`;
+async function searchOnTruyenKk(query: string): Promise<Story[]> {
+    const BASE_URL = 'https://truyenkk.com';
+    const searchUrl = `${BASE_URL}/tim-kiem/?q=${encodeURIComponent(query)}`;
     const doc = await fetchAndParse(searchUrl);
 
     const stories: Story[] = [];
-    doc.querySelectorAll('ul.list-story > li').forEach(itemEl => {
-        const titleAnchor = itemEl.querySelector<HTMLAnchorElement>('.info .title a');
-        const authorSpan = itemEl.querySelector<HTMLSpanElement>('.info .author');
-        const imageElement = itemEl.querySelector<HTMLImageElement>('.image a img');
+    doc.querySelectorAll('div.list-mainpage > div.row').forEach(rowEl => {
+        const titleAnchor = rowEl.querySelector<HTMLAnchorElement>('h3.truyen-title a');
+        const authorSpan = rowEl.querySelector<HTMLSpanElement>('.author');
+        const imageElement = rowEl.querySelector<HTMLImageElement>('img.cover');
         if (titleAnchor && authorSpan && imageElement) {
             stories.push({
                 title: titleAnchor.innerText.trim(),
                 url: titleAnchor.href,
                 author: authorSpan.innerText.trim(),
-                imageUrl: imageElement.src || '',
-                source: TRUYENHDT_SOURCE,
+                imageUrl: imageElement.getAttribute('src') || imageElement.getAttribute('data-src') || '',
+                source: TRUYENKK_SOURCE,
             });
         }
     });
     return stories;
 }
 
-async function getDetailsForTruyenHdt(storyUrl: string) {
+async function getDetailsForTruyenKk(storyUrl: string) {
     const doc = await fetchAndParse(storyUrl);
     const title = doc.querySelector('.info .title')?.textContent?.trim() ?? '';
     const author = doc.querySelector('.info .author a')?.textContent?.trim() ?? '';
@@ -347,85 +353,24 @@ async function getDetailsForTruyenHdt(storyUrl: string) {
     return { title, author, imageUrl, description, chapters };
 }
 
-async function getChapterFromTruyenHdt(chapterUrl: string) {
+async function getChapterFromTruyenKk(chapterUrl: string) {
     const doc = await fetchAndParse(chapterUrl);
     const contentEl = doc.querySelector('#chapter-content');
-    if (!contentEl) throw new Error("Không tìm thấy nội dung chương tại TruyenHDT.com.");
+    if (!contentEl) throw new Error("Không tìm thấy nội dung chương tại TruyenKK.com.");
     contentEl.querySelectorAll('.ads-in-content, script, style').forEach(el => el.remove());
     return contentEl;
 }
 
-// --- KHODOCSACH.COM ---
-const KHODOCSACH_SOURCE = 'KhoDocSach.com';
-
-async function searchOnKhoDocSach(query: string): Promise<Story[]> {
-    const BASE_URL = 'https://khodocsach.com';
-    const searchUrl = `${BASE_URL}/tim-kiem?q=${encodeURIComponent(query)}`;
-    const doc = await fetchAndParse(searchUrl);
-
-    const stories: Story[] = [];
-    doc.querySelectorAll('.container .grid .item').forEach(itemEl => {
-        const titleAnchor = itemEl.querySelector<HTMLAnchorElement>('.card-title a');
-        const authorAnchor = itemEl.querySelector<HTMLAnchorElement>('.card-author a');
-        const imageElement = itemEl.querySelector<HTMLImageElement>('.card-img-top img');
-        if (titleAnchor && authorAnchor && imageElement) {
-            stories.push({
-                title: titleAnchor.innerText.trim(),
-                url: titleAnchor.href,
-                author: authorAnchor.innerText.trim(),
-                imageUrl: imageElement.src || '',
-                source: KHODOCSACH_SOURCE,
-            });
-        }
-    });
-    return stories;
-}
-
-async function getDetailsForKhoDocSach(storyUrl: string) {
-    const doc = await fetchAndParse(storyUrl);
-    const title = doc.querySelector('h2.series-title')?.textContent?.trim() ?? '';
-    const author = doc.querySelector('.series-information .info-item:nth-child(1) a')?.textContent?.trim() ?? '';
-    const imageUrl = doc.querySelector('.series-cover .img-in-ratio')?.getAttribute('data-bg') ?? '';
-    const description = doc.querySelector('.summary-content .text')?.textContent?.trim() ?? 'Không có mô tả.';
-    const chapters: Chapter[] = [];
-    // Xử lý danh sách chương có phân trang
-    const pageLinks = Array.from(doc.querySelectorAll<HTMLAnchorElement>('.pagination .page-item a.page-link'));
-    const lastPageLink = pageLinks[pageLinks.length - 2]; // Link cuối cùng thường là 'Next', link áp chót là số trang cuối
-    const lastPage = lastPageLink ? parseInt(lastPageLink.innerText, 10) : 1;
-
-    for (let i = 1; i <= lastPage; i++) {
-        const pageUrl = `${storyUrl}?page=${i}`;
-        const pageDoc = (i === 1) ? doc : await fetchAndParse(pageUrl);
-        pageDoc.querySelectorAll('#chapters .chapter-list a').forEach(el => {
-            const chapterHref = el.getAttribute('href');
-            if (chapterHref && el.textContent) {
-                const chapterUrl = new URL(chapterHref, pageUrl).href;
-                chapters.push({ title: el.textContent.trim(), url: chapterUrl });
-            }
-        });
-    }
-
-    return { title, author, imageUrl, description, chapters };
-}
-
-async function getChapterFromKhoDocSach(chapterUrl: string) {
-    const doc = await fetchAndParse(chapterUrl);
-    const contentEl = doc.querySelector('#chapter-content');
-    if (!contentEl) throw new Error("Không tìm thấy nội dung chương tại KhoDocSach.com.");
-    contentEl.querySelectorAll('script, style, .text-center').forEach(el => el.remove());
-    return contentEl;
-}
-
-// --- TRUYENYY.MOBI ---
-const TRUYENYY_SOURCE = 'TruyenYY.mobi';
+// --- TRUYENYY.VIP (Formerly TruyenYY.mobi) ---
+const TRUYENYY_SOURCE = 'TruyenYY.vip';
 
 async function searchOnTruyenYy(query: string): Promise<Story[]> {
-    const BASE_URL = 'https://truyenyy.mobi';
+    const BASE_URL = 'https://truyenyy.vip';
     const searchUrl = `${BASE_URL}/search/?key=${encodeURIComponent(query)}`;
     const doc = await fetchAndParse(searchUrl);
     
     const stories: Story[] = [];
-    doc.querySelectorAll<HTMLAnchorElement>('.book-list .book-item a').forEach(itemAnchor => {
+    doc.querySelectorAll<HTMLAnchorElement>('.book-list > a.book-item').forEach(itemAnchor => {
         const titleDiv = itemAnchor.querySelector<HTMLDivElement>('.book-name');
         const authorDiv = itemAnchor.querySelector<HTMLDivElement>('.book-author');
         const imageElement = itemAnchor.querySelector<HTMLImageElement>('img');
@@ -462,10 +407,180 @@ async function getDetailsForTruyenYy(storyUrl: string) {
 async function getChapterFromTruyenYy(chapterUrl: string) {
     const doc = await fetchAndParse(chapterUrl);
     const contentEl = doc.querySelector('#chapter-content');
-    if (!contentEl) throw new Error("Không tìm thấy nội dung chương tại TruyenYY.mobi.");
+    if (!contentEl) throw new Error("Không tìm thấy nội dung chương tại TruyenYY.vip.");
     contentEl.querySelectorAll('script, style, .ads-holder').forEach(el => el.remove());
     return contentEl;
 }
+
+// --- TRUYENCHUHAY.VN ---
+const TRUYENCHUHAY_SOURCE = 'TruyenChuHay.vn';
+
+async function searchOnTruyenChuHay(query: string): Promise<Story[]> {
+    const BASE_URL = 'https://truyenchuhay.vn';
+    const searchUrl = `${BASE_URL}/tim-kiem?q=${encodeURIComponent(query)}`;
+    const doc = await fetchAndParse(searchUrl);
+
+    const stories: Story[] = [];
+    doc.querySelectorAll('.list-story .story-item').forEach(itemEl => {
+        const titleAnchor = itemEl.querySelector<HTMLAnchorElement>('h3.story-title a');
+        const authorAnchor = itemEl.querySelector<HTMLAnchorElement>('.story-author a');
+        const imageElement = itemEl.querySelector<HTMLImageElement>('.story-thumb img');
+        if (titleAnchor && authorAnchor && imageElement) {
+            stories.push({
+                title: titleAnchor.innerText.trim(),
+                url: titleAnchor.href,
+                author: authorAnchor.innerText.trim(),
+                imageUrl: imageElement.src || '',
+                source: TRUYENCHUHAY_SOURCE,
+            });
+        }
+    });
+    return stories;
+}
+
+async function getDetailsForTruyenChuHay(storyUrl: string) {
+    const doc = await fetchAndParse(storyUrl);
+    const title = doc.querySelector('h1.story-name')?.textContent?.trim() ?? '';
+    // FIX: Add type argument to querySelectorAll to correctly type 'a' as HTMLAnchorElement.
+    const authorAnchor = Array.from(doc.querySelectorAll<HTMLAnchorElement>('.info-item a')).find(a => a.href.includes('/tac-gia/'));
+    const author = authorAnchor?.textContent?.trim() ?? 'Đang cập nhật';
+    const imageUrl = doc.querySelector('.story-thumb img')?.getAttribute('src') ?? '';
+    const description = doc.querySelector('.story-desc-full')?.textContent?.trim() ?? 'Không có mô tả.';
+    
+    const chapters: Chapter[] = [];
+    const chapterListUrl = `${storyUrl.replace(/\/$/, '')}/danh-sach-chuong`;
+
+    const firstPageDoc = await fetchAndParse(chapterListUrl);
+    firstPageDoc.querySelectorAll('#chapters li a').forEach(el => {
+        const chapterHref = el.getAttribute('href');
+        if (chapterHref && el.textContent) {
+            chapters.push({ title: el.textContent.trim(), url: chapterHref });
+        }
+    });
+
+    let lastPage = 1;
+    const lastPageAnchor = firstPageDoc.querySelector<HTMLAnchorElement>('a[rel="last"]');
+    if (lastPageAnchor) {
+        const href = lastPageAnchor.href;
+        const match = href.match(/page=(\d+)/);
+        if (match) {
+            lastPage = parseInt(match[1], 10);
+        }
+    }
+
+    if (lastPage > 1) {
+        for (let i = 2; i <= lastPage; i++) {
+            const pageUrl = `${chapterListUrl}?page=${i}`;
+            try {
+                const pageDoc = await fetchAndParse(pageUrl);
+                pageDoc.querySelectorAll('#chapters li a').forEach(el => {
+                    const chapterHref = el.getAttribute('href');
+                    if (chapterHref && el.textContent) {
+                        chapters.push({ title: el.textContent.trim(), url: chapterHref });
+                    }
+                });
+            } catch (error) {
+                console.warn(`Không thể tải trang chương ${i} từ ${pageUrl} (TruyenChuHay). Lỗi:`, (error as Error).message);
+                break;
+            }
+        }
+    }
+    
+    return { title, author, imageUrl, description, chapters };
+}
+
+async function getChapterFromTruyenChuHay(chapterUrl: string) {
+    const doc = await fetchAndParse(chapterUrl);
+    const contentEl = doc.querySelector('#chapter-content');
+    if (!contentEl) throw new Error("Không tìm thấy nội dung chương tại TruyenChuHay.vn.");
+    contentEl.querySelectorAll('script, style, .ads-chapter, .text-center, .chapter-nav').forEach(el => el.remove());
+    return contentEl;
+}
+
+// --- TRUYENCHU.COM.VN ---
+const TRUYENCHU_SOURCE = 'TruyenChu.com.vn';
+
+async function searchOnTruyenChu(query: string): Promise<Story[]> {
+    const BASE_URL = 'https://truyenchu.com.vn';
+    const searchUrl = `${BASE_URL}/tim-kiem?tu-khoa=${encodeURIComponent(query)}`;
+    const doc = await fetchAndParse(searchUrl);
+    
+    const stories: Story[] = [];
+    doc.querySelectorAll('.list-truyen .row').forEach(rowEl => {
+        const titleAnchor = rowEl.querySelector<HTMLAnchorElement>('h3.truyen-title a');
+        const authorSpan = rowEl.querySelector<HTMLSpanElement>('.author');
+        const imageElement = rowEl.querySelector<HTMLImageElement>('.img-cover');
+        if (titleAnchor && authorSpan && imageElement) {
+            stories.push({
+                title: titleAnchor.innerText.trim(),
+                url: titleAnchor.href,
+                author: authorSpan.innerText.trim(),
+                imageUrl: imageElement.src || '',
+                source: TRUYENCHU_SOURCE,
+            });
+        }
+    });
+    return stories;
+}
+
+async function getDetailsForTruyenChu(storyUrl: string) {
+    const doc = await fetchAndParse(storyUrl);
+    const title = doc.querySelector('h1.name')?.textContent?.trim() ?? '';
+    const author = doc.querySelector('.author > a')?.textContent?.trim() ?? '';
+    const imageUrl = doc.querySelector('.book img')?.getAttribute('src') ?? '';
+    const description = doc.querySelector('.desc-text')?.textContent?.trim() ?? 'Không có mô tả.';
+    
+    const chapters: Chapter[] = [];
+    doc.querySelectorAll('#list-chapter ul li a').forEach(el => {
+        const chapterHref = el.getAttribute('href');
+        if (chapterHref && el.textContent) {
+            chapters.push({ title: el.textContent.trim(), url: chapterHref });
+        }
+    });
+
+    let lastPage = 1;
+    const lastPageAnchor = doc.querySelector<HTMLAnchorElement>('a[title="Cuối"]');
+    if (lastPageAnchor) {
+        const href = lastPageAnchor.href;
+        const match = href.match(/\/trang-(\d+)\/?$/);
+        if (match) {
+            lastPage = parseInt(match[1], 10);
+        }
+    } else {
+        const pageLinks = doc.querySelectorAll<HTMLAnchorElement>('.pagination li a');
+        if (pageLinks.length > 0) {
+            const pageNumbers = Array.from(pageLinks)
+                .map(a => a.href.match(/\/trang-(\d+)\/?$/))
+                .filter((match): match is RegExpMatchArray => match !== null)
+                .map(match => parseInt(match[1], 10));
+            if (pageNumbers.length > 0) {
+                lastPage = Math.max(1, ...pageNumbers);
+            }
+        }
+    }
+
+    if (lastPage > 1) {
+        const baseUrl = storyUrl.endsWith('/') ? storyUrl : `${storyUrl}/`;
+        for (let i = 2; i <= lastPage; i++) {
+            const pageUrl = `${baseUrl}trang-${i}/`;
+            try {
+                const pageDoc = await fetchAndParse(pageUrl);
+                pageDoc.querySelectorAll('#list-chapter ul li a').forEach(el => {
+                    const chapterHref = el.getAttribute('href');
+                    if (chapterHref && el.textContent) {
+                        chapters.push({ title: el.textContent.trim(), url: chapterHref });
+                    }
+                });
+            } catch (error) {
+                console.warn(`Không thể tải trang chương ${i} từ ${pageUrl}. Lỗi:`, (error as Error).message);
+                break;
+            }
+        }
+    }
+    return { title, author, imageUrl, description, chapters };
+}
+
+const getChapterFromTruyenChu = getChapterFromTruyenFull;
 
 // =================================================================
 // UNIFIED API
@@ -475,9 +590,10 @@ const scrapers = {
   [TRUYENFULL_SOURCE]: { search: searchOnTruyenFull, getDetails: getDetailsForTruyenFull, getChapter: getChapterFromTruyenFull },
   [TRUYENFULLVISION_SOURCE]: { search: searchOnTruyenFullVision, getDetails: getDetailsForTruyenFullVision, getChapter: getChapterFromTruyenFullVision },
   [TANGTHUVIEN_SOURCE]: { search: searchOnTangThuVien, getDetails: getDetailsForTangThuVien, getChapter: getChapterFromTangThuVien },
-  [TRUYENHDT_SOURCE]: { search: searchOnTruyenHdt, getDetails: getDetailsForTruyenHdt, getChapter: getChapterFromTruyenHdt },
-  [KHODOCSACH_SOURCE]: { search: searchOnKhoDocSach, getDetails: getDetailsForKhoDocSach, getChapter: getChapterFromKhoDocSach },
+  [TRUYENKK_SOURCE]: { search: searchOnTruyenKk, getDetails: getDetailsForTruyenKk, getChapter: getChapterFromTruyenKk },
   [TRUYENYY_SOURCE]: { search: searchOnTruyenYy, getDetails: getDetailsForTruyenYy, getChapter: getChapterFromTruyenYy },
+  [TRUYENCHUHAY_SOURCE]: { search: searchOnTruyenChuHay, getDetails: getDetailsForTruyenChuHay, getChapter: getChapterFromTruyenChuHay },
+  [TRUYENCHU_SOURCE]: { search: searchOnTruyenChu, getDetails: getDetailsForTruyenChu, getChapter: getChapterFromTruyenChu },
 };
 
 export async function searchStory(query: string): Promise<Story[]> {
@@ -496,29 +612,41 @@ export async function searchStory(query: string): Promise<Story[]> {
   const resultsBySource = await Promise.all(searchPromises);
   const allStoriesRaw = resultsBySource.flat();
 
-  // Lọc kết quả để đảm bảo tính chính xác
+  // Lọc và sắp xếp kết quả
   const normalizedQuery = normalizeString(trimmedQuery);
-  const queryWordCount = trimmedQuery.split(/\s+/).filter(Boolean).length;
 
-  const filteredStories = allStoriesRaw.filter(story => {
-    const normalizedTitle = normalizeString(story.title);
-    const titleWordCount = story.title.split(/\s+/).filter(Boolean).length;
-    // Điều kiện: Tiêu đề chuẩn hóa BẮT ĐẦU bằng truy vấn chuẩn hóa VÀ có cùng số từ.
-    return normalizedTitle.startsWith(normalizedQuery) && titleWordCount === queryWordCount;
+  // Lọc tất cả các truyện có tiêu đề chứa từ khóa tìm kiếm
+  const filteredStories = allStoriesRaw.filter(story => 
+      normalizeString(story.title).includes(normalizedQuery)
+  );
+
+  // Sắp xếp kết quả để những truyện bắt đầu bằng từ khóa được ưu tiên
+  filteredStories.sort((a, b) => {
+      const normalizedA = normalizeString(a.title);
+      const normalizedB = normalizeString(b.title);
+
+      const aStartsWith = normalizedA.startsWith(normalizedQuery);
+      const bStartsWith = normalizedB.startsWith(normalizedQuery);
+
+      if (aStartsWith && !bStartsWith) return -1; // a đứng trước
+      if (!aStartsWith && bStartsWith) return 1;  // b đứng trước
+
+      // Nếu cả hai đều bắt đầu bằng query hoặc không, sắp xếp theo độ dài tiêu đề (ngắn hơn trước)
+      if (normalizedA.length !== normalizedB.length) {
+          return normalizedA.length - normalizedB.length;
+      }
+
+      // Cuối cùng, sắp xếp theo alphabet
+      return a.title.localeCompare(b.title);
   });
-  
-  // Nếu bộ lọc nghiêm ngặt không có kết quả, thử bộ lọc lỏng hơn
-  if (filteredStories.length === 0 && allStoriesRaw.length > 0) {
-      console.warn("Bộ lọc tìm kiếm nghiêm ngặt không có kết quả. Chuyển sang bộ lọc lỏng hơn.");
-      const lenientFiltered = allStoriesRaw.filter(story => normalizeString(story.title).includes(normalizedQuery));
-      lenientFiltered.sort((a, b) => a.title.localeCompare(b.title));
-      if (lenientFiltered.length > 0) return lenientFiltered;
-  } else {
-      filteredStories.sort((a, b) => a.title.localeCompare(b.title));
-  }
 
-  if (filteredStories.length === 0 && allStoriesRaw.length === 0) {
-      throw new Error(`Không tìm thấy truyện "${query}" từ bất kỳ nguồn nào. Vui lòng thử với tên khác hoặc kiểm tra kết nối mạng.`);
+  if (filteredStories.length === 0) {
+      // Chỉ báo lỗi nếu không có kết quả NÀO được tìm thấy từ TẤT CẢ các nguồn
+      if (allStoriesRaw.length === 0) {
+        throw new Error(`Không tìm thấy truyện "${query}" từ bất kỳ nguồn nào. Vui lòng thử với tên khác hoặc kiểm tra kết nối mạng.`);
+      }
+      // Nếu có kết quả thô nhưng không khớp bộ lọc, trả về mảng rỗng
+      return [];
   }
 
   return filteredStories;
@@ -548,15 +676,18 @@ export async function getStoryFromUrl(url: string): Promise<Story> {
   } else if (hostname.includes('tangthuvien.net')) {
     source = TANGTHUVIEN_SOURCE;
     scraperKey = TANGTHUVIEN_SOURCE;
-  } else if (hostname.includes('truyenhdt.com')) {
-    source = TRUYENHDT_SOURCE;
-    scraperKey = TRUYENHDT_SOURCE;
-  } else if (hostname.includes('khodocsach.com')) {
-    source = KHODOCSACH_SOURCE;
-    scraperKey = KHODOCSACH_SOURCE;
-  } else if (hostname.includes('truyenyy.mobi')) {
+  } else if (hostname.includes('truyenkk.com') || hostname.includes('truyenhdt.com')) {
+    source = TRUYENKK_SOURCE;
+    scraperKey = TRUYENKK_SOURCE;
+  } else if (hostname.includes('truyenyy.vip') || hostname.includes('truyenyy.net') || hostname.includes('truyenyy.mobi')) {
     source = TRUYENYY_SOURCE;
     scraperKey = TRUYENYY_SOURCE;
+  } else if (hostname.includes('truyenchuhay.vn')) {
+    source = TRUYENCHUHAY_SOURCE;
+    scraperKey = TRUYENCHUHAY_SOURCE;
+  } else if (hostname.includes('truyenchu.com.vn')) {
+    source = TRUYENCHU_SOURCE;
+    scraperKey = TRUYENCHU_SOURCE;
   }
 
   if (!source || !scraperKey) {

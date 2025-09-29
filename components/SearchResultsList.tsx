@@ -18,17 +18,17 @@ const SearchResultItem: React.FC<SearchResultItemProps> = ({ story, onSelectStor
       case 'TangThuVien.net':
           sourceColor = 'bg-orange-800 text-orange-300';
           break;
-      case 'TruyenHDT.com':
+      case 'TruyenKK.com':
           sourceColor = 'bg-rose-800 text-rose-300';
           break;
-      case 'KhoDocSach.com':
-          sourceColor = 'bg-amber-800 text-amber-300';
-          break;
-      case 'TruyenYY.mobi':
+      case 'TruyenYY.vip':
           sourceColor = 'bg-fuchsia-800 text-fuchsia-300';
           break;
-      case 'MetruyenCV.com':
-          sourceColor = 'bg-emerald-800 text-emerald-300';
+      case 'TruyenChuHay.vn':
+          sourceColor = 'bg-sky-800 text-sky-300';
+          break;
+      case 'TruyenChu.com.vn':
+          sourceColor = 'bg-lime-800 text-lime-300';
           break;
       default:
           sourceColor = 'bg-slate-700 text-slate-300';

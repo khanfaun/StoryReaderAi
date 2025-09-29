@@ -26,6 +26,7 @@ import ChatToggleButton from './components/ChatToggleButton';
 import ConfirmationModal from './components/ConfirmationModal';
 import ApiKeyModal from './components/ApiKeyModal';
 import UpdateModal from './components/UpdateModal';
+import HelpModal from './components/HelpModal';
 
 
 declare var JSZip: any;
@@ -76,6 +77,9 @@ const App: React.FC = () => {
 
   // State for Update Modal
   const [isUpdateModalOpen, setIsUpdateModalOpen] = useState(true);
+
+  // State for Help Modal
+  const [isHelpModalOpen, setIsHelpModalOpen] = useState(false);
 
 
   const saveStoryState = useCallback((storyUrl: string, state: CharacterStats) => {
@@ -749,7 +753,7 @@ const App: React.FC = () => {
     : "max-w-screen-2xl mx-auto px-4 py-8 sm:py-12 flex-grow";
   
   // Blur the app if API key is required and modal is open
-  const appContentClass = (isApiKeyModalOpen && !apiKey) || isUpdateModalOpen ? 'blur-sm pointer-events-none' : '';
+  const appContentClass = (isApiKeyModalOpen && !apiKey) || isUpdateModalOpen || isHelpModalOpen ? 'blur-sm pointer-events-none' : '';
 
   return (
     <div className="bg-[var(--theme-bg-base)] text-[var(--theme-text-primary)] min-h-screen flex flex-col">
@@ -760,7 +764,12 @@ const App: React.FC = () => {
         />
         <main className={mainContainerClass}>
             <div className="mb-8">
-                <SearchBar onSearch={handleSearch} isLoading={isDataLoading} onEbookImport={handleEbookImportClick} />
+                <SearchBar 
+                    onSearch={handleSearch} 
+                    isLoading={isDataLoading} 
+                    onEbookImport={handleEbookImportClick} 
+                    onOpenHelpModal={() => setIsHelpModalOpen(true)}
+                />
                 <input 
                     type="file"
                     ref={ebookFileRef}
@@ -815,6 +824,8 @@ const App: React.FC = () => {
 
       <UpdateModal isOpen={isUpdateModalOpen} onClose={() => setIsUpdateModalOpen(false)} />
       
+      <HelpModal isOpen={isHelpModalOpen} onClose={() => setIsHelpModalOpen(false)} />
+
       <ApiKeyModal
         isOpen={isApiKeyModalOpen}
         onClose={() => setIsApiKeyModalOpen(false)}

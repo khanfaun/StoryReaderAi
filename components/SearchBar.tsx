@@ -1,13 +1,14 @@
 import React, { useState } from 'react';
-import { UploadIcon } from './icons';
+import { UploadIcon, QuestionMarkCircleIcon } from './icons';
 
 interface SearchBarProps {
   onSearch: (query: string) => void;
   isLoading: boolean;
   onEbookImport: () => void;
+  onOpenHelpModal: () => void;
 }
 
-const SearchBar: React.FC<SearchBarProps> = ({ onSearch, isLoading, onEbookImport }) => {
+const SearchBar: React.FC<SearchBarProps> = ({ onSearch, isLoading, onEbookImport, onOpenHelpModal }) => {
   const [query, setQuery] = useState('');
 
   const handleSearch = (e: React.FormEvent) => {
@@ -39,15 +40,27 @@ const SearchBar: React.FC<SearchBarProps> = ({ onSearch, isLoading, onEbookImpor
           </button>
         </div>
       </form>
-      <button
-        type="button"
-        onClick={onEbookImport}
-        className="flex-shrink-0 w-full sm:w-auto bg-transparent border-2 border-[var(--theme-accent-secondary)] hover:bg-[var(--theme-accent-secondary)] hover:text-slate-900 text-sm text-[var(--theme-accent-secondary)] font-semibold py-2 px-4 rounded-lg disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-300 flex items-center justify-center"
-        disabled={isLoading}
-      >
-        <UploadIcon className="w-5 h-5 mr-2" />
-        <span>Nhập Ebook</span>
-      </button>
+      <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={onEbookImport}
+            className="flex-shrink-0 w-full sm:w-auto bg-transparent border-2 border-[var(--theme-accent-secondary)] hover:bg-[var(--theme-accent-secondary)] hover:text-slate-900 text-sm text-[var(--theme-accent-secondary)] font-semibold py-2 px-4 rounded-lg disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-300 flex items-center justify-center"
+            disabled={isLoading}
+          >
+            <UploadIcon className="w-5 h-5 mr-2" />
+            <span>Nhập Ebook</span>
+          </button>
+          <button
+            type="button"
+            onClick={onOpenHelpModal}
+            className="flex-shrink-0 p-2 rounded-full text-[var(--theme-text-secondary)] hover:bg-[var(--theme-border)] hover:text-[var(--theme-text-primary)] transition-colors duration-200"
+            aria-label="Mẹo tìm kiếm"
+            disabled={isLoading}
+            title="Mẹo tìm truyện nhanh"
+          >
+            <QuestionMarkCircleIcon className="w-7 h-7" />
+          </button>
+      </div>
     </div>
   );
 };
