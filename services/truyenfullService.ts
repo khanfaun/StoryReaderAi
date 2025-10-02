@@ -123,8 +123,13 @@ async function searchOnTruyenFull(query: string): Promise<Story[]> {
 }
 
 async function getDetailsForTruyenFull(storyUrl: string) {
-    // 1. Fetch và parse trang đầu tiên
-    const doc = await fetchAndParse(storyUrl);
+    // 1. Clean the URL to get the base URL of the story, ensuring we always start from page 1.
+    // This handles cases where the user provides a paginated URL (e.g., /trang-2/) or a URL with a hash.
+    const baseUrl = storyUrl.replace(/\/trang-\d+\/?(#.*)?$/, '').replace(/#.*$/, '');
+    const storyBaseUrl = baseUrl.endsWith('/') ? baseUrl : `${baseUrl}/`;
+
+    // Fetch and parse the first page using the cleaned base URL
+    const doc = await fetchAndParse(storyBaseUrl);
 
     // 2. Trích xuất thông tin cơ bản của truyện
     const title = doc.querySelector('h3.title')?.textContent?.trim() ?? '';
@@ -172,9 +177,9 @@ async function getDetailsForTruyenFull(storyUrl: string) {
 
     // 5. Fetch các chương từ các trang tiếp theo (TUẦN TỰ) nếu có
     if (lastPage > 1) {
-        const baseUrl = storyUrl.endsWith('/') ? storyUrl : `${storyUrl}/`;
+        // We already have page 1, so start from page 2. Use the cleaned storyBaseUrl.
         for (let i = 2; i <= lastPage; i++) {
-            const pageUrl = `${baseUrl}trang-${i}/`;
+            const pageUrl = `${storyBaseUrl}trang-${i}/`;
             try {
                 // Tải tuần tự từng trang để tránh bị giới hạn tốc độ hoặc chặn
                 const pageDoc = await fetchAndParse(pageUrl);
@@ -185,9 +190,9 @@ async function getDetailsForTruyenFull(storyUrl: string) {
                     }
                 });
             } catch (error) {
-                console.warn(`Không thể tải trang chương ${i} từ ${pageUrl}. Danh sách chương có thể không đầy đủ. Lỗi:`, (error as Error).message);
-                // Dừng lại nếu có lỗi để tránh chờ đợi vô ích và trả về những gì đã có.
-                break;
+                console.warn(`Không thể tải trang chương ${i} từ ${pageUrl}. Bỏ qua trang này. Lỗi:`, (error as Error).message);
+                // Instead of breaking, continue to the next page to get as many chapters as possible.
+                continue;
             }
         }
     }
