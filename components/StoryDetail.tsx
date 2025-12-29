@@ -154,31 +154,35 @@ const StoryDetail: React.FC<StoryDetailProps> = ({
   };
 
   return (
-    <div className="bg-[var(--theme-bg-surface)] rounded-lg shadow-xl p-6 animate-fade-in border border-[var(--theme-border)]">
+    <div className="bg-[var(--theme-bg-surface)] rounded-lg shadow-xl p-4 sm:p-6 animate-fade-in border border-[var(--theme-border)]">
       <div className="flex justify-between items-center mb-6">
         <button
             onClick={onBack}
-            className="bg-[var(--theme-accent-primary)] hover:brightness-90 text-white font-bold py-2 px-4 rounded-lg transition-colors duration-300"
+            className="flex items-center gap-1 bg-[var(--theme-accent-primary)] hover:brightness-90 text-white font-bold p-2 sm:py-2 sm:px-4 rounded-lg transition-colors duration-300"
+            title="Quay lại"
         >
-            &larr; Quay lại
+            <span>&larr;</span>
+            <span className="hidden sm:inline">Quay lại</span>
         </button>
         
         {onUpdateStory && (
             <div className="flex gap-2">
                 <button
                     onClick={() => setIsEditModalOpen(true)}
-                    className="flex items-center gap-2 bg-slate-600 hover:bg-slate-500 text-white font-bold py-2 px-4 rounded-lg transition-colors duration-300"
+                    className="flex items-center gap-2 bg-slate-600 hover:bg-slate-500 text-white font-bold p-2 sm:py-2 sm:px-4 rounded-lg transition-colors duration-300"
+                    title="Sửa thông tin truyện"
                 >
                     <EditIcon className="w-5 h-5" />
-                    Sửa thông tin
+                    <span className="hidden sm:inline">Sửa thông tin</span>
                 </button>
                 {onDeleteStory && (
                     <button
                         onClick={() => setConfirmDeleteStory(true)}
-                        className="flex items-center gap-2 bg-rose-600 hover:bg-rose-500 text-white font-bold py-2 px-4 rounded-lg transition-colors duration-300"
+                        className="flex items-center gap-2 bg-rose-600 hover:bg-rose-500 text-white font-bold p-2 sm:py-2 sm:px-4 rounded-lg transition-colors duration-300"
+                        title="Xóa truyện"
                     >
                         <TrashIcon className="w-5 h-5" />
-                        Xóa truyện
+                        <span className="hidden sm:inline">Xóa truyện</span>
                     </button>
                 )}
             </div>
@@ -187,7 +191,7 @@ const StoryDetail: React.FC<StoryDetailProps> = ({
 
       {/* Story info display */}
       <div className="mb-6 flex flex-col md:flex-row gap-6">
-          <div className="flex-shrink-0 w-full md:w-48 lg:w-64 aspect-[2/3] relative rounded-lg overflow-hidden shadow-lg border border-[var(--theme-border)]">
+          <div className="flex-shrink-0 w-full md:w-48 lg:w-64 aspect-[2/3] relative rounded-lg overflow-hidden shadow-lg border border-[var(--theme-border)] mx-auto md:mx-0 max-w-[200px] md:max-w-none">
                {story.imageUrl ? (
                   <img src={story.imageUrl} alt={story.title} className="w-full h-full object-cover" />
                ) : (
@@ -195,8 +199,8 @@ const StoryDetail: React.FC<StoryDetailProps> = ({
                )}
           </div>
           <div className="flex-grow">
-              <h2 className="text-3xl font-bold text-[var(--theme-text-primary)] mb-2">{story.title}</h2>
-              <div className="flex flex-wrap items-center gap-2 mb-3">
+              <h2 className="text-2xl sm:text-3xl font-bold text-[var(--theme-text-primary)] mb-2 text-center md:text-left">{story.title}</h2>
+              <div className="flex flex-wrap items-center justify-center md:justify-start gap-2 mb-3">
                   <span className="text-[var(--theme-text-secondary)]">Tác giả:</span>
                   <button 
                     onClick={handleAuthorClick}
@@ -210,7 +214,7 @@ const StoryDetail: React.FC<StoryDetailProps> = ({
               </div>
               
               {story.tags && story.tags.length > 0 && (
-                  <div className="flex flex-wrap gap-2 mb-4">
+                  <div className="flex flex-wrap justify-center md:justify-start gap-2 mb-4">
                       {story.tags.map(tag => (
                           <button 
                             key={tag}
@@ -223,16 +227,16 @@ const StoryDetail: React.FC<StoryDetailProps> = ({
                   </div>
               )}
 
-              <p className="text-[var(--theme-text-primary)] leading-relaxed whitespace-pre-wrap">{story.description}</p>
+              <p className="text-[var(--theme-text-primary)] leading-relaxed whitespace-pre-wrap text-justify">{story.description}</p>
           </div>
       </div>
 
       <div className="mt-8 animate-fade-in">
           <div className="flex justify-between items-center border-b-2 border-[var(--theme-border)] pb-2 mb-4">
-              <h3 className="text-2xl font-semibold text-[var(--theme-text-primary)]">Danh sách chương ({totalChapters})</h3>
+              <h3 className="text-xl sm:text-2xl font-semibold text-[var(--theme-text-primary)]">Danh sách chương ({totalChapters})</h3>
               {onCreateChapter && (
                   <button onClick={handleAddChapterClick} className="flex items-center gap-1 text-sm bg-[var(--theme-accent-primary)] text-white px-3 py-1 rounded hover:brightness-110 transition-colors">
-                      <PlusIcon className="w-4 h-4" /> Thêm chương
+                      <PlusIcon className="w-4 h-4" /> <span className="hidden sm:inline">Thêm chương</span>
                   </button>
               )}
           </div>
@@ -328,33 +332,33 @@ const StoryDetail: React.FC<StoryDetailProps> = ({
               <button
               onClick={() => handlePageChange(1)}
               disabled={currentPage === 1}
-              className="bg-[var(--theme-bg-surface)] brightness-125 hover:brightness-150 text-[var(--theme-text-primary)] font-bold py-2 px-4 rounded-lg transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed"
+              className="bg-[var(--theme-bg-surface)] brightness-125 hover:brightness-150 text-[var(--theme-text-primary)] font-bold py-2 px-3 sm:px-4 text-xs sm:text-sm rounded-lg transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed"
               >
-              &laquo; Đầu
+              &laquo; <span className="hidden sm:inline">Đầu</span>
               </button>
               <button
               onClick={() => handlePageChange(currentPage - 1)}
               disabled={currentPage === 1}
-              className="bg-[var(--theme-bg-surface)] brightness-125 hover:brightness-150 text-[var(--theme-text-primary)] font-bold py-2 px-4 rounded-lg transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed"
+              className="bg-[var(--theme-bg-surface)] brightness-125 hover:brightness-150 text-[var(--theme-text-primary)] font-bold py-2 px-3 sm:px-4 text-xs sm:text-sm rounded-lg transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed"
               >
-              &lsaquo; Trước
+              &lsaquo; <span className="hidden sm:inline">Trước</span>
               </button>
-              <span className="text-[var(--theme-text-primary)] font-semibold whitespace-nowrap">
-              Trang {currentPage} / {totalPages}
+              <span className="text-[var(--theme-text-primary)] font-semibold whitespace-nowrap text-sm sm:text-base">
+              {currentPage} / {totalPages}
               </span>
               <button
               onClick={() => handlePageChange(currentPage + 1)}
               disabled={currentPage === totalPages}
-              className="bg-[var(--theme-bg-surface)] brightness-125 hover:brightness-150 text-[var(--theme-text-primary)] font-bold py-2 px-4 rounded-lg transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed"
+              className="bg-[var(--theme-bg-surface)] brightness-125 hover:brightness-150 text-[var(--theme-text-primary)] font-bold py-2 px-3 sm:px-4 text-xs sm:text-sm rounded-lg transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed"
               >
-              Sau &rsaquo;
+              <span className="hidden sm:inline">Sau</span> &rsaquo;
               </button>
               <button
               onClick={() => handlePageChange(totalPages)}
               disabled={currentPage === totalPages}
-              className="bg-[var(--theme-bg-surface)] brightness-125 hover:brightness-150 text-[var(--theme-text-primary)] font-bold py-2 px-4 rounded-lg transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed"
+              className="bg-[var(--theme-bg-surface)] brightness-125 hover:brightness-150 text-[var(--theme-text-primary)] font-bold py-2 px-3 sm:px-4 text-xs sm:text-sm rounded-lg transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed"
               >
-              Cuối &raquo;
+              <span className="hidden sm:inline">Cuối</span> &raquo;
               </button>
           </div>
           )}

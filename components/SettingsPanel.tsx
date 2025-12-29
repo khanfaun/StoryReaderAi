@@ -70,7 +70,7 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
   const isTtsSetup = mode === 'tts-setup';
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-60 z-50 flex justify-center items-center" onClick={isTtsSetup ? undefined : onClose}>
+    <div className="fixed inset-0 bg-black bg-opacity-60 z-[150] flex justify-center items-center" onClick={isTtsSetup ? undefined : onClose}>
       <div 
         className="bg-[var(--theme-bg-surface)] rounded-lg shadow-2xl w-full max-w-sm flex flex-col m-4 border border-[var(--theme-border)] animate-fade-in"
         onClick={e => e.stopPropagation()}

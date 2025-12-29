@@ -119,6 +119,18 @@ const ChapterContent: React.FC<ChapterContentProps> = ({
 
   const totalChars = chunkMetadata.length > 0 ? chunkMetadata[chunkMetadata.length - 1].end : 0;
 
+  // Toggle Helpers (Mutually Exclusive)
+  const togglePlaylist = useCallback(() => {
+      if (!isPlaylistOpen) setIsTtsSettingsOpen(false); // Close settings if opening playlist
+      setIsPlaylistOpen(prev => !prev);
+  }, [isPlaylistOpen]);
+
+  const toggleTtsSettings = useCallback(() => {
+      if (!isTtsSettingsOpen) setIsPlaylistOpen(false); // Close playlist if opening settings
+      setIsTtsSettingsOpen(prev => !prev);
+  }, [isTtsSettingsOpen]);
+
+
   useEffect(() => {
     onNavBarVisibilityChange(isNavBarVisible);
   }, [isNavBarVisible, onNavBarVisibilityChange]);
@@ -590,7 +602,7 @@ const ChapterContent: React.FC<ChapterContentProps> = ({
           max="10"
           value={autoScrollSpeed}
           onChange={e => setAutoScrollSpeed(parseInt(e.target.value, 10))}
-          className="w-full h-2 bg-[var(--theme-bg-base)] rounded-lg appearance-none cursor-pointer accent-[var(--theme-accent-primary)]"
+          className="w-full h-2 bg-[var(--theme-text-primary)]/20 rounded-lg appearance-none cursor-pointer accent-[var(--theme-accent-primary)]"
         />
         <button 
           onClick={startAutoScroll}
@@ -603,7 +615,7 @@ const ChapterContent: React.FC<ChapterContentProps> = ({
   );
 
   const navButtons = (target: 'top' | 'bottom') => {
-    // 1. TOP NAV
+    // 1. TOP NAV - REFINED (Removing borders, using flex-wrap)
     if (target === 'top') {
         const TtsButton = () => {
             const isActive = isAudioPlayerVisible;
@@ -619,12 +631,21 @@ const ChapterContent: React.FC<ChapterContentProps> = ({
         };
 
         return (
-            <div className="container mx-auto px-2 flex justify-center items-center gap-1 sm:gap-2">
-              <button onClick={onPrev} disabled={isFirstChapter || (isBusy && !isAnalyzing)} className="whitespace-nowrap bg-[var(--theme-bg-surface)] brightness-125 hover:brightness-150 text-[var(--theme-text-primary)] font-bold text-xs sm:text-sm py-2 px-3 sm:px-4 rounded-lg transition-all duration-300 disabled:opacity-50">Chương trước</button>
+            <div className="w-full flex flex-wrap justify-center items-center gap-2 px-1">
+              <button onClick={onPrev} disabled={isFirstChapter || (isBusy && !isAnalyzing)} className="whitespace-nowrap bg-[var(--theme-bg-surface)] brightness-125 hover:brightness-150 text-[var(--theme-text-primary)] font-bold text-xs sm:text-sm py-2 px-3 sm:px-4 rounded-lg transition-all duration-300 disabled:opacity-50">
+                  <span className="hidden sm:inline">Chương </span>Trước
+              </button>
               <button onClick={() => setIsListVisible(true)} disabled={isBusy && !isAnalyzing} className="flex-shrink-0 bg-[var(--theme-text-primary)] text-[var(--theme-bg-surface)] hover:brightness-90 font-bold p-2 rounded-lg transition-all duration-300 disabled:opacity-50"><ListIcon className="h-6 w-6" /></button>
-              <button onClick={onNext} disabled={isLastChapter || (isBusy && !isAnalyzing)} className="whitespace-nowrap bg-[var(--theme-bg-surface)] brightness-125 hover:brightness-150 text-[var(--theme-text-primary)] font-bold text-xs sm:text-sm py-2 px-3 sm:px-4 rounded-lg transition-all duration-300 disabled:opacity-50">Chương sau</button>
-              <div className="flex items-center gap-2 border-l border-[var(--theme-border)]/50 pl-2 sm:pl-3"><TtsButton /></div>
-              <div ref={autoScrollButtonRefTop} className="relative flex-shrink-0 border-l border-[var(--theme-border)]/50 pl-2 sm:pl-3">
+              <button onClick={onNext} disabled={isLastChapter || (isBusy && !isAnalyzing)} className="whitespace-nowrap bg-[var(--theme-bg-surface)] brightness-125 hover:brightness-150 text-[var(--theme-text-primary)] font-bold text-xs sm:text-sm py-2 px-3 sm:px-4 rounded-lg transition-all duration-300 disabled:opacity-50">
+                  <span className="hidden sm:inline">Chương </span>Sau
+              </button>
+              
+              {/* Divider for grouping tools if screen is wide enough, otherwise just wrap */}
+              <div className="hidden sm:block w-px h-6 bg-[var(--theme-border)] mx-1"></div>
+
+              <TtsButton />
+              
+              <div ref={autoScrollButtonRefTop} className="relative flex-shrink-0">
                 <button onClick={() => handleAutoScrollButtonClick('top')} className={`p-2 rounded-lg transition-all duration-300 ${isAutoScrolling ? 'bg-[var(--theme-accent-primary)] text-white' : 'bg-[var(--theme-bg-surface)] brightness-125 hover:brightness-150 text-[var(--theme-text-primary)]'}`}>
                     {isAutoScrolling ? <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M10 9v6m4-6v6m7-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg> : <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M19 13l-7 7-7-7m14-8l-7 7-7-7" /></svg>}
                 </button>
@@ -653,8 +674,9 @@ const ChapterContent: React.FC<ChapterContentProps> = ({
         };
 
         return (
-            <div className="container mx-auto px-2 flex justify-between items-center gap-2">
-                <div className="flex items-center gap-1 sm:gap-2">
+            <div className="container mx-auto px-2 flex flex-col md:flex-row justify-between items-center gap-2">
+                {/* Changed justify-between to justify-center for centering nav buttons on mobile */}
+                <div className="flex items-center gap-1 sm:gap-2 w-full md:w-auto justify-center md:justify-start">
                     <button onClick={onPrev} disabled={isFirstChapter} className="bg-[var(--theme-bg-surface)] brightness-125 hover:brightness-150 text-[var(--theme-text-primary)] font-bold py-2 px-3 rounded-lg transition-all duration-300 disabled:opacity-50" title="Chương trước">
                         <svg className="w-5 h-5 sm:hidden" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" /></svg>
                         <span className="hidden sm:inline">Trước</span>
@@ -666,22 +688,30 @@ const ChapterContent: React.FC<ChapterContentProps> = ({
                         <span className="hidden sm:inline">Sau</span>
                         <svg className="w-5 h-5 sm:hidden" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" /></svg>
                     </button>
+                    
+                    {/* Settings Button moved to first row on mobile for space */}
+                    <div className="md:hidden">
+                        <button onClick={() => setIsSettingsVisible(true)} className="bg-[var(--theme-bg-surface)] brightness-125 hover:brightness-150 text-[var(--theme-text-primary)] p-2 rounded-lg transition-all duration-300" title="Cài đặt">
+                            <CogIcon className="w-6 h-6" />
+                        </button>
+                    </div>
                 </div>
 
-                <div className="flex flex-1 flex-col items-center justify-center bg-slate-800/80 rounded-2xl px-4 py-2 border border-[var(--theme-accent-primary)]/30 shadow-lg mx-1 sm:mx-2 max-w-md relative">
-                    {/* Playlist Popover */}
-                    {isPlaylistOpen && (
-                        <div className="absolute bottom-full mb-2 left-0 right-0 max-h-60 bg-slate-900 border border-slate-700 rounded-lg shadow-xl overflow-y-auto z-20 p-2 animate-fade-in-up">
-                            <div className="flex justify-between items-center mb-2 px-1">
-                                <span className="text-xs font-bold text-slate-300">Danh sách phát ({chunkMetadata.length} đoạn)</span>
-                                <button onClick={() => setIsPlaylistOpen(false)} className="text-slate-500 hover:text-white"><CloseIcon className="w-4 h-4"/></button>
+                <div className="flex flex-1 flex-col items-center justify-center bg-transparent rounded-none px-0 py-0 border-none shadow-none mx-0 max-w-full w-full relative">
+                    
+                    {/* Popovers rendered here to escape bottom nav stacking context */}
+                    {isAudioPlayerVisible && isPlaylistOpen && (
+                        <div className="fixed bottom-24 left-4 right-4 md:bottom-28 md:left-1/2 md:-translate-x-1/2 md:w-96 md:max-w-none bg-[var(--theme-bg-surface)] border border-[var(--theme-border)] rounded-lg shadow-xl overflow-y-auto z-[100] p-2 animate-fade-in-up max-h-[50vh]">
+                            <div className="flex justify-between items-center mb-2 px-1 border-b border-[var(--theme-border)] pb-1">
+                                <span className="text-xs font-bold text-[var(--theme-text-primary)]">Danh sách phát ({chunkMetadata.length} đoạn)</span>
+                                <button onClick={() => setIsPlaylistOpen(false)} className="text-[var(--theme-text-secondary)] hover:text-[var(--theme-text-primary)]"><CloseIcon className="w-4 h-4"/></button>
                             </div>
                             <ul className="space-y-1">
                                 {chunkMetadata.map((chunk) => (
                                     <li key={chunk.index}>
                                         <button 
                                             onClick={() => handleJumpToChunk(chunk.index)}
-                                            className={`w-full text-left text-xs p-2 rounded flex items-center gap-2 transition-colors ${chunk.index === ttsCurrentChunkIndex ? 'bg-[var(--theme-accent-primary)] text-white' : 'hover:bg-slate-800 text-slate-400'}`}
+                                            className={`w-full text-left text-xs p-2 rounded flex items-center gap-2 transition-colors ${chunk.index === ttsCurrentChunkIndex ? 'bg-[var(--theme-accent-primary)] text-white' : 'hover:bg-[var(--theme-bg-base)] text-[var(--theme-text-secondary)]'}`}
                                         >
                                             {chunk.index === ttsCurrentChunkIndex && ttsStatus === 'playing' && <SpinnerIcon className="w-3 h-3 animate-spin"/>}
                                             <span className="font-mono opacity-50">#{chunk.index + 1}</span>
@@ -693,20 +723,19 @@ const ChapterContent: React.FC<ChapterContentProps> = ({
                         </div>
                     )}
 
-                    {/* TTS Settings Popover */}
-                    {isTtsSettingsOpen && (
-                        <div className="absolute bottom-full mb-2 z-20 bg-slate-900 border border-slate-700 rounded-lg shadow-xl p-3 animate-fade-in-up w-64 left-1/2 -translate-x-1/2">
+                    {isAudioPlayerVisible && isTtsSettingsOpen && (
+                        <div className="fixed bottom-24 left-4 right-4 md:bottom-28 md:left-1/2 md:-translate-x-1/2 md:w-64 md:max-w-none bg-[var(--theme-bg-surface)] border border-[var(--theme-border)] rounded-lg shadow-xl p-3 z-[100] animate-fade-in-up">
                             <div className="flex justify-between items-center mb-3">
-                                <span className="text-xs font-bold text-slate-300">Cấu hình giọng đọc</span>
-                                <button onClick={() => setIsTtsSettingsOpen(false)} className="text-slate-500 hover:text-white"><CloseIcon className="w-4 h-4"/></button>
+                                <span className="text-xs font-bold text-[var(--theme-text-primary)]">Cấu hình giọng đọc</span>
+                                <button onClick={() => setIsTtsSettingsOpen(false)} className="text-[var(--theme-text-secondary)] hover:text-[var(--theme-text-primary)]"><CloseIcon className="w-4 h-4"/></button>
                             </div>
                             <div className="space-y-3">
                                 <div>
-                                    <label className="block text-[10px] text-slate-400 mb-1">Giọng đọc</label>
+                                    <label className="block text-[10px] text-[var(--theme-text-secondary)] mb-1">Giọng đọc</label>
                                     <select
                                         value={settings.ttsSettings.voice}
                                         onChange={e => handleTtsSettingChange('voice', e.target.value)}
-                                        className="w-full bg-slate-800 border border-slate-600 rounded p-1 text-xs text-slate-200 focus:outline-none focus:border-[var(--theme-accent-primary)]"
+                                        className="w-full bg-[var(--theme-bg-base)] border border-[var(--theme-border)] rounded p-1 text-xs text-[var(--theme-text-primary)] focus:outline-none focus:border-[var(--theme-accent-primary)]"
                                     >
                                         <option value="">Mặc định</option>
                                         {availableSystemVoices.map(voice => (
@@ -715,7 +744,7 @@ const ChapterContent: React.FC<ChapterContentProps> = ({
                                     </select>
                                 </div>
                                 <div>
-                                    <div className="flex justify-between text-[10px] text-slate-400 mb-1">
+                                    <div className="flex justify-between text-[10px] text-[var(--theme-text-secondary)] mb-1">
                                         <span>Tốc độ</span>
                                         <span>{settings.ttsSettings.playbackRate}x</span>
                                     </div>
@@ -726,7 +755,7 @@ const ChapterContent: React.FC<ChapterContentProps> = ({
                                         step="0.1"
                                         value={settings.ttsSettings.playbackRate}
                                         onChange={e => handleTtsSettingChange('playbackRate', parseFloat(e.target.value))}
-                                        className="w-full h-1 bg-slate-600 rounded-lg appearance-none cursor-pointer accent-[var(--theme-accent-primary)] hover:accent-[var(--theme-accent-primary)]"
+                                        className="w-full h-1 bg-[var(--theme-text-primary)]/20 rounded-lg appearance-none cursor-pointer accent-[var(--theme-accent-primary)]"
                                     />
                                 </div>
                             </div>
@@ -734,7 +763,7 @@ const ChapterContent: React.FC<ChapterContentProps> = ({
                     )}
 
                     <div className="w-full flex items-center gap-2 mb-1">
-                        <span className="text-[10px] text-slate-300 min-w-[35px] text-right font-mono">{formatTime(ttsCurrentTime)}</span>
+                        <span className="text-[10px] text-[var(--theme-text-secondary)] min-w-[35px] text-right font-mono">{formatTime(ttsCurrentTime)}</span>
                         <input
                             type="range"
                             min="0"
@@ -742,85 +771,93 @@ const ChapterContent: React.FC<ChapterContentProps> = ({
                             step="0.1"
                             value={ttsProgress}
                             onChange={handleSeek}
-                            className="w-full h-1 bg-slate-600 rounded-lg appearance-none cursor-pointer accent-[var(--theme-accent-primary)] hover:accent-[var(--theme-accent-primary)]"
+                            className="w-full h-1 bg-[var(--theme-text-primary)]/20 rounded-lg appearance-none cursor-pointer accent-[var(--theme-accent-primary)] hover:accent-[var(--theme-accent-primary)]"
                         />
-                        <span className="text-[10px] text-slate-400 min-w-[35px] font-mono">{formatTime(ttsDuration)}</span>
+                        <span className="text-[10px] text-[var(--theme-text-secondary)] min-w-[35px] font-mono">{formatTime(ttsDuration)}</span>
                     </div>
 
-                    <div className="flex items-center gap-3">
-                        <button 
-                            onClick={() => setIsPlaylistOpen(!isPlaylistOpen)}
-                            className={`p-1 rounded-full hover:text-white transition-colors ${isPlaylistOpen ? 'text-[var(--theme-accent-primary)] bg-slate-700' : 'text-slate-300 hover:bg-white/10'}`}
-                            title="Danh sách phát"
-                        >
-                            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                                <path strokeLinecap="round" strokeLinejoin="round" d="M4 6h16M4 12h16M4 18h16" />
-                            </svg>
-                        </button>
-
-                        <button 
-                            onClick={() => onTtsChunkChange(ttsCurrentChunkIndex - 1)} 
-                            disabled={ttsCurrentChunkIndex === 0} 
-                            className="p-1 text-slate-300 hover:text-white disabled:opacity-30 rounded-full hover:bg-white/10"
-                            title="Đoạn trước"
-                        >
-                            <BackwardStepIcon className="w-5 h-5 text-white" />
-                        </button>
-                        
-                        <button 
-                            onClick={handleFooterPlayPause} 
-                            className="w-8 h-8 flex items-center justify-center bg-[var(--theme-accent-primary)] hover:brightness-110 text-white rounded-full transition-transform hover:scale-105 shadow-md border border-[var(--theme-accent-primary)]/50"
-                            disabled={ttsStatus === 'loading'}
-                        >
-                            {ttsStatus === 'loading' ? <SpinnerIcon className="w-4 h-4 animate-spin" /> : (ttsStatus === 'playing' ? <PauseIcon className="w-4 h-4"/> : <PlayIcon className="w-4 h-4 ml-0.5"/>)}
-                        </button>
-
-                        <button 
-                            onClick={() => onTtsChunkChange(ttsCurrentChunkIndex + 1)} 
-                            disabled={ttsCurrentChunkIndex >= ttsTextChunks.length - 1} 
-                            className="p-1 text-slate-300 hover:text-white disabled:opacity-30 rounded-full hover:bg-white/10"
-                            title="Đoạn sau"
-                        >
-                            <ForwardStepIcon className="w-5 h-5 text-white" />
-                        </button>
-
-                        <div className="w-px h-4 bg-slate-600 mx-1 opacity-50"></div>
-                        
-                        {/* Volume Control - Visible directly in main UI */}
-                        <div className="flex items-center gap-2 group mr-1">
-                            <VolumeHighIcon className="w-4 h-4 text-slate-300 group-hover:text-white" />
-                            <input
-                                type="range"
-                                min="0"
-                                max="1"
-                                step="0.1"
-                                value={settings.ttsSettings.volume}
-                                onChange={e => handleTtsSettingChange('volume', parseFloat(e.target.value))}
-                                className="w-16 h-1 bg-slate-600 rounded-lg appearance-none cursor-pointer accent-[var(--theme-accent-primary)] hover:accent-[var(--theme-accent-primary)]"
-                                title={`Âm lượng: ${Math.round(settings.ttsSettings.volume * 100)}%`}
-                            />
+                    <div className="w-full flex items-center justify-between gap-2 md:justify-center md:gap-4">
+                        {/* Left Control: Playlist */}
+                        <div className="flex items-center">
+                             <button 
+                                onClick={togglePlaylist}
+                                className={`p-2 rounded-full transition-colors ${isPlaylistOpen ? 'text-[var(--theme-accent-primary)] bg-[var(--theme-bg-base)]' : 'text-[var(--theme-text-secondary)] hover:text-[var(--theme-text-primary)] hover:bg-[var(--theme-bg-base)]'}`}
+                                title="Danh sách phát"
+                            >
+                                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                    <path strokeLinecap="round" strokeLinejoin="round" d="M4 6h16M4 12h16M4 18h16" />
+                                </svg>
+                            </button>
                         </div>
 
-                        {/* TTS Settings Toggle Button */}
-                        <button 
-                            onClick={() => setIsTtsSettingsOpen(!isTtsSettingsOpen)}
-                            className={`p-1 rounded-full hover:text-white transition-colors ${isTtsSettingsOpen ? 'text-[var(--theme-accent-primary)] bg-slate-700' : 'text-slate-300 hover:bg-white/10'}`}
-                            title="Cấu hình giọng đọc"
-                        >
-                            <SlidersIcon className="w-4 h-4" />
-                        </button>
+                        {/* Center Controls: Prev - Play - Next */}
+                        <div className="flex items-center gap-2 sm:gap-4">
+                            <button 
+                                onClick={() => onTtsChunkChange(ttsCurrentChunkIndex - 1)} 
+                                disabled={ttsCurrentChunkIndex === 0} 
+                                className="p-1 text-[var(--theme-text-secondary)] hover:text-[var(--theme-text-primary)] disabled:opacity-30 rounded-full hover:bg-[var(--theme-bg-base)]"
+                                title="Đoạn trước"
+                            >
+                                <BackwardStepIcon className="w-6 h-6" />
+                            </button>
+                            
+                            {/* Updated Play Button - Removed Border */}
+                            <button 
+                                onClick={handleFooterPlayPause} 
+                                className="w-10 h-10 flex items-center justify-center bg-[var(--theme-accent-primary)] hover:brightness-110 text-white rounded-full transition-transform hover:scale-105 shadow-md"
+                                disabled={ttsStatus === 'loading'}
+                            >
+                                {ttsStatus === 'loading' ? <SpinnerIcon className="w-5 h-5 animate-spin" /> : (ttsStatus === 'playing' ? <PauseIcon className="w-5 h-5"/> : <PlayIcon className="w-5 h-5 ml-0.5"/>)}
+                            </button>
 
-                        <button 
-                            onClick={handleClosePlayer} 
-                            className="p-1 rounded-full text-slate-400 hover:text-white hover:bg-slate-700 transition-colors"
-                            title="Đóng trình phát"
-                        >
-                            <CloseIcon className="w-4 h-4"/>
-                        </button>
+                            <button 
+                                onClick={() => onTtsChunkChange(ttsCurrentChunkIndex + 1)} 
+                                disabled={ttsCurrentChunkIndex >= ttsTextChunks.length - 1} 
+                                className="p-1 text-[var(--theme-text-secondary)] hover:text-[var(--theme-text-primary)] disabled:opacity-30 rounded-full hover:bg-[var(--theme-bg-base)]"
+                                title="Đoạn sau"
+                            >
+                                <ForwardStepIcon className="w-6 h-6" />
+                            </button>
+                        </div>
+
+                        {/* Right Controls: Settings & Close */}
+                        <div className="flex items-center gap-1">
+                            
+                            {/* Volume Control - Hidden on mobile to save space */}
+                            <div className="items-center gap-2 group mr-1 hidden sm:flex">
+                                <VolumeHighIcon className="w-4 h-4 text-[var(--theme-text-secondary)] group-hover:text-[var(--theme-text-primary)]" />
+                                <input
+                                    type="range"
+                                    min="0"
+                                    max="1"
+                                    step="0.1"
+                                    value={settings.ttsSettings.volume}
+                                    onChange={e => handleTtsSettingChange('volume', parseFloat(e.target.value))}
+                                    className="w-16 h-1 bg-[var(--theme-text-primary)]/20 rounded-lg appearance-none cursor-pointer accent-[var(--theme-accent-primary)]"
+                                    title={`Âm lượng: ${Math.round(settings.ttsSettings.volume * 100)}%`}
+                                />
+                            </div>
+
+                            <button 
+                                onClick={toggleTtsSettings}
+                                className={`p-2 rounded-full transition-colors ${isTtsSettingsOpen ? 'text-[var(--theme-accent-primary)] bg-[var(--theme-bg-base)]' : 'text-[var(--theme-text-secondary)] hover:text-[var(--theme-text-primary)] hover:bg-[var(--theme-bg-base)]'}`}
+                                title="Cấu hình giọng đọc"
+                            >
+                                <SlidersIcon className="w-5 h-5" />
+                            </button>
+
+                            <button 
+                                onClick={handleClosePlayer} 
+                                className="p-2 rounded-full text-[var(--theme-text-secondary)] hover:text-[var(--theme-text-primary)] hover:bg-[var(--theme-bg-base)] transition-colors"
+                                title="Đóng trình phát"
+                            >
+                                <CloseIcon className="w-5 h-5"/>
+                            </button>
+                        </div>
                     </div>
                 </div>
 
-                <div>
+                <div className="hidden md:block">
                     <button onClick={() => setIsSettingsVisible(true)} className="bg-[var(--theme-bg-surface)] brightness-125 hover:brightness-150 text-[var(--theme-text-primary)] p-2 rounded-lg transition-all duration-300" title="Cài đặt">
                         <CogIcon className="w-6 h-6" />
                     </button>
@@ -854,7 +891,7 @@ const ChapterContent: React.FC<ChapterContentProps> = ({
           >
             Chương sau
           </button>
-          <div className="flex items-center gap-2 border-l border-[var(--theme-border)]/50 pl-2 sm:pl-3">
+          <div className="flex items-center gap-2 pl-2 sm:pl-3">
              <button
                 onClick={handleTtsButtonClick}
                 className={`flex-shrink-0 text-white p-2 rounded-lg transition-colors duration-200 bg-[var(--theme-accent-primary)] hover:brightness-110 disabled:opacity-50 disabled:cursor-not-allowed`}
@@ -864,7 +901,7 @@ const ChapterContent: React.FC<ChapterContentProps> = ({
                 {ttsStatus === 'loading' ? <SpinnerIcon className="h-6 w-6 animate-spin" /> : <PlayIcon className="h-6 w-6" />}
             </button>
           </div>
-          <div ref={autoScrollButtonRefBottom} className="relative flex-shrink-0 border-l border-[var(--theme-border)]/50 pl-2 sm:pl-3">
+          <div ref={autoScrollButtonRefBottom} className="relative flex-shrink-0 pl-2 sm:pl-3">
             <button 
                 onClick={() => handleAutoScrollButtonClick('bottom')} 
                 className={`p-2 rounded-lg transition-all duration-300 ${isAutoScrolling ? 'bg-[var(--theme-accent-primary)] text-white' : 'bg-[var(--theme-bg-surface)] brightness-125 hover:brightness-150 text-[var(--theme-text-primary)]'}`}
@@ -1002,6 +1039,69 @@ const ChapterContent: React.FC<ChapterContentProps> = ({
         )}
       </div>
       
+      {/* Popovers rendered here to escape bottom nav stacking context */}
+      {isAudioPlayerVisible && isPlaylistOpen && (
+        <div className="fixed bottom-24 left-4 right-4 md:bottom-28 md:left-1/2 md:-translate-x-1/2 md:w-96 md:max-w-none bg-[var(--theme-bg-surface)] border border-[var(--theme-border)] rounded-lg shadow-xl overflow-y-auto z-[100] p-2 animate-fade-in-up max-h-[50vh]">
+            <div className="flex justify-between items-center mb-2 px-1 border-b border-[var(--theme-border)] pb-1">
+                <span className="text-xs font-bold text-[var(--theme-text-primary)]">Danh sách phát ({chunkMetadata.length} đoạn)</span>
+                <button onClick={() => setIsPlaylistOpen(false)} className="text-[var(--theme-text-secondary)] hover:text-[var(--theme-text-primary)]"><CloseIcon className="w-4 h-4"/></button>
+            </div>
+            <ul className="space-y-1">
+                {chunkMetadata.map((chunk) => (
+                    <li key={chunk.index}>
+                        <button 
+                            onClick={() => handleJumpToChunk(chunk.index)}
+                            className={`w-full text-left text-xs p-2 rounded flex items-center gap-2 transition-colors ${chunk.index === ttsCurrentChunkIndex ? 'bg-[var(--theme-accent-primary)] text-white' : 'hover:bg-[var(--theme-bg-base)] text-[var(--theme-text-secondary)]'}`}
+                        >
+                            {chunk.index === ttsCurrentChunkIndex && ttsStatus === 'playing' && <SpinnerIcon className="w-3 h-3 animate-spin"/>}
+                            <span className="font-mono opacity-50">#{chunk.index + 1}</span>
+                            <span className="truncate">{chunk.text.substring(0, 40)}...</span>
+                        </button>
+                    </li>
+                ))}
+            </ul>
+        </div>
+      )}
+
+      {isAudioPlayerVisible && isTtsSettingsOpen && (
+        <div className="fixed bottom-24 left-4 right-4 md:bottom-28 md:left-1/2 md:-translate-x-1/2 md:w-64 md:max-w-none bg-[var(--theme-bg-surface)] border border-[var(--theme-border)] rounded-lg shadow-xl p-3 z-[100] animate-fade-in-up">
+            <div className="flex justify-between items-center mb-3">
+                <span className="text-xs font-bold text-[var(--theme-text-primary)]">Cấu hình giọng đọc</span>
+                <button onClick={() => setIsTtsSettingsOpen(false)} className="text-[var(--theme-text-secondary)] hover:text-[var(--theme-text-primary)]"><CloseIcon className="w-4 h-4"/></button>
+            </div>
+            <div className="space-y-3">
+                <div>
+                    <label className="block text-[10px] text-[var(--theme-text-secondary)] mb-1">Giọng đọc</label>
+                    <select
+                        value={settings.ttsSettings.voice}
+                        onChange={e => handleTtsSettingChange('voice', e.target.value)}
+                        className="w-full bg-[var(--theme-bg-base)] border border-[var(--theme-border)] rounded p-1 text-xs text-[var(--theme-text-primary)] focus:outline-none focus:border-[var(--theme-accent-primary)]"
+                    >
+                        <option value="">Mặc định</option>
+                        {availableSystemVoices.map(voice => (
+                            <option key={voice.voiceURI} value={voice.voiceURI}>{voice.name}</option>
+                        ))}
+                    </select>
+                </div>
+                <div>
+                    <div className="flex justify-between text-[10px] text-[var(--theme-text-secondary)] mb-1">
+                        <span>Tốc độ</span>
+                        <span>{settings.ttsSettings.playbackRate}x</span>
+                    </div>
+                    <input
+                        type="range"
+                        min="0.5"
+                        max="2.0"
+                        step="0.1"
+                        value={settings.ttsSettings.playbackRate}
+                        onChange={e => handleTtsSettingChange('playbackRate', parseFloat(e.target.value))}
+                        className="w-full h-1 bg-[var(--theme-text-primary)]/20 rounded-lg appearance-none cursor-pointer accent-[var(--theme-accent-primary)]"
+                    />
+                </div>
+            </div>
+        </div>
+      )}
+
       {popoverTarget && autoScrollPopover}
 
       <div className={`fixed bottom-0 left-0 right-0 z-10 py-4 bg-[var(--theme-bg-base)]/95 backdrop-blur-lg border-t border-[var(--theme-border)] shadow-lg transition-transform duration-300 ${isNavBarVisible ? 'translate-y-0' : 'translate-y-full'}`}>
