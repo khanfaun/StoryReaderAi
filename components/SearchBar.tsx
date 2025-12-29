@@ -1,14 +1,14 @@
+
 import React, { useState } from 'react';
-import { UploadIcon, QuestionMarkCircleIcon } from './icons';
+import { QuestionMarkCircleIcon } from './icons';
 
 interface SearchBarProps {
   onSearch: (query: string) => void;
   isLoading: boolean;
-  onEbookImport: () => void;
   onOpenHelpModal: () => void;
 }
 
-const SearchBar: React.FC<SearchBarProps> = ({ onSearch, isLoading, onEbookImport, onOpenHelpModal }) => {
+const SearchBar: React.FC<SearchBarProps> = ({ onSearch, isLoading, onOpenHelpModal }) => {
   const [query, setQuery] = useState('');
 
   const handleSearch = (e: React.FormEvent) => {
@@ -19,48 +19,37 @@ const SearchBar: React.FC<SearchBarProps> = ({ onSearch, isLoading, onEbookImpor
   };
 
   return (
-    <div className="w-full max-w-3xl mx-auto flex flex-col sm:flex-row items-center gap-4">
+    <div className="w-full max-w-lg mx-auto flex items-center gap-2">
       <form onSubmit={handleSearch} className="flex-grow w-full">
-        <div className="flex items-center border-b-2 border-[var(--theme-accent-primary)] py-2">
+        <div className="flex items-center border-b border-[var(--theme-accent-primary)] py-1">
           <input
-            className="appearance-none bg-transparent border-none w-full text-[var(--theme-text-primary)] mr-3 py-1 px-2 leading-tight focus:outline-none"
+            className="appearance-none bg-transparent border-none w-full text-[var(--theme-text-primary)] mr-3 py-1 px-2 leading-tight focus:outline-none text-sm"
             type="text"
-            placeholder="Nhập tên truyện hoặc dán URL..."
+            placeholder="Tìm truyện hoặc dán URL..."
             aria-label="Tên truyện hoặc URL"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             disabled={isLoading}
           />
           <button
-            className="flex-shrink-0 bg-[var(--theme-accent-primary)] hover:brightness-90 border-[var(--theme-accent-primary)] hover:border-[var(--theme-accent-primary)]/90 text-sm border-4 text-white py-1 px-4 rounded-lg disabled:bg-slate-600 disabled:cursor-not-allowed transition-all duration-300"
+            className="flex-shrink-0 bg-[var(--theme-accent-primary)] hover:brightness-90 border-[var(--theme-accent-primary)] text-xs text-white py-1 px-3 rounded disabled:bg-slate-600 disabled:cursor-not-allowed transition-all duration-300"
             type="submit"
             disabled={isLoading}
           >
-            {isLoading ? 'Đang tìm...' : 'Tìm kiếm'}
+            {isLoading ? '...' : 'Tìm'}
           </button>
         </div>
       </form>
-      <div className="flex items-center gap-2">
-          <button
-            type="button"
-            onClick={onEbookImport}
-            className="flex-shrink-0 w-full sm:w-auto bg-transparent border-2 border-[var(--theme-accent-secondary)] hover:bg-[var(--theme-accent-secondary)] hover:text-slate-900 text-sm text-[var(--theme-accent-secondary)] font-semibold py-2 px-4 rounded-lg disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-300 flex items-center justify-center"
-            disabled={isLoading}
-          >
-            <UploadIcon className="w-5 h-5 mr-2" />
-            <span>Nhập Ebook</span>
-          </button>
-          <button
-            type="button"
-            onClick={onOpenHelpModal}
-            className="flex-shrink-0 p-2 rounded-full text-[var(--theme-text-secondary)] hover:bg-[var(--theme-border)] hover:text-[var(--theme-text-primary)] transition-colors duration-200"
-            aria-label="Mẹo tìm kiếm"
-            disabled={isLoading}
-            title="Mẹo tìm truyện nhanh"
-          >
-            <QuestionMarkCircleIcon className="w-7 h-7" />
-          </button>
-      </div>
+      <button
+        type="button"
+        onClick={onOpenHelpModal}
+        className="flex-shrink-0 p-1.5 rounded-full text-[var(--theme-text-secondary)] hover:bg-[var(--theme-border)] hover:text-[var(--theme-text-primary)] transition-colors duration-200"
+        aria-label="Mẹo tìm kiếm"
+        disabled={isLoading}
+        title="Mẹo tìm truyện nhanh"
+      >
+        <QuestionMarkCircleIcon className="w-5 h-5" />
+      </button>
     </div>
   );
 };

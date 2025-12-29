@@ -1,3 +1,4 @@
+
 import React, { useState, useRef } from 'react';
 import type { CharacterStats } from '../types';
 import LoadingSpinner from './LoadingSpinner';
@@ -12,11 +13,12 @@ interface CharacterPrimaryPanelProps {
   onStatsChange: (newStats: CharacterStats) => void;
   onDataLoaded: () => void;
   onReanalyze: () => void;
+  onStopAnalysis: () => void;
 }
 
 type Tab = 'status' | 'realmSystem' | 'inventory' | 'skills' | 'equipment' | 'data';
 
-const CharacterPrimaryPanel: React.FC<CharacterPrimaryPanelProps> = ({ stats, isAnalyzing, onStatsChange, onDataLoaded, onReanalyze }) => {
+const CharacterPrimaryPanel: React.FC<CharacterPrimaryPanelProps> = ({ stats, isAnalyzing, onStatsChange, onDataLoaded, onReanalyze, onStopAnalysis }) => {
   const [activeTab, setActiveTab] = useState<Tab>('status');
   const [modalState, setModalState] = useState<{ isOpen: boolean; type: EntityType | null; data: any | null }>({ isOpen: false, type: null, data: null });
   const [deleteConfirmation, setDeleteConfirmation] = useState<{ type: EntityType; entity: any; } | null>(null);
@@ -316,16 +318,27 @@ const CharacterPrimaryPanel: React.FC<CharacterPrimaryPanelProps> = ({ stats, is
                   </svg>
               )}
           </div>
-          {!isAnalyzing && (
-            <button 
-              onClick={onReanalyze} 
-              className="bg-[var(--theme-accent-secondary)] text-slate-900 font-semibold text-xs px-3 py-1 rounded-md hover:brightness-110 transition-colors"
-              aria-label="Phân tích lại thông tin nhân vật"
-              title="Phân tích lại"
-            >
-              Phân tích lại
-            </button>
-          )}
+          <div className="flex items-center gap-2">
+            {isAnalyzing ? (
+                <button 
+                  onClick={onStopAnalysis} 
+                  className="bg-rose-600 text-white font-semibold text-xs px-3 py-1 rounded-md hover:bg-rose-500 transition-colors animate-pulse"
+                  aria-label="Dừng phân tích"
+                  title="Dừng phân tích"
+                >
+                  Dừng phân tích
+                </button>
+            ) : (
+                <button 
+                  onClick={onReanalyze} 
+                  className="bg-[var(--theme-accent-secondary)] text-slate-900 font-semibold text-xs px-3 py-1 rounded-md hover:brightness-110 transition-colors"
+                  aria-label="Phân tích lại thông tin nhân vật"
+                  title="Phân tích lại"
+                >
+                  Phân tích lại
+                </button>
+            )}
+          </div>
         </div>
         
         <div className="p-4 flex flex-wrap gap-2 border-b border-[var(--theme-border)] bg-[var(--theme-bg-base)]/50">

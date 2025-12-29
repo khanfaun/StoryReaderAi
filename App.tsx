@@ -1,7 +1,8 @@
-import React, { useState, useCallback, useEffect, useRef } from 'react';
+
+import React, { useState, useCallback, useEffect, useRef, useMemo } from 'react';
 import type { Story, Chapter, CharacterStats, ReadingSettings, ReadingHistoryItem, ChatMessage, PartialStory } from './types';
-import { searchStory, getChapterContent, getStoryDetails, getStoryFromUrl, parseHtml } from './services/truyenfullService';
-import { analyzeChapterForCharacterStats, chatWithEbook, chatWithChapterContent, validateApiKey, analyzeChapterForPrimaryCharacter, analyzeChapterForWorldInfo } from './services/geminiService';
+import { searchStory, getChapterContent, getStoryDetails, getStoryFromUrl, parseHtml, parseChapterContentFromDoc, parseStoryDetailsFromDoc } from './services/truyenfullService';
+import { analyzeChapterForCharacterStats, chatWithEbook, chatWithChapterContent, validateApiKey, analyzeChapterForPrimaryCharacter, analyzeChapterForWorldInfo, rewriteChapterContent } from './services/geminiService';
 import { getCachedChapter, setCachedChapter } from './services/cacheService';
 import { getStoryState, saveStoryState as saveStoryStateLocal, mergeChapterStats } from './services/storyStateService';
 import { useReadingSettings } from './hooks/useReadingSettings';
@@ -27,6 +28,9 @@ import ConfirmationModal from './components/ConfirmationModal';
 import ApiKeyModal from './components/ApiKeyModal';
 import UpdateModal from './components/UpdateModal';
 import HelpModal from './components/HelpModal';
+import ManualImportModal from './components/ManualImportModal';
+import StoryEditModal from './components/StoryEditModal';
+import { PlusIcon, CloseIcon, CheckIcon, UploadIcon } from './components/icons';
 
 
 declare var JSZip: any;
@@ -35,8 +39,67 @@ interface EbookHandler {
   zip: any; // JSZip instance
 }
 
+interface ManualImportState {
+    isOpen: boolean;
+    url: string;
+    message: string;
+    type: 'chapter' | 'story_details';
+    source: string;
+    contextData?: any; // To pass extra data like current story object
+}
+
+type SortOption = 'newest' | 'oldest' | 'az' | 'za';
+type TtsStatus = 'idle' | 'loading' | 'playing' | 'paused' | 'error' | 'ready';
+
+interface TtsState {
+  status: TtsStatus;
+  textChunks: string[];
+  currentChunkIndex: number;
+  error: string | null;
+}
+
+
+const UPDATE_MODAL_VERSION = 'update_modal_seen_v2'; // Bump version for new features
+
+// Hàm chia đoạn thông minh: Tách theo câu để tua chính xác hơn
+function splitChapterIntoChunks(text: string): string[] {
+    if (!text || text.trim().length === 0) return [];
+    
+    // Tách dựa trên các dấu kết thúc câu (. ! ? ; xuống dòng) nhưng vẫn giữ lại dấu
+    // Regex này tìm chuỗi không phải dấu kết thúc câu, theo sau là dấu kết thúc câu
+    const matches = text.match(/[^.!?\n]+[.!?\n]+|[^.!?\n]+$/g);
+    
+    if (!matches) return [text];
+
+    // Gom nhóm các câu quá ngắn để tránh việc chuyển đoạn quá liên tục
+    const chunks: string[] = [];
+    let currentChunk = "";
+    
+    // Ngưỡng ký tự tối thiểu cho một chunk.
+    // Đặt ở mức 300 ký tự (khoảng 3-4 câu).
+    // Đây là "Điểm ngọt" (Sweet Spot): đủ dài để không bị ngắt quãng liên tục,
+    // nhưng đủ ngắn để trình duyệt tải kịp, tránh hiện tượng lag/giật khi đọc.
+    const MIN_CHUNK_LENGTH = 300; 
+
+    for (const sentence of matches) {
+        currentChunk += sentence;
+        if (currentChunk.length >= MIN_CHUNK_LENGTH) {
+            chunks.push(currentChunk.trim());
+            currentChunk = "";
+        }
+    }
+    
+    if (currentChunk.trim().length > 0) {
+        chunks.push(currentChunk.trim());
+    }
+
+    return chunks;
+}
+
+
 const App: React.FC = () => {
   const [searchResults, setSearchResults] = useState<Story[] | null>(null);
+  const [localStories, setLocalStories] = useState<Story[]>([]);
   const [story, setStory] = useState<Story | null>(null);
   const [selectedChapterIndex, setSelectedChapterIndex] = useState<number | null>(null);
   const [chapterContent, setChapterContent] = useState<string | null>(null);
@@ -47,6 +110,7 @@ const App: React.FC = () => {
   
   const [cumulativeStats, setCumulativeStats] = useState<CharacterStats | null>(null);
   const [isAnalyzing, setIsAnalyzing] = useState<boolean>(false);
+  const [isRewriting, setIsRewriting] = useState<boolean>(false);
   const [isPanelVisible, setIsPanelVisible] = useState<boolean>(false);
   
   const [readChapters, setReadChapters] = useState<Set<string>>(new Set());
@@ -73,14 +137,113 @@ const App: React.FC = () => {
   const [apiKey, setApiKey] = useState<string | null>(apiKeyService.getApiKey());
   const [isApiKeyModalOpen, setIsApiKeyModalOpen] = useState<boolean>(!apiKeyService.hasApiKey());
   const [tokenUsage, setTokenUsage] = useState<apiKeyService.TokenUsage>(apiKeyService.getTokenUsage());
-
+  
+  // State for TTS (Text-to-Speech) using Web Speech API
+  const [ttsState, setTtsState] = useState<TtsState>({
+    status: 'idle', textChunks: [], currentChunkIndex: 0, error: null,
+  });
+  const [availableSystemVoices, setAvailableSystemVoices] = useState<SpeechSynthesisVoice[]>([]);
+  // Removed utteranceRef from App as it is now managed in ChapterContent
 
   // State for Update Modal
-  const [isUpdateModalOpen, setIsUpdateModalOpen] = useState(true);
+  const [isUpdateModalOpen, setIsUpdateModalOpen] = useState(false);
 
   // State for Help Modal
   const [isHelpModalOpen, setIsHelpModalOpen] = useState(false);
+  
+  // State for Manual Import Modal
+  const [manualImportState, setManualImportState] = useState<ManualImportState>({
+      isOpen: false,
+      url: '',
+      message: '',
+      type: 'chapter',
+      source: ''
+  });
+  
+  // State for Create Story Modal
+  const [isCreateStoryModalOpen, setIsCreateStoryModalOpen] = useState(false);
 
+  // Filter & Sort State
+  const [sortOption, setSortOption] = useState<SortOption>('newest');
+  const [filterSource, setFilterSource] = useState<string | null>(null);
+  const [filterAuthor, setFilterAuthor] = useState<string | null>(null);
+  const [filterTags, setFilterTags] = useState<string[]>([]);
+  const [isTagDropdownOpen, setIsTagDropdownOpen] = useState(false);
+  const tagDropdownRef = useRef<HTMLDivElement>(null);
+
+  // Reference to track the current operation ID. 
+  const operationIdRef = useRef<number>(0);
+  
+  // Handle click outside tag dropdown
+  useEffect(() => {
+      const handleClickOutside = (event: MouseEvent) => {
+          if (tagDropdownRef.current && !tagDropdownRef.current.contains(event.target as Node)) {
+              setIsTagDropdownOpen(false);
+          }
+      };
+      document.addEventListener('mousedown', handleClickOutside);
+      return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  // Load available system voices with Priority Logic
+  useEffect(() => {
+    const loadVoices = () => {
+        let allVoices = window.speechSynthesis.getVoices();
+        if (allVoices.length === 0) return;
+
+        // Sorting Logic:
+        // 1. Vietnamese voices (lang starts with 'vi')
+        // 2. Other voices
+        // 3. Deprioritize: English ('en') and voices marked as 'default' (often robotic system defaults)
+        allVoices.sort((a, b) => {
+            const isViA = a.lang.startsWith('vi');
+            const isViB = b.lang.startsWith('vi');
+            
+            // Priority 1: Vietnamese
+            if (isViA && !isViB) return -1;
+            if (!isViA && isViB) return 1;
+            
+            // Priority 2: Push English/Default to bottom
+            // Check if voice is English OR Default system voice
+            const isLowPriorityA = a.lang.startsWith('en') || a.default;
+            const isLowPriorityB = b.lang.startsWith('en') || b.default;
+
+            if (isLowPriorityA && !isLowPriorityB) return 1; // A is low prio -> move down
+            if (!isLowPriorityA && isLowPriorityB) return -1; // B is low prio -> move down
+
+            return a.name.localeCompare(b.name);
+        });
+
+        setAvailableSystemVoices(allVoices);
+
+        // Auto-selection Logic
+        const currentVoiceURI = settings.ttsSettings.voice;
+        // Check if current voice is valid in the loaded list
+        const isCurrentVoiceValid = allVoices.some(v => v.voiceURI === currentVoiceURI);
+        
+        // If current voice is invalid or empty, pick the best one from sorted list (VI first)
+        if (!isCurrentVoiceValid && allVoices.length > 0) {
+            setSettings({
+                ...settings,
+                ttsSettings: {
+                    ...settings.ttsSettings,
+                    voice: allVoices[0].voiceURI // First one is the best due to sorting
+                }
+            });
+        }
+    };
+
+    loadVoices();
+    
+    // Some browsers load voices asynchronously
+    window.speechSynthesis.onvoiceschanged = loadVoices;
+    
+    // Cleanup on unmount
+    return () => {
+        window.speechSynthesis.onvoiceschanged = null;
+        window.speechSynthesis.cancel();
+    }
+  }, [settings, setSettings]); // Add settings deps to allow auto-update
 
   const saveStoryState = useCallback((storyUrl: string, state: CharacterStats) => {
     saveStoryStateLocal(storyUrl, state);
@@ -102,21 +265,28 @@ const App: React.FC = () => {
     setError(null);
     const localHistory = getReadingHistory();
     const dbStories = await dbService.getAllStories();
-    const dbEbooks = dbStories.filter(s => s.source === 'Ebook');
+    setLocalStories(dbStories);
+    
+    // Use all DB stories for history, not just ebooks.
     const historyMap = new Map(localHistory.map(item => [item.url, item]));
-    dbEbooks.forEach(ebook => {
-      if (!historyMap.has(ebook.url)) {
-        const placeholderItem: ReadingHistoryItem = {
-          title: ebook.title, author: ebook.author, url: ebook.url,
-          source: ebook.source, imageUrl: ebook.imageUrl,
-          lastChapterUrl: ebook.chapters?.[0]?.url || '',
-          lastChapterTitle: ebook.chapters?.[0]?.title || 'Bắt đầu đọc',
-          lastReadTimestamp: 0
-        };
-        historyMap.set(ebook.url, placeholderItem);
+    
+    dbStories.forEach(dbStory => {
+      if (!historyMap.has(dbStory.url)) {
+           const placeholderItem: ReadingHistoryItem = {
+              title: dbStory.title, author: dbStory.author, url: dbStory.url,
+              source: dbStory.source, imageUrl: dbStory.imageUrl,
+              lastChapterUrl: dbStory.chapters?.[0]?.url || '',
+              lastChapterTitle: dbStory.chapters?.[0]?.title || 'Bắt đầu đọc',
+              lastReadTimestamp: 0
+           };
+           historyMap.set(dbStory.url, placeholderItem);
       }
     });
-    const combinedHistory = Array.from(historyMap.values()).sort((a, b) => b.lastReadTimestamp - a.lastReadTimestamp);
+
+    const combinedHistory = Array.from(historyMap.values())
+        .filter(item => item.lastReadTimestamp > 0) // Only show actually read items in history
+        .sort((a, b) => b.lastReadTimestamp - a.lastReadTimestamp);
+        
     setReadingHistory(combinedHistory);
     const savedSettingsRaw = localStorage.getItem('truyenReaderSettings');
     if (savedSettingsRaw) {
@@ -137,16 +307,36 @@ const App: React.FC = () => {
       setIsLoading(true);
       await reloadDataFromStorage();
       setTokenUsage(apiKeyService.getTokenUsage());
+      
+      const hasSeenUpdate = localStorage.getItem(UPDATE_MODAL_VERSION);
+      if (!hasSeenUpdate) {
+          setIsUpdateModalOpen(true);
+      }
+
       setIsLoading(false);
     };
 
     loadInitialData();
   }, [reloadDataFromStorage]);
 
+  const handleCloseUpdateModal = () => {
+      localStorage.setItem(UPDATE_MODAL_VERSION, 'true');
+      setIsUpdateModalOpen(false);
+  };
+
   const resetChat = () => {
     setChatMessages([]);
     setIsChatLoading(false);
   };
+  
+  const cleanupTts = useCallback(() => {
+    window.speechSynthesis.cancel();
+    setTtsState({ status: 'idle', textChunks: [], currentChunkIndex: 0, error: null });
+  }, []);
+  
+  useEffect(() => {
+      return () => cleanupTts();
+  }, [cleanupTts]);
 
   const handleApiError = useCallback((error: unknown) => {
         const errorMessage = error instanceof Error ? error.message : "Đã xảy ra lỗi không xác định.";
@@ -158,48 +348,56 @@ const App: React.FC = () => {
         }
   }, []);
   
-  const handleTokenUsageUpdate = useCallback((usageData?: { totalTokens: number }) => {
-    if (!usageData || !usageData.totalTokens || usageData.totalTokens === 0) return;
+  const handleTokenUsageUpdate = useCallback((usageData?: { totalTokens?: number, ttsCharacters?: number }) => {
+    if (!usageData || (!usageData.totalTokens && !usageData.ttsCharacters)) return;
     if (!apiKey) return;
+    
     setTokenUsage(prevUsage => {
-      const newTotal = prevUsage.totalTokens + usageData.totalTokens;
-      const newUsageState = { ...prevUsage, totalTokens: newTotal };
+      const newTotalTokens = prevUsage.totalTokens + (usageData.totalTokens || 0);
+      const newTtsChars = prevUsage.ttsCharacters + (usageData.ttsCharacters || 0);
+      const newUsageState = { ...prevUsage, totalTokens: newTotalTokens, ttsCharacters: newTtsChars };
       apiKeyService.saveTokenUsage(apiKey, newUsageState);
       return newUsageState;
     });
   }, [apiKey]);
     
-  // Central function to process content and run AI analysis
   const processAndAnalyzeContent = useCallback(async (storyToLoad: Story, chapterUrl: string, content: string) => {
+    const currentOpId = ++operationIdRef.current;
+    
     setChapterContent(content);
-    if (!apiKey) {
-      setError("Vui lòng thiết lập API Key để sử dụng tính năng phân tích nhân vật.");
-      setIsApiKeyModalOpen(true);
-      setCachedChapter(storyToLoad.url, chapterUrl, { content, stats: null });
-      return;
+    
+    try {
+        await setCachedChapter(storyToLoad.url, chapterUrl, { content, stats: null });
+    } catch (e) {
+        console.error("Failed to initial cache chapter", e);
     }
+    
+    if (!content || content.trim().length === 0 || !apiKey) return;
 
     setIsAnalyzing(true);
     try {
       const currentStats = getStoryState(storyToLoad.url) ?? {};
       const { data: chapterStats, usage } = await analyzeChapterForCharacterStats(apiKey, content, currentStats);
-      handleTokenUsageUpdate(usage);
+      
+      if (currentOpId !== operationIdRef.current) return; 
+
+      handleTokenUsageUpdate({ totalTokens: usage.totalTokens });
       const newState = mergeChapterStats(currentStats, chapterStats ?? {});
       setCumulativeStats(newState);
       saveStoryState(storyToLoad.url, newState);
-      setCachedChapter(storyToLoad.url, chapterUrl, { content, stats: chapterStats });
+      await setCachedChapter(storyToLoad.url, chapterUrl, { content, stats: chapterStats });
     } catch (analysisError) {
-      console.error("Analysis error, caching content only", analysisError);
+      if (currentOpId !== operationIdRef.current) return;
       handleApiError(analysisError);
-      setCachedChapter(storyToLoad.url, chapterUrl, { content, stats: null });
     } finally {
-      setIsAnalyzing(false);
+      if (currentOpId === operationIdRef.current) setIsAnalyzing(false);
     }
   }, [apiKey, handleApiError, handleTokenUsageUpdate, saveStoryState]);
 
   const fetchChapter = useCallback(async (storyToLoad: Story, chapterIndex: number) => {
     if (!storyToLoad || !storyToLoad.chapters || chapterIndex < 0 || chapterIndex >= storyToLoad.chapters.length) return;
     
+    cleanupTts();
     const chapter = storyToLoad.chapters[chapterIndex];
     setSelectedChapterIndex(chapterIndex);
     
@@ -210,133 +408,88 @@ const App: React.FC = () => {
     newReadChapters.add(chapter.url);
     localStorage.setItem(`readChapters_${storyToLoad.url}`, JSON.stringify(Array.from(newReadChapters)));
     
-    let cachedData = getCachedChapter(storyToLoad.url, chapter.url);
+    setError(null);
+    setChapterContent(null);
+    setIsChapterLoading(true);
+
+    const cachedData = await getCachedChapter(storyToLoad.url, chapter.url);
     if (cachedData) {
         setChapterContent(cachedData.content);
+        setIsChapterLoading(false); 
+        
         if (cachedData.stats) {
             const currentStats = getStoryState(storyToLoad.url) ?? {};
             const newState = mergeChapterStats(currentStats, cachedData.stats);
             setCumulativeStats(newState);
             saveStoryState(storyToLoad.url, newState);
+        } else {
+            processAndAnalyzeContent(storyToLoad, chapter.url, cachedData.content);
         }
         return;
     }
-
-    setIsChapterLoading(true);
-    setError(null);
-    setChapterContent(null);
     
     try {
+        let content = "";
         if (storyToLoad.source === 'Ebook' && ebookInstance) {
             const { zip } = ebookInstance;
-            const decodedUrl = decodeURIComponent(chapter.url);
+            const [filePath] = chapter.url.split('#');
+            const decodedUrl = decodeURIComponent(filePath);
             const chapterFile = zip.file(decodedUrl);
             if (!chapterFile) throw new Error(`Không thể tìm thấy tệp tin của chương "${decodedUrl}" bên trong Ebook.`);
+            
             const rawHtml = await chapterFile.async('string');
             const doc = parseHtml(rawHtml);
             const contentEl = doc.body;
             contentEl.querySelectorAll('a, sup, sub, script, style, img, svg').forEach((el: HTMLElement) => el.remove());
             contentEl.innerHTML = contentEl.innerHTML.replace(/<br\s*\/?>/gi, '\n');
             let text = (contentEl.textContent ?? '').trim();
-            if (!text) text = "Nội dung chương trống.";
-            await processAndAnalyzeContent(storyToLoad, chapter.url, text.replace(/\n\s*\n/g, '\n\n'));
+            content = (text || "Nội dung chương trống.").replace(/\n\s*\n/g, '\n\n');
+        } else if (storyToLoad.source === 'Local') {
+             content = "";
         } else {
-             const content = await getChapterContent(chapter, storyToLoad.source);
-             await processAndAnalyzeContent(storyToLoad, chapter.url, content);
+             content = await getChapterContent(chapter, storyToLoad.source);
         }
+        
+        processAndAnalyzeContent(storyToLoad, chapter.url, content);
+        
     } catch (err) {
         const error = err as Error;
-        setError(`Lỗi tải chương: ${error.message}. Vui lòng thử lại sau hoặc chọn chương khác.`);
+        const isConnectionError = error.message.includes('CONNECTION_FAILED') || error.message.includes('Proxy');
+        if (isConnectionError) {
+            setManualImportState({
+                isOpen: true,
+                url: chapter.url,
+                message: "Kết nối mạng không ổn định hoặc nguồn truyện chặn truy cập tự động. Bạn có thể tự tải file chương về và nhập vào đây để đọc.",
+                type: 'chapter',
+                source: storyToLoad.source,
+                contextData: { story: storyToLoad, chapterIndex }
+            });
+        }
+        setError(`Lỗi tải chương: ${error.message}.`);
     } finally {
         setIsChapterLoading(false);
     }
-  }, [readChapters, saveStoryState, ebookInstance, processAndAnalyzeContent, handleApiError]);
+  }, [readChapters, saveStoryState, ebookInstance, processAndAnalyzeContent, cleanupTts]);
 
-  const handleSearch = useCallback(async (query: string) => {
-    setIsDataLoading(true);
-    setError(null);
-    setStory(null);
-    setSearchResults(null);
-    setSelectedChapterIndex(null);
-    setChapterContent(null);
-    setCumulativeStats(null);
-    setReadChapters(new Set());
-    setEbookInstance(null);
-    resetChat();
-    
-    try {
-      const urlRegex = /^(https?):\/\/[^\s$.?#].[^\s]*$/i;
-      if (urlRegex.test(query)) {
-        const fullStory = await getStoryFromUrl(query);
-        setStory(fullStory);
-        setCumulativeStats(getStoryState(fullStory.url) ?? {});
-        const savedRead = localStorage.getItem(`readChapters_${fullStory.url}`);
-        if (savedRead) setReadChapters(new Set(JSON.parse(savedRead)));
-      } else {
-        const results = await searchStory(query);
-        setSearchResults(results);
-      }
-    } catch (err) {
-        handleApiError(err);
-    } finally {
-      setIsDataLoading(false);
-    }
-  }, [handleApiError]);
-  
-  const handleSelectStory = useCallback(async (selectedStory: Story) => {
-    setIsDataLoading(true);
-    setError(null);
-    setSearchResults(null);
-    setStory(null);
-    setEbookInstance(null);
-    resetChat();
-    
-    try {
-        const fullStory = await getStoryDetails(selectedStory);
-        setStory(fullStory);
-        setCumulativeStats(getStoryState(fullStory.url) ?? {});
-        const savedRead = localStorage.getItem(`readChapters_${fullStory.url}`);
-        if (savedRead) setReadChapters(new Set(JSON.parse(savedRead)));
-        else setReadChapters(new Set());
-    } catch (err) {
-        handleApiError(err);
-    } finally {
-        setIsDataLoading(false);
-    }
-  }, [handleApiError]);
+  const handleUpdateChapterContent = async (newContent: string) => {
+        if (!story || selectedChapterIndex === null || !story.chapters) return;
+        const chapter = story.chapters[selectedChapterIndex];
 
-  const handleSelectChapter = useCallback((chapter: Chapter) => {
-      if (!story || !story.chapters) return;
-      const index = story.chapters.findIndex(c => c.url === chapter.url);
-      if (index !== -1) {
-          window.scrollTo(0, 0);
-          fetchChapter(story, index);
-      }
-  }, [story, fetchChapter]);
+        setChapterContent(newContent);
 
-  const handleEbookImportClick = () => {
-    ebookFileRef.current?.click();
+        try {
+            await setCachedChapter(story.url, chapter.url, { 
+                content: newContent, 
+                stats: getStoryState(story.url)
+            });
+        } catch (e) {
+            setError("Không thể lưu nội dung chỉnh sửa vào bộ nhớ.");
+        }
   };
-  
-  const handleFileChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (!file) return;
 
-    setIsDataLoading(true);
-    setError(null);
-    setStory(null);
-    setSearchResults(null);
-    setSelectedChapterIndex(null);
-    setChapterContent(null);
-    setCumulativeStats(null);
-    setReadChapters(new Set());
-    setEbookInstance(null);
-    resetChat();
-   
-    try {
+  const parseEbookFile = async (file: File): Promise<Story> => {
       const zip = await JSZip.loadAsync(file);
       const parser = new DOMParser();
-
       const containerXmlText = await zip.file('META-INF/container.xml')?.async('string');
       if (!containerXmlText) throw new Error('File container.xml không hợp lệ hoặc không tồn tại.');
       const containerDoc = parser.parseFromString(containerXmlText, 'application/xml');
@@ -351,6 +504,11 @@ const App: React.FC = () => {
       const title = metadataEl.getElementsByTagName('dc:title')[0]?.textContent || 'Không có tiêu đề';
       const author = metadataEl.getElementsByTagName('dc:creator')[0]?.textContent || 'Không rõ tác giả';
       const description = metadataEl.getElementsByTagName('dc:description')[0]?.textContent || 'Không có mô tả.';
+
+      const tags: string[] = [];
+      Array.from(metadataEl.getElementsByTagName('dc:subject')).forEach(el => {
+          if (el.textContent) tags.push(el.textContent.trim());
+      });
 
       const manifestItems = opfDoc.getElementsByTagName('item');
       const manifestMap = new Map<string, { href: string; mediaType: string }>();
@@ -386,62 +544,346 @@ const App: React.FC = () => {
           }
         }
       }
-
-      const titleMap = new Map<string, string>();
-      const parseNavPoints = (element: Element, pathDir: string) => {
-        for (const point of Array.from(element.children).filter(c => c.tagName.toLowerCase() === 'navpoint')) {
-          const label = point.querySelector('navLabel > text')?.textContent?.trim();
-          const src = point.querySelector('content')?.getAttribute('src');
-          if (label && src) {
-            const chapterUrl = new URL(src.split('#')[0], `http://dummy.com/${pathDir}`).pathname.substring(1);
-            titleMap.set(chapterUrl, label);
-          }
-          parseNavPoints(point, pathDir);
-        }
+      
+      const resolvePath = (base: string, relative: string) => {
+          try {
+              const dummyBase = "http://dummy.com/";
+              const absUrl = new URL(relative, dummyBase + base).href;
+              const result = absUrl.replace(dummyBase, "");
+              return result;
+          } catch(e) { return relative; }
       };
 
-      if (navHref) { // EPUB 3
+      const tocChapters: Chapter[] = [];
+
+      if (navHref) { 
           const navXmlText = await zip.file(navHref).async('string');
           const navDoc = parser.parseFromString(navXmlText, 'text/html');
-          const tocNav = navDoc.querySelector('nav[epub\\:type="toc"]');
+          const tocNav = navDoc.querySelector('nav[epub\\:type="toc"]') || navDoc.querySelector('nav');
+          const navPathDir = navHref.substring(0, navHref.lastIndexOf('/') + 1);
+
           if (tocNav) {
-            for (const link of Array.from(tocNav.querySelectorAll('a'))) {
-              const href = link.getAttribute('href'), chapterTitle = link.textContent?.trim();
+            const links = tocNav.querySelectorAll('a');
+            for (const link of Array.from(links)) {
+              const href = link.getAttribute('href');
+              const chapterTitle = link.textContent?.trim();
               if (href && chapterTitle) {
-                const navPathDir = navHref.substring(0, navHref.lastIndexOf('/') + 1);
-                const chapterUrl = new URL(href.split('#')[0], `http://dummy.com/${navPathDir}`).pathname.substring(1);
-                titleMap.set(chapterUrl, chapterTitle);
+                const chapterUrl = resolvePath(navPathDir, href);
+                tocChapters.push({ title: chapterTitle, url: chapterUrl });
               }
             }
           }
-      } else { // EPUB 2
+      } else { 
           const ncxFileIdFromSpine = spineEl.getAttribute('toc');
           const ncxManifestItem = manifestMap.get(ncxFileIdFromSpine || ncxId || '');
           if (ncxManifestItem) {
             const ncxXmlText = await zip.file(ncxManifestItem.href).async('string');
             const ncxDoc = parser.parseFromString(ncxXmlText, 'application/xml');
-            const navMap = ncxDoc.querySelector('navMap');
-            if (navMap) {
-              const ncxPathDir = ncxManifestItem.href.substring(0, ncxManifestItem.href.lastIndexOf('/') + 1);
-              parseNavPoints(navMap, ncxPathDir);
+            const ncxPathDir = ncxManifestItem.href.substring(0, ncxManifestItem.href.lastIndexOf('/') + 1);
+            
+            const navPoints = ncxDoc.querySelectorAll('navPoint');
+            for (const point of Array.from(navPoints)) {
+                const label = point.querySelector('navLabel > text')?.textContent?.trim();
+                const contentSrc = point.querySelector('content')?.getAttribute('src');
+                if (label && contentSrc) {
+                    const chapterUrl = resolvePath(ncxPathDir, contentSrc);
+                    tocChapters.push({ title: label, url: chapterUrl });
+                }
             }
           }
       }
       
-      let chapters = spineChapters.map(c => ({ ...c, title: titleMap.get(decodeURIComponent(c.url)) || c.title }))
-        .filter(c => !['bìa', 'cover', 'mục lục', 'bản quyền'].some(kw => c.title.toLowerCase().includes(kw)));
-      if (chapters.length === 0 && spineChapters.length > 1) chapters = spineChapters.slice(1);
+      let chapters = tocChapters.length > 0 ? tocChapters : spineChapters;
+      
+      chapters = chapters.filter(c => !['bìa', 'cover', 'mục lục', 'bản quyền', 'copyright', 'table of contents'].some(kw => c.title.toLowerCase().includes(kw)));
+      
+      if (chapters.length === 0) chapters = spineChapters;
       if (chapters.length === 0) throw new Error("Không tìm thấy chương có nội dung trong file Ebook này.");
 
-      const ebookStory: Story = { title, author, imageUrl, source: 'Ebook', url: `ebook:${file.name}`, description, chapters };
+      const ebookStory: Story = { 
+          title, author, imageUrl, source: 'Ebook', 
+          url: `ebook:${file.name}`, description, chapters,
+          createdAt: Date.now(),
+          tags: tags
+      };
+      return ebookStory;
+  };
+
+  const handleSelectStory = useCallback(async (selectedStory: Story) => {
+      setIsDataLoading(true);
+      setError(null);
+      try {
+          let fullStory = selectedStory;
+          if ((!selectedStory.chapters || selectedStory.chapters.length === 0) && selectedStory.source !== 'Local' && selectedStory.source !== 'Ebook') {
+              fullStory = await getStoryDetails(selectedStory);
+          }
+          
+          if (story?.url !== fullStory.url) {
+               setSelectedChapterIndex(null);
+               setChapterContent(null);
+               setIsPanelVisible(false);
+          }
+
+          setStory(fullStory);
+          setSearchResults(null); 
+
+          const stats = getStoryState(fullStory.url);
+          setCumulativeStats(stats || {});
+
+          const savedRead = localStorage.getItem(`readChapters_${fullStory.url}`);
+          if (savedRead) setReadChapters(new Set(JSON.parse(savedRead)));
+          else setReadChapters(new Set());
+          
+          window.scrollTo(0, 0);
+
+      } catch (e) {
+          setError(`Lỗi tải thông tin truyện: ${(e as Error).message}`);
+      } finally {
+          setIsDataLoading(false);
+      }
+  }, [story]);
+
+  const handleRewriteChapter = useCallback(async () => {
+      if (!apiKey) {
+          setIsApiKeyModalOpen(true);
+          return;
+      }
+      if (!chapterContent || !story || selectedChapterIndex === null) {
+          return;
+      }
+      setIsRewriting(true);
+      try {
+          const { text, usage } = await rewriteChapterContent(apiKey, chapterContent);
+          handleTokenUsageUpdate({ totalTokens: usage.totalTokens });
+          await handleUpdateChapterContent(text);
+      } catch (err) {
+          handleApiError(err);
+      } finally {
+          setIsRewriting(false);
+      }
+  }, [apiKey, chapterContent, story, selectedChapterIndex, handleApiError, handleTokenUsageUpdate]);
+
+  const handleCreateChapter = async (targetStory: Story, title: string, content: string) => {
+     if (targetStory.source !== 'Local' && targetStory.source !== 'Ebook') {
+         setError("Chỉ có thể thêm chương cho truyện tự tạo hoặc Ebook.");
+         return;
+     }
+
+     const newChapter: Chapter = {
+         title,
+         url: `${targetStory.url}/chapter-${Date.now()}` 
+     };
+     
+     const updatedChapters = [...(targetStory.chapters || []), newChapter];
+     const updatedStory = { ...targetStory, chapters: updatedChapters };
+     
+     try {
+         await setCachedChapter(targetStory.url, newChapter.url, { content, stats: null });
+         
+         await dbService.saveStory(updatedStory);
+         
+         if (story?.url === updatedStory.url) {
+             setStory(updatedStory);
+         }
+         setLocalStories(prev => prev.map(s => s.url === updatedStory.url ? updatedStory : s));
+         
+     } catch (e) {
+         setError(`Lỗi tạo chương: ${(e as Error).message}`);
+     }
+  };
+
+  const handleSearch = async (query: string) => {
+    if (!query.trim()) return;
+    setIsDataLoading(true);
+    setError(null);
+    setSearchResults(null);
+    setStory(null);
+    setSelectedChapterIndex(null);
+    setChapterContent(null);
+    
+    try {
+      const results = await searchStory(query);
+      setSearchResults(results);
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setIsDataLoading(false);
+    }
+  };
+
+  const handleCreateStory = async (storyData: Partial<Story> & { ebookFile?: File }) => {
+     if (!storyData.title) return;
+     
+     const isEbook = !!storyData.ebookFile;
+     const source = isEbook ? 'Ebook' : 'Local';
+     const url = isEbook ? `ebook:${storyData.ebookFile!.name}` : `local:${Date.now()}`;
+
+     const newStory: Story = {
+         title: storyData.title,
+         author: storyData.author || 'Tự sáng tác',
+         imageUrl: storyData.imageUrl || '',
+         description: storyData.description || '',
+         source: source,
+         url: url,
+         chapters: storyData.chapters || [],
+         createdAt: Date.now(),
+         tags: storyData.tags || []
+     };
+     
+     try {
+         if (storyData.ebookFile) {
+             await dbService.saveEbook(newStory.url, storyData.ebookFile);
+         }
+
+         await dbService.saveStory(newStory);
+         setLocalStories(prev => [newStory, ...prev]);
+         
+         if (isEbook && storyData.ebookFile) {
+             const zip = await JSZip.loadAsync(storyData.ebookFile);
+             setEbookInstance({ zip });
+             setStory(newStory);
+             const newHistory = updateReadingHistory(newStory, newStory.chapters![0]);
+             setReadingHistory(newHistory);
+             let storyState = getStoryState(newStory.url);
+             setCumulativeStats(storyState ?? {});
+             const savedRead = localStorage.getItem(`readChapters_${newStory.url}`);
+             if (savedRead) setReadChapters(new Set(JSON.parse(savedRead)));
+         } else {
+             handleSelectStory(newStory);
+         }
+
+     } catch (e) {
+         setError(`Lỗi tạo truyện: ${(e as Error).message}`);
+     }
+  };
+
+  const handleUpdateStory = async (updatedStory: Story) => {
+      try {
+          await dbService.saveStory(updatedStory);
+          setStory(updatedStory);
+          setLocalStories(prev => prev.map(s => s.url === updatedStory.url ? updatedStory : s));
+          
+          const history = getReadingHistory();
+          const existingIndex = history.findIndex(item => item.url === updatedStory.url);
+          if (existingIndex > -1) {
+              history[existingIndex].title = updatedStory.title;
+              history[existingIndex].author = updatedStory.author;
+              history[existingIndex].imageUrl = updatedStory.imageUrl;
+              saveReadingHistory(history);
+              setReadingHistory(history);
+          }
+      } catch (e) {
+          setError(`Lỗi cập nhật truyện: ${(e as Error).message}`);
+      }
+  };
+
+  const handleDeleteStory = async (storyToDelete: Story) => {
+      try {
+          await dbService.deleteEbookAndStory(storyToDelete.url);
+          const history = getReadingHistory().filter(item => item.url !== storyToDelete.url);
+          saveReadingHistory(history);
+          setReadingHistory(history);
+          setLocalStories(prev => prev.filter(s => s.url !== storyToDelete.url));
+          handleBackToMain();
+      } catch (e) {
+          setError(`Lỗi xóa truyện: ${(e as Error).message}`);
+      }
+  };
+
+  const handleManualImportFile = async (file: File) => {
+      try {
+          const text = await file.text();
+          const doc = parseHtml(text);
+          const { type, source, contextData, url } = manualImportState;
+
+          if (type === 'chapter') {
+              setIsChapterLoading(true);
+              const { story, chapterIndex } = contextData;
+              const content = parseChapterContentFromDoc(doc, source);
+              setManualImportState(prev => ({ ...prev, isOpen: false }));
+              await processAndAnalyzeContent(story, url, content);
+              setIsChapterLoading(false);
+              setError(null);
+          } else if (type === 'story_details') {
+              setIsDataLoading(true);
+              let currentSource = source;
+              if (source === 'Unknown' || !source) {
+                  if (url.includes('truyenfull')) currentSource = 'TruyenFull.vn';
+                  else if (url.includes('tangthuvien')) currentSource = 'TangThuVien.net';
+              }
+
+              const details = parseStoryDetailsFromDoc(doc, currentSource, url);
+              
+              const fullStory: Story = {
+                  ...(contextData?.partialStory || {}),
+                  ...details,
+                  createdAt: Date.now()
+              };
+              
+              await dbService.saveStory(fullStory);
+
+              setStory(fullStory);
+              setCumulativeStats(getStoryState(fullStory.url) ?? {});
+              const savedRead = localStorage.getItem(`readChapters_${fullStory.url}`);
+              if (savedRead) setReadChapters(new Set(JSON.parse(savedRead)));
+              else setReadChapters(new Set());
+              
+              setLocalStories(prev => {
+                if(prev.find(s => s.url === fullStory.url)) return prev;
+                return [...prev, fullStory];
+              });
+
+              setManualImportState(prev => ({ ...prev, isOpen: false }));
+              setIsDataLoading(false);
+              setError(null);
+          }
+      } catch (e) {
+          alert(`Lỗi khi đọc file: ${(e as Error).message}`);
+      }
+  };
+
+
+  const handleSelectChapter = useCallback((chapter: Chapter) => {
+      cleanupTts();
+      if (!story || !story.chapters) return;
+      const index = story.chapters.findIndex(c => c.url === chapter.url);
+      if (index !== -1) {
+          window.scrollTo(0, 0);
+          fetchChapter(story, index);
+      }
+  }, [story, fetchChapter, cleanupTts]);
+
+  const handleEbookImportClick = () => {
+    ebookFileRef.current?.click();
+  };
+  
+  const handleFileChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    setIsDataLoading(true);
+    setError(null);
+    setStory(null);
+    setSearchResults(null);
+    setSelectedChapterIndex(null);
+    setChapterContent(null);
+    setCumulativeStats(null);
+    setReadChapters(new Set());
+    setEbookInstance(null);
+    resetChat();
+   
+    try {
+      const ebookStory = await parseEbookFile(file);
       
       await dbService.saveEbook(ebookStory.url, file);
       await dbService.saveStory(ebookStory);
+      setLocalStories(prev => [ebookStory, ...prev.filter(s => s.url !== ebookStory.url)]);
       
+      const zip = await JSZip.loadAsync(file);
       setStory(ebookStory);
       setEbookInstance({ zip });
       
-      const newHistory = updateReadingHistory(ebookStory, chapters[0]);
+      const newHistory = updateReadingHistory(ebookStory, ebookStory.chapters![0]);
       setReadingHistory(newHistory);
       
       let storyState = getStoryState(ebookStory.url);
@@ -458,6 +900,7 @@ const App: React.FC = () => {
   };
   
   const handleBackToStory = () => {
+    cleanupTts();
     setSelectedChapterIndex(null);
     setChapterContent(null);
     setError(null);
@@ -465,6 +908,7 @@ const App: React.FC = () => {
   };
   
   const handleBackToMain = () => {
+    cleanupTts();
     setStory(null);
     setSelectedChapterIndex(null);
     setChapterContent(null);
@@ -484,6 +928,28 @@ const App: React.FC = () => {
     }
   };
   
+  const handleTtsRequest = useCallback(async () => {
+      if (!chapterContent) return;
+      if (ttsState.textChunks.length > 0 && ttsState.status !== 'error') {
+          setTtsState(prev => ({ ...prev, status: 'playing' }));
+          return;
+      }
+
+      setTtsState(prev => ({ ...prev, status: 'loading', error: null }));
+      
+      try {
+          const chunks = splitChapterIntoChunks(chapterContent);
+          setTtsState({
+              status: 'playing',
+              textChunks: chunks,
+              currentChunkIndex: 0,
+              error: null
+          });
+      } catch (e) {
+          setTtsState(prev => ({ ...prev, status: 'error', error: "Lỗi xử lý văn bản." }));
+      }
+  }, [chapterContent, ttsState.textChunks.length, ttsState.status]);
+
   const handleContinueFromHistory = useCallback(async (item: ReadingHistoryItem) => {
     setIsDataLoading(true);
     setError(null);
@@ -492,129 +958,167 @@ const App: React.FC = () => {
     setChapterContent(null);
     
     try {
-        let storyToLoad: Story;
-        if (item.source === 'Ebook') {
-            const [ebookBuffer, dbStory] = await Promise.all([
-                dbService.getEbookAsArrayBuffer(item.url),
-                dbService.getStory(item.url)
-            ]);
-            if (!ebookBuffer || !dbStory) throw new Error("Không tìm thấy dữ liệu Ebook đã lưu. Vui lòng nhập lại file.");
-            
-            const zip = await JSZip.loadAsync(ebookBuffer);
-            setEbookInstance({ zip });
-            storyToLoad = dbStory;
-        } else {
-            storyToLoad = await getStoryFromUrl(item.url);
-        }
-
-        setStory(storyToLoad);
-        setCumulativeStats(getStoryState(storyToLoad.url) ?? {});
+        let storyToLoad: Story | null = null;
         
-        const savedRead = localStorage.getItem(`readChapters_${storyToLoad.url}`);
-        if (savedRead) setReadChapters(new Set(JSON.parse(savedRead)));
-        else setReadChapters(new Set());
-
-        const chapterIndex = storyToLoad.chapters?.findIndex(c => 
-            decodeURIComponent(c.url) === decodeURIComponent(item.lastChapterUrl)
-        );
-
-        if (chapterIndex !== -1 && chapterIndex !== undefined) {
-            await fetchChapter(storyToLoad, chapterIndex);
-        } else if (storyToLoad.chapters?.length) {
-            await fetchChapter(storyToLoad, 0);
+        if (item.source === 'Ebook') {
+             const ebookBuffer = await dbService.getEbookAsArrayBuffer(item.url); 
+             if (!ebookBuffer) throw new Error("File Ebook không còn tồn tại trong bộ nhớ.");
+             
+             // Reconstruct JSZip from buffer
+             const zip = await JSZip.loadAsync(ebookBuffer);
+             setEbookInstance({ zip });
+             
+             const storedStory = await dbService.getStory(item.url);
+             if (storedStory) {
+                 storyToLoad = storedStory;
+             } else {
+                 throw new Error("Thông tin truyện không tìm thấy.");
+             }
+        } else {
+             const storedStory = await dbService.getStory(item.url);
+             if (storedStory) {
+                 storyToLoad = storedStory;
+             } else {
+                 if (item.source === 'Local') throw new Error("Truyện này đã bị xóa.");
+                 storyToLoad = await getStoryFromUrl(item.url);
+             }
         }
-    } catch (err) {
-        handleApiError(err);
+
+        if (storyToLoad) {
+            setStory(storyToLoad);
+            const stats = getStoryState(storyToLoad.url);
+            setCumulativeStats(stats ?? {});
+            
+            const savedRead = localStorage.getItem(`readChapters_${storyToLoad.url}`);
+            if (savedRead) setReadChapters(new Set(JSON.parse(savedRead)));
+            
+            const chapterIndex = storyToLoad.chapters?.findIndex(c => c.url === item.lastChapterUrl) ?? 0;
+            const validIndex = chapterIndex >= 0 ? chapterIndex : 0;
+            
+            await fetchChapter(storyToLoad, validIndex);
+        }
+
+    } catch (e) {
+        setError(`Không thể khôi phục truyện: ${(e as Error).message}`);
     } finally {
         setIsDataLoading(false);
     }
-  }, [fetchChapter, handleApiError]);
-  
-  const handleRequestDeleteEbook = (item: ReadingHistoryItem) => {
-    setDeleteConfirmation({ isOpen: true, item });
-  };
-  
-  const handleDeleteEbook = async () => {
-      const storyUrl = deleteConfirmation.item?.url;
-      if (!storyUrl) return;
+  }, [fetchChapter]);
+
+  const handleStopAnalysis = useCallback(() => {
+      operationIdRef.current++;
+      setIsAnalyzing(false);
+  }, []);
+
+  const handleReanalyzePrimary = useCallback(async () => {
+      if (!apiKey) {
+          setIsApiKeyModalOpen(true);
+          return;
+      }
+      if (!chapterContent || !story) return;
+      
+      setIsAnalyzing(true);
+      const currentOpId = ++operationIdRef.current;
 
       try {
-          await dbService.deleteEbookAndStory(storyUrl);
-          const currentHistory = getReadingHistory();
-          const updatedHistory = currentHistory.filter(h => h.url !== storyUrl);
-          saveReadingHistory(updatedHistory);
-          setReadingHistory(updatedHistory);
-          if (story?.url === storyUrl) {
-              setStory(null);
-              setSelectedChapterIndex(null);
-              setChapterContent(null);
+          const { data, usage } = await analyzeChapterForPrimaryCharacter(apiKey, chapterContent, cumulativeStats);
+          
+          if (currentOpId !== operationIdRef.current) return;
+
+          handleTokenUsageUpdate({ totalTokens: usage.totalTokens });
+          
+          if (data) {
+              const currentStats = getStoryState(story.url) ?? {};
+              const newState = mergeChapterStats(currentStats, data as CharacterStats);
+              setCumulativeStats(newState);
+              saveStoryState(story.url, newState);
           }
       } catch (err) {
-          setError("Không thể xóa Ebook.");
+          if (currentOpId !== operationIdRef.current) return;
+          handleApiError(err);
       } finally {
-          setDeleteConfirmation({ isOpen: false });
+          if (currentOpId === operationIdRef.current) setIsAnalyzing(false);
+      }
+  }, [apiKey, chapterContent, story, cumulativeStats, handleTokenUsageUpdate, saveStoryState, handleApiError]);
+
+  const handleReanalyzeWorld = useCallback(async () => {
+      if (!apiKey) {
+          setIsApiKeyModalOpen(true);
+          return;
+      }
+      if (!chapterContent || !story) return;
+      
+      setIsAnalyzing(true);
+      const currentOpId = ++operationIdRef.current;
+
+      try {
+          const { data, usage } = await analyzeChapterForWorldInfo(apiKey, chapterContent, cumulativeStats);
+          
+          if (currentOpId !== operationIdRef.current) return;
+
+          handleTokenUsageUpdate({ totalTokens: usage.totalTokens });
+          
+          if (data) {
+              const currentStats = getStoryState(story.url) ?? {};
+              const newState = mergeChapterStats(currentStats, data as CharacterStats);
+              setCumulativeStats(newState);
+              saveStoryState(story.url, newState);
+          }
+      } catch (err) {
+          if (currentOpId !== operationIdRef.current) return;
+          handleApiError(err);
+      } finally {
+          if (currentOpId === operationIdRef.current) setIsAnalyzing(false);
+      }
+  }, [apiKey, chapterContent, story, cumulativeStats, handleTokenUsageUpdate, saveStoryState, handleApiError]);
+
+  const handleSendMessage = async (message: string) => {
+      if (!apiKey) {
+          setIsApiKeyModalOpen(true);
+          return;
+      }
+      
+      const newMessage: ChatMessage = { role: 'user', content: message };
+      setChatMessages(prev => [...prev, newMessage]);
+      setIsChatLoading(true);
+      
+      try {
+          let responseText = "";
+          let usageTokenCount = 0;
+
+          if (chapterContent && story) {
+              const result = await chatWithChapterContent(apiKey, message, chapterContent, story.title);
+              responseText = result.text;
+              usageTokenCount = result.usage.totalTokens;
+          } else if (ebookInstance && story?.chapters) {
+              const result = await chatWithEbook(apiKey, message, ebookInstance.zip, story.chapters);
+              responseText = result.text;
+              usageTokenCount = result.usage.totalTokens;
+          } else {
+              responseText = "Chức năng chat chỉ khả dụng khi đang đọc một chương hoặc với Ebook.";
+          }
+
+          handleTokenUsageUpdate({ totalTokens: usageTokenCount });
+          setChatMessages(prev => [...prev, { role: 'model', content: responseText }]);
+      } catch (err) {
+          handleApiError(err);
+          setChatMessages(prev => [...prev, { role: 'model', content: "Xin lỗi, đã có lỗi xảy ra." }]);
+      } finally {
+          setIsChatLoading(false);
       }
   };
-
-  const handleSendMessage = useCallback(async (message: string) => {
-    if (!message.trim() || isChatLoading || !story) return;
-
-    if (!apiKey) {
-      const newErrorMessage: ChatMessage = { role: 'model', content: `Lỗi: Vui lòng thiết lập API Key trong mục cài đặt để sử dụng tính năng trò chuyện.` };
-      setChatMessages(prev => [...prev, newErrorMessage]);
-      setIsApiKeyModalOpen(true);
-      return;
-    }
-
-    const newUserMessage: ChatMessage = { role: 'user', content: message };
-    setChatMessages(prev => [...prev, newUserMessage]);
-    setIsChatLoading(true);
-
-    try {
-      let responseText: string;
-      if (story.source === 'Ebook' && ebookInstance?.zip) {
-        const { text, usage } = await chatWithEbook(apiKey, message, ebookInstance.zip, story.chapters || []);
-        handleTokenUsageUpdate(usage);
-        responseText = text;
-      } else if (chapterContent) {
-        const { text, usage } = await chatWithChapterContent(apiKey, message, chapterContent, story.title);
-        handleTokenUsageUpdate(usage);
-        responseText = text;
-      } else {
-        responseText = "Không có nội dung để trò chuyện. Vui lòng tải một chương hoặc Ebook.";
-      }
-      const newModelMessage: ChatMessage = { role: 'model', content: responseText };
-      setChatMessages(prev => [...prev, newModelMessage]);
-    } catch (err) {
-        handleApiError(err);
-        const errorMessage = err instanceof Error ? err.message : "Đã xảy ra lỗi khi trò chuyện với AI.";
-        const newErrorMessage: ChatMessage = { role: 'model', content: `Lỗi: ${errorMessage}` };
-        setChatMessages(prev => [...prev, newErrorMessage]);
-    } finally {
-      setIsChatLoading(false);
-    }
-  }, [isChatLoading, story, ebookInstance, chapterContent, apiKey, handleApiError, handleTokenUsageUpdate]);
 
   const handleValidateAndSaveApiKey = async (key: string): Promise<true | string> => {
-    if (apiKeyService.isAiStudio()) {
-        apiKeyService.saveApiKey(key);
-        setApiKey(key);
-        setTokenUsage(apiKeyService.getTokenUsage());
-        setIsApiKeyModalOpen(false);
-        return true;
-    }
-    try {
-        await validateApiKey(key);
-        apiKeyService.saveApiKey(key);
-        setApiKey(key);
-        setTokenUsage(apiKeyService.getTokenUsage());
-        setIsApiKeyModalOpen(false);
-        return true;
-    } catch (err) {
-        return err instanceof Error ? err.message : "Đã xảy ra lỗi không xác định.";
-    }
+      try {
+          await validateApiKey(key);
+          apiKeyService.saveApiKey(key);
+          setApiKey(key);
+          setTokenUsage(apiKeyService.getTokenUsage());
+          return true;
+      } catch (e) {
+          return (e as Error).message;
+      }
   };
-
 
   const handleDeleteApiKey = () => {
       apiKeyService.clearApiKey();
@@ -622,59 +1126,77 @@ const App: React.FC = () => {
       setTokenUsage(apiKeyService.getTokenUsage());
   };
 
-  const handleReanalyzePrimary = useCallback(async () => {
-    if (!apiKey || !chapterContent || !story || selectedChapterIndex === null) return;
-    
-    setIsAnalyzing(true);
-    setError(null);
-    try {
-        const currentStats = getStoryState(story.url) ?? {};
-        const { data: newPrimaryDelta, usage } = await analyzeChapterForPrimaryCharacter(apiKey, chapterContent, currentStats);
-        handleTokenUsageUpdate(usage);
-        
-        if (newPrimaryDelta) {
-            const newState = mergeChapterStats(currentStats, newPrimaryDelta);
-            setCumulativeStats(newState);
-            saveStoryState(story.url, newState);
+  const handleRequestDeleteEbook = async (item: ReadingHistoryItem) => {
+      setDeleteConfirmation({ isOpen: true, item });
+  };
 
-            const chapter = story.chapters![selectedChapterIndex];
-            const oldCachedData = getCachedChapter(story.url, chapter.url);
-            const newCachedStats = { ...(oldCachedData?.stats || {}), ...newPrimaryDelta };
-            setCachedChapter(story.url, chapter.url, { content: chapterContent, stats: newCachedStats });
+  const confirmDeleteEbook = async () => {
+      if (deleteConfirmation.item) {
+          await dbService.deleteEbookAndStory(deleteConfirmation.item.url);
+          const newHistory = getReadingHistory().filter(h => h.url !== deleteConfirmation.item?.url);
+          saveReadingHistory(newHistory);
+          setReadingHistory(newHistory);
+          setLocalStories(prev => prev.filter(s => s.url !== deleteConfirmation.item?.url));
+      }
+      setDeleteConfirmation({ isOpen: false });
+  };
+
+  const handleTtsStatusChange = (newStatus: TtsStatus) => {
+    setTtsState(prev => ({...prev, status: newStatus}));
+  };
+
+  const handleTtsChunkChange = (newIndex: number) => {
+    setTtsState(prev => {
+        if (newIndex >= prev.textChunks.length || newIndex < 0) {
+            return prev;
         }
-    } catch (err) {
-        handleApiError(err);
-    } finally {
-        setIsAnalyzing(false);
-    }
-  }, [apiKey, chapterContent, story, selectedChapterIndex, handleApiError, saveStoryState, handleTokenUsageUpdate]);
+        return {...prev, currentChunkIndex: newIndex, status: 'playing'};
+    });
+  };
 
-  const handleReanalyzeWorld = useCallback(async () => {
-    if (!apiKey || !chapterContent || !story || selectedChapterIndex === null) return;
+  const filteredLibraryStories = useMemo(() => {
+      let filtered = [...localStories];
 
-    setIsAnalyzing(true);
-    setError(null);
-    try {
-        const currentStats = getStoryState(story.url) ?? {};
-        const { data: newWorldDelta, usage } = await analyzeChapterForWorldInfo(apiKey, chapterContent, currentStats);
-        handleTokenUsageUpdate(usage);
+      if (filterSource) {
+          filtered = filtered.filter(s => s.source === filterSource);
+      }
+      if (filterAuthor) {
+          filtered = filtered.filter(s => s.author.toLowerCase().includes(filterAuthor.toLowerCase()));
+      }
+      if (filterTags.length > 0) {
+          filtered = filtered.filter(s => 
+              filterTags.every(tag => s.tags?.includes(tag))
+          );
+      }
 
-        if (newWorldDelta) {
-            const newState = mergeChapterStats(currentStats, newWorldDelta);
-            setCumulativeStats(newState);
-            saveStoryState(story.url, newState);
+      filtered.sort((a, b) => {
+          switch (sortOption) {
+              case 'newest': return (b.createdAt || 0) - (a.createdAt || 0);
+              case 'oldest': return (a.createdAt || 0) - (b.createdAt || 0);
+              case 'az': return a.title.localeCompare(b.title);
+              case 'za': return b.title.localeCompare(a.title);
+              default: return 0;
+          }
+      });
 
-            const chapter = story.chapters![selectedChapterIndex];
-            const oldCachedData = getCachedChapter(story.url, chapter.url);
-            const newCachedStats = { ...(oldCachedData?.stats || {}), ...newWorldDelta };
-            setCachedChapter(story.url, chapter.url, { content: chapterContent, stats: newCachedStats });
-        }
-    } catch (err) {
-        handleApiError(err);
-    } finally {
-        setIsAnalyzing(false);
-    }
-  }, [apiKey, chapterContent, story, selectedChapterIndex, handleApiError, saveStoryState, handleTokenUsageUpdate]);
+      return filtered;
+  }, [localStories, filterSource, filterAuthor, filterTags, sortOption]);
+
+  const allTags = useMemo(() => {
+      const tags = new Set<string>();
+      localStories.forEach(s => {
+          if (s.tags) {
+              s.tags.forEach(t => tags.add(t));
+          }
+      });
+      return Array.from(tags).sort();
+  }, [localStories]);
+
+  const toggleTag = (tag: string) => {
+      setFilterTags(prev => 
+          prev.includes(tag) ? prev.filter(t => t !== tag) : [...prev, tag]
+      );
+  };
 
   const renderMainContent = () => {
     if (isLoading || isDataLoading) return <LoadingSpinner />;
@@ -699,7 +1221,7 @@ const App: React.FC = () => {
                 </div>
             );
         }
-        if (chapterContent) {
+        if (chapterContent !== null) {
             return (
                 <ChapterContent
                   story={story} currentChapterIndex={selectedChapterIndex} content={chapterContent}
@@ -708,63 +1230,202 @@ const App: React.FC = () => {
                   onSettingsChange={setSettings} onNavBarVisibilityChange={setIsBottomNavForReadingVisible}
                   cumulativeStats={cumulativeStats}
                   onStatsChange={handleStatsChange}
+                  onContentUpdate={handleUpdateChapterContent}
+                  onRewrite={handleRewriteChapter}
+                  isBusy={isChapterLoading || isAnalyzing || isRewriting || ttsState.status === 'loading'}
+                  isAnalyzing={isAnalyzing}
+                  onCreateChapter={handleCreateChapter}
+                  onTtsRequest={handleTtsRequest}
+                  onTtsStop={cleanupTts}
+                  onTtsStatusChange={handleTtsStatusChange}
+                  onTtsChunkChange={handleTtsChunkChange}
+                  ttsStatus={ttsState.status}
+                  ttsError={ttsState.error}
+                  ttsTextChunks={ttsState.textChunks}
+                  ttsCurrentChunkIndex={ttsState.currentChunkIndex}
+                  availableSystemVoices={availableSystemVoices}
                 />
             );
         }
          return <LoadingSpinner />;
     }
     
-    if (story) return <StoryDetail story={story} onSelectChapter={handleSelectChapter} readChapters={readChapters} lastReadChapterIndex={selectedChapterIndex} onBack={handleBackToMain} />;
+    if (story) return (
+      <StoryDetail 
+        story={story} 
+        onSelectChapter={handleSelectChapter} 
+        readChapters={readChapters} 
+        lastReadChapterIndex={selectedChapterIndex} 
+        onBack={handleBackToMain} 
+        onUpdateStory={handleUpdateStory}
+        onDeleteStory={handleDeleteStory}
+        onDeleteChapterContent={dbService.deleteChapterData}
+        onCreateChapter={handleCreateChapter}
+        onFilterAuthor={setFilterAuthor}
+        onFilterTag={(tag) => { setFilterTags([tag]); setSortOption('newest'); }}
+      />
+    );
     if (searchResults) return <SearchResultsList results={searchResults} onSelectStory={handleSelectStory} />;
-    if (readingHistory.length > 0) return <ReadingHistory items={readingHistory} onContinue={handleContinueFromHistory} onRequestDeleteEbook={handleRequestDeleteEbook} />;
 
     return (
-        <div className="text-center text-[var(--theme-text-secondary)]">
-            <h2 className="text-2xl mb-4 text-[var(--theme-text-primary)]">Chào mừng đến với Trình Đọc Truyện</h2>
-            <p>Sử dụng thanh tìm kiếm để tìm truyện hoặc nhập file Ebook để bắt đầu đọc.</p>
+        <div className="space-y-12">
+            {readingHistory.length > 0 && (
+                <section>
+                    <ReadingHistory items={readingHistory} onContinue={handleContinueFromHistory} onRequestDeleteEbook={handleRequestDeleteEbook} />
+                </section>
+            )}
+            
+            {localStories.length > 0 && (
+                <section className="animate-fade-in">
+                    <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6 border-b-2 border-[var(--theme-border)] pb-2">
+                        <h2 className="text-2xl font-bold text-[var(--theme-text-primary)]">
+                            Thư viện của bạn <span className="text-sm font-normal text-[var(--theme-text-secondary)]">({filteredLibraryStories.length} truyện)</span>
+                        </h2>
+                        
+                        <div className="flex flex-wrap items-center gap-3">
+                            <select 
+                                value={sortOption}
+                                onChange={(e) => setSortOption(e.target.value as SortOption)}
+                                className="bg-[var(--theme-bg-base)] border border-[var(--theme-border)] text-[var(--theme-text-primary)] text-sm rounded-lg p-2 focus:ring-[var(--theme-accent-primary)] focus:border-[var(--theme-accent-primary)]"
+                            >
+                                <option value="newest">Mới thêm</option>
+                                <option value="oldest">Cũ nhất</option>
+                                <option value="az">A - Z</option>
+                                <option value="za">Z - A</option>
+                            </select>
+
+                            <select 
+                                value={filterSource || ''}
+                                onChange={(e) => setFilterSource(e.target.value || null)}
+                                className="bg-[var(--theme-bg-base)] border border-[var(--theme-border)] text-[var(--theme-text-primary)] text-sm rounded-lg p-2 focus:ring-[var(--theme-accent-primary)] focus:border-[var(--theme-accent-primary)]"
+                            >
+                                <option value="">Tất cả nguồn</option>
+                                <option value="TruyenFull.vn">Web (TruyenFull)</option>
+                                <option value="TangThuVien.net">Web (TTV)</option>
+                                <option value="Ebook">Ebook</option>
+                                <option value="Local">Tự thêm</option>
+                            </select>
+
+                            {/* Multi-select Tags Dropdown */}
+                            <div className="relative" ref={tagDropdownRef}>
+                                <button 
+                                    onClick={() => setIsTagDropdownOpen(!isTagDropdownOpen)}
+                                    className="bg-[var(--theme-bg-base)] border border-[var(--theme-border)] text-[var(--theme-text-primary)] text-sm rounded-lg p-2 focus:ring-[var(--theme-accent-primary)] focus:border-[var(--theme-accent-primary)] min-w-[150px] text-left flex justify-between items-center"
+                                >
+                                    <span className="truncate">
+                                        {filterTags.length === 0 ? "Tất cả thể loại" : `${filterTags.length} thể loại`}
+                                    </span>
+                                    <svg className="w-4 h-4 ml-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>
+                                </button>
+                                {isTagDropdownOpen && (
+                                    <div className="absolute z-20 mt-1 w-64 max-h-60 overflow-y-auto bg-[var(--theme-bg-surface)] border border-[var(--theme-border)] rounded-lg shadow-xl p-2 animate-fade-in-up">
+                                        {allTags.map(tag => (
+                                            <div key={tag} className="flex items-center p-2 hover:bg-[var(--theme-bg-base)] rounded cursor-pointer" onClick={(e) => { e.stopPropagation(); toggleTag(tag); }}>
+                                                <div className={`w-4 h-4 border rounded mr-2 flex items-center justify-center ${filterTags.includes(tag) ? 'bg-[var(--theme-accent-primary)] border-[var(--theme-accent-primary)]' : 'border-gray-500'}`}>
+                                                    {filterTags.includes(tag) && <CheckIcon className="w-3 h-3 text-white" />}
+                                                </div>
+                                                <span className="text-sm text-[var(--theme-text-primary)]">{tag}</span>
+                                            </div>
+                                        ))}
+                                        {allTags.length === 0 && <p className="text-sm text-[var(--theme-text-secondary)] p-2">Không có thể loại nào.</p>}
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+                    </div>
+
+                    {(filterSource || filterAuthor || filterTags.length > 0) && (
+                        <div className="flex gap-2 mb-4 flex-wrap">
+                            {filterSource && (
+                                <span className="inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs font-medium bg-[var(--theme-accent-primary)]/20 text-[var(--theme-accent-primary)] border border-[var(--theme-accent-primary)]">
+                                    Nguồn: {filterSource}
+                                    <button onClick={() => setFilterSource(null)} className="hover:text-white"><CloseIcon className="w-3 h-3" /></button>
+                                </span>
+                            )}
+                            {filterAuthor && (
+                                <span className="inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs font-medium bg-[var(--theme-accent-secondary)]/20 text-[var(--theme-accent-secondary)] border border-[var(--theme-accent-secondary)]">
+                                    Tác giả: {filterAuthor}
+                                    <button onClick={() => setFilterAuthor(null)} className="hover:text-white"><CloseIcon className="w-3 h-3" /></button>
+                                </span>
+                            )}
+                            {filterTags.map(tag => (
+                                <span key={tag} className="inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs font-medium bg-purple-600/20 text-purple-400 border border-purple-500">
+                                    {tag}
+                                    <button onClick={() => toggleTag(tag)} className="hover:text-white"><CloseIcon className="w-3 h-3" /></button>
+                                </span>
+                            ))}
+                            <button 
+                                onClick={() => { setFilterSource(null); setFilterAuthor(null); setFilterTags([]); }}
+                                className="text-xs text-[var(--theme-text-secondary)] hover:text-[var(--theme-text-primary)] underline"
+                            >
+                                Xóa bộ lọc
+                            </button>
+                        </div>
+                    )}
+
+                    <SearchResultsList 
+                        results={filteredLibraryStories} 
+                        onSelectStory={handleSelectStory}
+                        onFilterAuthor={setFilterAuthor}
+                        onFilterSource={setFilterSource}
+                        onFilterTag={(tag) => setFilterTags([tag])}
+                    />
+                </section>
+            )}
+            
+            {!readingHistory.length && !localStories.length && (
+                 <div className="text-center text-[var(--theme-text-secondary)] py-12">
+                    <h2 className="text-2xl mb-4 text-[var(--theme-text-primary)]">Chào mừng đến với Trình Đọc Truyện</h2>
+                    <p>Sử dụng thanh tìm kiếm để tìm truyện hoặc tạo truyện mới để bắt đầu.</p>
+                </div>
+            )}
         </div>
     );
   };
   
-  const isReading = selectedChapterIndex !== null && !!story && !!chapterContent;
+  const isReading = selectedChapterIndex !== null && !!story && chapterContent !== null;
   const mainContainerClass = isReading
     ? "w-full px-4 sm:px-8 py-8 sm:py-12 flex-grow"
     : "max-w-screen-2xl mx-auto px-4 py-8 sm:py-12 flex-grow";
   
-  const appContentClass = (isApiKeyModalOpen && !apiKey) || isUpdateModalOpen || isHelpModalOpen ? 'blur-sm pointer-events-none' : '';
+  const appContentClass = (isApiKeyModalOpen && !apiKey) || isUpdateModalOpen || isHelpModalOpen || manualImportState.isOpen || isCreateStoryModalOpen ? 'blur-sm pointer-events-none' : '';
 
   return (
-    <div className="bg-[var(--theme-bg-base)] text-[var(--theme-text-primary)] min-h-screen flex flex-col">
+    <div className="flex flex-col min-h-screen bg-[var(--theme-bg-base)] text-[var(--theme-text-primary)] font-sans transition-colors duration-300">
       <div className={appContentClass}>
         <Header 
             onOpenApiKeySettings={() => setIsApiKeyModalOpen(true)}
             onOpenUpdateModal={() => setIsUpdateModalOpen(true)}
+            onGoHome={handleBackToMain}
         />
         <main className={mainContainerClass}>
-            <div className="mb-8">
-                <SearchBar 
-                    onSearch={handleSearch} 
-                    isLoading={isDataLoading} 
-                    onEbookImport={handleEbookImportClick} 
-                    onOpenHelpModal={() => setIsHelpModalOpen(true)}
-                />
-                <input 
-                    type="file"
-                    ref={ebookFileRef}
-                    onChange={handleFileChange}
-                    accept=".epub"
-                    className="hidden"
-                />
+            <div className="mb-8 flex flex-col sm:flex-row gap-4 items-stretch sm:items-center">
+                <div className="flex-grow">
+                    <SearchBar 
+                        onSearch={handleSearch} 
+                        isLoading={isDataLoading} 
+                        onOpenHelpModal={() => setIsHelpModalOpen(true)}
+                    />
+                </div>
+                 {!isReading && !searchResults && (
+                    <button
+                        onClick={() => setIsCreateStoryModalOpen(true)}
+                        className="flex-shrink-0 flex items-center justify-center gap-2 bg-green-600 hover:bg-green-500 text-white font-semibold py-2 px-4 rounded-lg transition-colors h-auto"
+                    >
+                        <PlusIcon className="w-5 h-5" />
+                        <span className="whitespace-nowrap">Tạo truyện mới</span>
+                    </button>
+                )}
             </div>
             
             {isReading ? (
             <div className="grid grid-cols-1 lg:grid-cols-[24rem_minmax(0,1fr)_24rem] xl:grid-cols-[28rem_minmax(0,1fr)_28rem] lg:gap-8">
                 <aside className="hidden lg:block sticky top-8 self-start">
-                <CharacterPrimaryPanel stats={cumulativeStats} isAnalyzing={isAnalyzing} onStatsChange={handleStatsChange} onDataLoaded={reloadDataFromStorage} onReanalyze={handleReanalyzePrimary} />
+                <CharacterPrimaryPanel stats={cumulativeStats} isAnalyzing={isAnalyzing} onStatsChange={handleStatsChange} onDataLoaded={reloadDataFromStorage} onReanalyze={handleReanalyzePrimary} onStopAnalysis={handleStopAnalysis} />
                 </aside>
                 <div className="min-w-0">{renderMainContent()}</div>
                 <aside className="hidden lg:block sticky top-8 self-start">
-                <CharacterPanel stats={cumulativeStats} isAnalyzing={isAnalyzing} isOpen={true} onClose={() => {}} isSidebar={true} onStatsChange={handleStatsChange} onDataLoaded={reloadDataFromStorage} onReanalyze={handleReanalyzeWorld} />
+                <CharacterPanel stats={cumulativeStats} isAnalyzing={isAnalyzing} isOpen={true} onClose={() => {}} isSidebar={true} onStatsChange={handleStatsChange} onDataLoaded={reloadDataFromStorage} onReanalyze={handleReanalyzeWorld} onStopAnalysis={handleStopAnalysis} />
                 </aside>
             </div>
             ) : (
@@ -780,7 +1441,7 @@ const App: React.FC = () => {
             {isReading && (
                 <>
                     <PanelToggleButton onClick={() => setIsPanelVisible(!isPanelVisible)} isPanelOpen={isPanelVisible} isBottomNavVisible={isBottomNavForReadingVisible} />
-                    <CharacterPanel isOpen={isPanelVisible} onClose={() => setIsPanelVisible(false)} stats={cumulativeStats} isAnalyzing={isAnalyzing} isSidebar={false} onStatsChange={handleStatsChange} onDataLoaded={reloadDataFromStorage} onReanalyze={handleReanalyzeWorld} />
+                    <CharacterPanel isOpen={isPanelVisible} onClose={() => setIsPanelVisible(false)} stats={cumulativeStats} isAnalyzing={isAnalyzing} isSidebar={false} onStatsChange={handleStatsChange} onDataLoaded={reloadDataFromStorage} onReanalyze={handleReanalyzeWorld} onStopAnalysis={handleStopAnalysis} />
                 </>
             )}
         </div>
@@ -800,10 +1461,8 @@ const App: React.FC = () => {
         <ScrollToTopButton isReading={isReading} isBottomNavVisible={isBottomNavForReadingVisible} />
       </div>
 
-      <UpdateModal isOpen={isUpdateModalOpen} onClose={() => setIsUpdateModalOpen(false)} />
-      
+      <UpdateModal isOpen={isUpdateModalOpen} onClose={handleCloseUpdateModal} />
       <HelpModal isOpen={isHelpModalOpen} onClose={() => setIsHelpModalOpen(false)} />
-
       <ApiKeyModal
         isOpen={isApiKeyModalOpen}
         onClose={() => setIsApiKeyModalOpen(false)}
@@ -811,16 +1470,29 @@ const App: React.FC = () => {
         onDelete={handleDeleteApiKey}
         currentKey={apiKey}
         tokenUsage={tokenUsage}
+        onDataChange={reloadDataFromStorage}
       />
-      
+      <ManualImportModal 
+        isOpen={manualImportState.isOpen}
+        onClose={() => setManualImportState(prev => ({ ...prev, isOpen: false }))}
+        urlToImport={manualImportState.url}
+        message={manualImportState.message}
+        onFileSelected={handleManualImportFile}
+      />
+       <StoryEditModal
+        isOpen={isCreateStoryModalOpen}
+        onClose={() => setIsCreateStoryModalOpen(false)}
+        onSave={handleCreateStory}
+        onParseEbook={parseEbookFile}
+      />
        <ConfirmationModal
         isOpen={deleteConfirmation.isOpen}
         onClose={() => setDeleteConfirmation({ isOpen: false })}
-        onConfirm={handleDeleteEbook}
-        title="Xác nhận xóa Ebook"
+        onConfirm={confirmDeleteEbook}
+        title="Xác nhận xóa"
       >
         <p>
-          Bạn có chắc chắn muốn xóa Ebook{' '}
+          Bạn có chắc chắn muốn xóa truyện{' '}
           <strong className="text-[var(--theme-text-primary)]">{deleteConfirmation.item?.title}</strong>
           {' '}vĩnh viễn không?
         </p>

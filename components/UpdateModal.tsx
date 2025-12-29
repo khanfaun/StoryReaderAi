@@ -1,5 +1,6 @@
+
 import React from 'react';
-import { CloseIcon, UploadIcon, RefreshIcon, ChatIcon, WrenchScrewdriverIcon, KeyIcon } from './icons';
+import { CloseIcon, RefreshIcon, SparklesIcon, EditIcon, PlayIcon, PlusIcon } from './icons';
 
 interface UpdateModalProps {
   isOpen: boolean;
@@ -13,29 +14,29 @@ const UpdateModal: React.FC<UpdateModalProps> = ({ isOpen, onClose }) => {
 
   const features = [
     {
-      icon: <UploadIcon className="w-8 h-8 text-green-400" />,
-      title: "Nhập Ebook (.EPUB)",
-      description: "Giờ đây bạn có thể đọc và phân tích những cuốn truyện yêu thích từ file .epub của riêng mình."
+      icon: <RefreshIcon className="w-8 h-8 text-green-400" />,
+      title: "Cải thiện thuật toán tìm truyện",
+      description: "Hệ thống tìm kiếm đã được nâng cấp để xử lý thông minh hơn, giúp bạn tìm thấy những cuốn truyện yêu thích chính xác và nhanh chóng hơn."
     },
     {
-      icon: <RefreshIcon className="w-8 h-8 text-yellow-400" />,
-      title: "Phân Tích Lại",
-      description: "AI phân tích sai? Không vấn đề! Nút 'Phân tích lại' cho phép bạn yêu cầu AI quét lại chương truyện để có kết quả chính xác hơn."
+      icon: <SparklesIcon className="w-8 h-8 text-purple-400" />,
+      title: "AI Biên tập & Dịch lại",
+      description: "Văn phong 'Convert' quá khó đọc? Sử dụng tính năng 'AI Viết lại' để chuyển đổi nội dung thành tiếng Việt mượt mà, văn học hơn."
     },
     {
-      icon: <ChatIcon className="w-8 h-8 text-cyan-400" />,
-      title: "AI Trò Chuyện",
-      description: "Thắc mắc về tình tiết, nhân vật hay nội dung truyện? Hãy hỏi trực tiếp AI để có câu trả lời ngay lập tức."
+      icon: <EditIcon className="w-8 h-8 text-blue-400" />,
+      title: "Chỉnh sửa Toàn diện",
+      description: "Bạn có thể sửa trực tiếp nội dung chương, đổi tên chương, cập nhật thông tin truyện hoặc xóa các chương bị lỗi."
     },
     {
-      icon: <WrenchScrewdriverIcon className="w-8 h-8 text-orange-400" />,
-      title: "Chỉnh Sửa Dữ Liệu",
-      description: "Toàn quyền kiểm soát dữ liệu! Bạn có thể dễ dàng thêm, sửa đổi, hoặc xóa bất kỳ thông tin nào mà AI đã phân tích."
+      icon: <PlayIcon className="w-8 h-8 text-rose-400" />,
+      title: "Cập nhật Giọng đọc Trình duyệt",
+      description: "Tối ưu hóa trải nghiệm nghe truyện. Hệ thống sẽ tự động ưu tiên giọng đọc Tiếng Việt chất lượng cao trên thiết bị của bạn, hạn chế sử dụng giọng mặc định tiếng Anh."
     },
     {
-      icon: <KeyIcon className="w-8 h-8 text-indigo-400" />,
-      title: "Cá nhân hóa sử dụng API Key",
-      description: "Để tăng cường bảo mật và cá nhân hóa, ứng dụng giờ đây yêu cầu bạn cung cấp API Key của riêng mình để sử dụng các tính năng AI."
+      icon: <PlusIcon className="w-8 h-8 text-teal-400" />,
+      title: "Tự Thêm Truyện (Local)",
+      description: "Bạn có thể tự sáng tác hoặc copy truyện từ nguồn ngoài vào để đọc và lưu trữ trực tiếp trên trình duyệt mà không cần mạng."
     }
   ];
 
@@ -50,13 +51,13 @@ const UpdateModal: React.FC<UpdateModalProps> = ({ isOpen, onClose }) => {
         </header>
 
         <div className="p-6 max-h-[70vh] overflow-y-auto">
-          <ul className="space-y-5">
+          <ul className="space-y-6">
             {features.map(feature => (
               <li key={feature.title} className="flex items-start gap-4">
-                <div className="flex-shrink-0 bg-slate-800 rounded-full p-2">{feature.icon}</div>
+                <div className="flex-shrink-0 bg-slate-800 rounded-full p-2 border border-[var(--theme-border)]">{feature.icon}</div>
                 <div>
-                  <h3 className="font-semibold text-md text-[var(--theme-text-primary)]">{feature.title}</h3>
-                  <p className="text-sm text-[var(--theme-text-secondary)]">{feature.description}</p>
+                  <h3 className="font-bold text-lg text-[var(--theme-accent-primary)] mb-1">{feature.title}</h3>
+                  <p className="text-sm text-[var(--theme-text-secondary)] leading-relaxed">{feature.description}</p>
                 </div>
               </li>
             ))}
@@ -68,7 +69,7 @@ const UpdateModal: React.FC<UpdateModalProps> = ({ isOpen, onClose }) => {
               onClick={onClose} 
               className="sync-modal-form__button sync-modal-form__button--primary"
             >
-              Đóng
+              Tuyệt vời, Đóng lại
             </button>
         </div>
       </div>

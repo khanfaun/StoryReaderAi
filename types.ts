@@ -1,3 +1,4 @@
+
 export interface Chapter {
   title: string;
   url: string;
@@ -12,6 +13,8 @@ export interface Story {
   description?: string;
   chapters?: Chapter[];
   isSearchLink?: boolean; // Cờ để xác định đây là link tìm kiếm, không phải truyện
+  createdAt?: number; // Timestamp khi truyện được thêm vào thư viện
+  tags?: string[]; // Danh sách thể loại/nhãn (Ví dụ: Tiên Hiệp, Kiếm Hiệp)
 }
 
 export type PartialStory = Omit<Story, 'chapters'>;
@@ -87,7 +90,7 @@ export interface CharacterStats {
   npcs?: NPC[]; // Danh sách nhân vật phụ mới hoặc có tương tác quan trọng
   theLuc?: TheLuc[]; // Danh sách các thế lực, môn phái, gia tộc được đề cập
   diaDiem?: DiaDiem[]; // Danh sách các địa điểm mới xuất hiện
-  viTriHienTai?: string; // Tên của địa điểm hiện tại của nhân vật chính
+  viTriHienTai?: string; // Tên của địa điểm cụ thể và chi tiết nhất nơi nhân vật chính đang ở. Giá trị này PHẢI khớp với một trong các tên trong danh sách 'diaDiem'.
   quanHe?: QuanHe[]; // Danh sách các mối quan hệ giữa các nhân vật
 }
 
@@ -104,6 +107,12 @@ export interface ReadingSettings {
   highlightColor: string;
   fontSize: number;
   fontFamily: string;
+  ttsSettings: {
+    voice: string; // Stores voiceURI for Web Speech API
+    playbackRate: number;
+    volume: number; // Âm lượng (0.0 - 1.0)
+    showTtsSetupOnPlay: boolean; // Cờ hiển thị modal cài đặt khi bấm play lần đầu
+  };
 }
 
 export interface ChatMessage {

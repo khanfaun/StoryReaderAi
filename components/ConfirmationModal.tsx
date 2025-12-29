@@ -1,3 +1,4 @@
+
 import React from 'react';
 import { createPortal } from 'react-dom';
 import { CloseIcon } from './icons';
@@ -8,10 +9,16 @@ interface ConfirmationModalProps {
   onConfirm: () => void;
   title: string;
   children: React.ReactNode;
+  confirmText?: string;
+  cancelText?: string;
+  confirmButtonClass?: string;
+  hideCancel?: boolean;
 }
 
-const ConfirmationModal: React.FC<ConfirmationModalProps> = ({ isOpen, onClose, onConfirm, title, children }) => {
+const ConfirmationModal: React.FC<ConfirmationModalProps> = ({ isOpen, onClose, onConfirm, title, children, confirmText, cancelText, confirmButtonClass, hideCancel }) => {
   if (!isOpen) return null;
+
+  const defaultConfirmClass = "px-4 py-2 rounded-md bg-rose-600 hover:bg-rose-700 text-white font-semibold transition-colors";
 
   return createPortal(
     <div 
@@ -37,19 +44,21 @@ const ConfirmationModal: React.FC<ConfirmationModalProps> = ({ isOpen, onClose, 
         </div>
 
         <div className="flex justify-end gap-3 p-4 bg-[var(--theme-bg-base)] rounded-b-lg">
-          <button 
-            type="button" 
-            onClick={onClose} 
-            className="px-4 py-2 rounded-md bg-slate-600 hover:bg-slate-500 text-white font-semibold transition-colors"
-          >
-            Hủy
-          </button>
+          {!hideCancel && (
+            <button 
+              type="button" 
+              onClick={onClose} 
+              className="px-4 py-2 rounded-md bg-slate-600 hover:bg-slate-500 text-white font-semibold transition-colors"
+            >
+              {cancelText || 'Hủy'}
+            </button>
+          )}
           <button 
             type="button" 
             onClick={onConfirm} 
-            className="px-4 py-2 rounded-md bg-rose-600 hover:bg-rose-700 text-white font-semibold transition-colors"
+            className={confirmButtonClass || defaultConfirmClass}
           >
-            Xác nhận
+            {confirmText || 'Xác nhận'}
           </button>
         </div>
       </div>

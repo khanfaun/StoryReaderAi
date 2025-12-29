@@ -1,3 +1,4 @@
+
 import React, { useState, useMemo, useEffect, useCallback, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import type { CharacterStats, DiaDiem, QuanHe, NPC } from '../types';
@@ -17,6 +18,7 @@ interface CharacterPanelProps {
   onStatsChange: (newStats: CharacterStats) => void;
   onDataLoaded: () => void;
   onReanalyze: () => void;
+  onStopAnalysis: () => void;
 }
 
 type Tab = 'status' | 'realmSystem' | 'inventory' | 'skills' | 'equipment' | 'npcs' | 'relationships' | 'factions' | 'locations' | 'data';
@@ -334,7 +336,7 @@ const RelationshipGraph: React.FC<RelationshipGraphProps> = ({ relations, mainCh
 };
 
 
-const CharacterPanel: React.FC<CharacterPanelProps> = ({ stats, isOpen, onClose, isAnalyzing, isSidebar = false, onStatsChange, onDataLoaded, onReanalyze }) => {
+const CharacterPanel: React.FC<CharacterPanelProps> = ({ stats, isOpen, onClose, isAnalyzing, isSidebar = false, onStatsChange, onDataLoaded, onReanalyze, onStopAnalysis }) => {
   const [activeTab, setActiveTab] = useState<Tab>(isSidebar ? 'npcs' : 'status');
   const [modalState, setModalState] = useState<{ isOpen: boolean; type: EntityType | null; data: any | null }>({ isOpen: false, type: null, data: null });
   const [deleteConfirmation, setDeleteConfirmation] = useState<{ type: EntityType; entity: any; } | null>(null);
@@ -784,7 +786,16 @@ const CharacterPanel: React.FC<CharacterPanelProps> = ({ stats, isOpen, onClose,
             )}
           </div>
           <div className="flex items-center gap-2">
-              {!isAnalyzing && (
+              {isAnalyzing ? (
+                <button 
+                  onClick={onStopAnalysis} 
+                  className="bg-rose-600 text-white font-semibold text-xs px-3 py-1 rounded-md hover:bg-rose-500 transition-colors animate-pulse"
+                  aria-label="Dừng phân tích"
+                  title="Dừng phân tích"
+                >
+                  Dừng phân tích
+                </button>
+              ) : (
                 <button 
                   onClick={onReanalyze} 
                   className="bg-[var(--theme-accent-secondary)] text-slate-900 font-semibold text-xs px-3 py-1 rounded-md hover:brightness-110 transition-colors"

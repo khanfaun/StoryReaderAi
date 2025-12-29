@@ -1,3 +1,4 @@
+
 import { useState, useEffect, useCallback } from 'react';
 import type { ReadingSettings } from '../types';
 
@@ -8,7 +9,7 @@ export const themePresets = {
     backgroundColor: '#141414', // rgb(20, 20, 20)
     surfaceColor: '#1e1e1e',   // rgb(30, 30, 30)
     textColor: '#e5e7eb',     // gray-200
-    titleColor: '#622eff',      // RGB(98, 46, 255)
+    titleColor: '#8170FF',      // RGB(129, 112, 255) - Updated
     highlightColor: '#f59e0b', // amber-500
   },
   light: { // Crisp Light
@@ -34,6 +35,12 @@ const defaultSettings: ReadingSettings = {
   backgroundColor: themePresets.dark.surfaceColor,
   fontSize: 20,
   fontFamily: "'Readex Pro', sans-serif",
+  ttsSettings: {
+    voice: 'vi-VN-HoaiMyNeural', // Default to HoaiMy if available
+    playbackRate: 1, // Tốc độ bình thường
+    volume: 1, // Âm lượng tối đa
+    showTtsSetupOnPlay: true, // Mặc định hỏi người dùng
+  },
 };
 
 // Helper to lighten/darken a hex color
@@ -65,7 +72,16 @@ export const useReadingSettings = (): [ReadingSettings, (settings: ReadingSettin
     try {
       const savedSettings = localStorage.getItem(SETTINGS_KEY);
       if (savedSettings) {
-        return { ...defaultSettings, ...JSON.parse(savedSettings) };
+        // Hợp nhất cài đặt đã lưu với cài đặt mặc định để đảm bảo các key mới (như ttsSettings) được thêm vào
+        const parsedSettings = JSON.parse(savedSettings);
+        
+        // Deep merge for ttsSettings because it's an object
+        const mergedSettings = { ...defaultSettings, ...parsedSettings };
+        if (parsedSettings.ttsSettings) {
+            mergedSettings.ttsSettings = { ...defaultSettings.ttsSettings, ...parsedSettings.ttsSettings };
+        }
+        
+        return mergedSettings;
       }
     } catch (error) {
       console.error("Lỗi khi tải cài đặt đọc:", error);

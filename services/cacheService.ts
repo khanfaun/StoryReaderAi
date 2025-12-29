@@ -1,51 +1,41 @@
-import type { CachedChapter } from '../types';
 
-const getCacheKey = (storyUrl: string) => `chapterCache_${storyUrl}`;
+import type { CachedChapter } from '../types';
+import * as dbService from './dbService';
 
 /**
- * Lấy dữ liệu chương đã được cache từ localStorage.
+ * Lấy dữ liệu chương đã được cache từ IndexedDB.
  * @param storyUrl URL của truyện để tạo khóa cache.
  * @param chapterUrl URL của chương cụ thể.
- * @returns Dữ liệu chương đã cache hoặc null nếu không tìm thấy.
+ * @returns Promise chứa dữ liệu chương đã cache hoặc null nếu không tìm thấy.
  */
-export const getCachedChapter = (storyUrl: string, chapterUrl: string): CachedChapter | null => {
+export const getCachedChapter = async (storyUrl: string, chapterUrl: string): Promise<CachedChapter | null> => {
   if (!storyUrl || !chapterUrl) return null;
   try {
-    const storyCacheStr = localStorage.getItem(getCacheKey(storyUrl));
-    if (!storyCacheStr) return null;
-    const storyCache = JSON.parse(storyCacheStr);
-    return storyCache[chapterUrl] || null;
+    const chapterData = await dbService.getChapterData(storyUrl, chapterUrl);
+    if (chapterData) {
+        return {
+            content: chapterData.content,
+            stats: chapterData.stats,
+        };
+    }
+    return null;
   } catch (e) {
-    console.error("Lỗi khi đọc cache chương:", e);
+    console.error("Lỗi khi đọc cache chương từ DB:", e);
     return null;
   }
 };
 
 /**
- * Lưu dữ liệu chương vào localStorage.
+ * Lưu dữ liệu chương vào IndexedDB.
  * @param storyUrl URL của truyện.
  * @param chapterUrl URL của chương.
  * @param data Dữ liệu chương (nội dung và stats) để lưu.
  */
-export const setCachedChapter = (storyUrl: string, chapterUrl: string, data: CachedChapter): void => {
+export const setCachedChapter = async (storyUrl: string, chapterUrl: string, data: CachedChapter): Promise<void> => {
   if (!storyUrl || !chapterUrl) return;
   try {
-    const cacheKey = getCacheKey(storyUrl);
-    let storyCache: { [key: string]: CachedChapter } = {};
-    const storyCacheStr = localStorage.getItem(cacheKey);
-    if (storyCacheStr) {
-        // Xử lý lỗi JSON có thể xảy ra
-        try {
-            storyCache = JSON.parse(storyCacheStr);
-        } catch (e) {
-            console.error("Cache hiện tại bị hỏng, tạo cache mới.", e);
-            storyCache = {};
-        }
-    }
-    storyCache[chapterUrl] = data;
-    localStorage.setItem(cacheKey, JSON.stringify(storyCache));
+    await dbService.saveChapterData(storyUrl, chapterUrl, data);
   } catch (e) {
-    console.error("Lỗi khi ghi cache chương:", e);
-    // Có thể triển khai logic xóa cache cũ nếu localStorage đầy
+    console.error("Lỗi khi ghi cache chương vào DB:", e);
   }
 };

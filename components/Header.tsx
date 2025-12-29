@@ -1,16 +1,22 @@
+
 import React from 'react';
 import { KeyIcon, BellIcon } from './icons';
 
 interface HeaderProps {
   onOpenApiKeySettings: () => void;
   onOpenUpdateModal: () => void;
+  onGoHome: () => void;
 }
 
-const Header: React.FC<HeaderProps> = ({ onOpenApiKeySettings, onOpenUpdateModal }) => {
+const Header: React.FC<HeaderProps> = ({ onOpenApiKeySettings, onOpenUpdateModal, onGoHome }) => {
   return (
     <header className="bg-[var(--theme-bg-surface)] shadow-lg border-b border-[var(--theme-border)]">
       <div className="container mx-auto px-4 py-4 flex justify-between items-center">
-        <h1 className="text-2xl font-bold text-[var(--theme-text-primary)]">
+        <h1 
+            className="text-2xl font-bold text-[var(--theme-text-primary)] cursor-pointer hover:opacity-80 transition-opacity select-none"
+            onClick={onGoHome}
+            title="Về trang chủ"
+        >
           <span className="text-[var(--theme-accent-primary)]">Trình Đọc</span> Truyện
         </h1>
         <div className="flex items-center gap-2">

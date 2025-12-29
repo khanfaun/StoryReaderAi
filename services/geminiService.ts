@@ -1,3 +1,4 @@
+
 import { GoogleGenAI, Type } from "@google/genai";
 import type { CharacterStats, Story, Chapter } from "../types";
 import { isAiStudio } from './apiKeyService';
@@ -50,8 +51,8 @@ export const validateApiKey = async (apiKey: string): Promise<void> => {
   try {
     // Perform a simple, low-cost query to check if the key is valid.
     await validationClient.models.generateContent({
-        model: "gemini-2.5-flash",
-        contents: "Validate",
+        model: "gemini-3-flash-preview",
+        contents: 'Validate',
         config: {
             thinkingConfig: { thinkingBudget: 0 }, // Disable thinking for faster validation
         },
@@ -197,7 +198,7 @@ const characterStatsSchema = { type: Type.OBJECT, properties: { ...primaryCharac
 
 const BASE_PROMPT = `Bạn là một trợ lý phân tích truyện tiên hiệp chuyên nghiệp, có khả năng duy trì và cập nhật trạng thái của thế giới truyện qua từng chương.
 
-**DỮ LIỆU HIỆN TẠI:**
+**DỮ LIệu HIỆN TẠI:**
 Dưới đây là thông tin đã biết về nhân vật và thế giới truyện cho đến trước chương này.
 \`\`\`json
 {previousStats}
@@ -237,7 +238,7 @@ async function executeAnalysis(apiKey: string, prompt: string, schema: any): Pro
     try {
         const geminiClient = getAiClient(apiKey);
         const response = await geminiClient.models.generateContent({
-            model: "gemini-2.5-flash",
+            model: "gemini-3-flash-preview",
             contents: prompt,
             config: {
                 responseMimeType: "application/json",
@@ -320,7 +321,7 @@ export const chatWithChapterContent = async (apiKey: string, prompt: string, cha
   try {
     const geminiClient = getAiClient(apiKey);
     const response = await geminiClient.models.generateContent({
-        model: "gemini-2.5-flash",
+        model: "gemini-3-flash-preview",
         contents: `**Bối cảnh:** Bạn là một trợ lý AI hữu ích, đang thảo luận về cuốn sách "${storyTitle}".
         **Nhiệm vụ:** Trả lời câu hỏi của người dùng chỉ dựa vào nội dung được cung cấp từ chương truyện hiện tại. Nếu câu trả lời không có trong văn bản, hãy nói rằng bạn không tìm thấy thông tin trong đoạn trích này.
 
@@ -366,7 +367,7 @@ export const chatWithEbook = async (apiKey: string, prompt: string, zipInstance:
     const chapterListText = chapterList.map((c, i) => `${i + 1}. Tiêu đề: "${c.title}", Tên file: "${c.url}"`).join('\n');
     
     const chapterSelectionResponse = await geminiClient.models.generateContent({
-        model: "gemini-2.5-flash",
+        model: "gemini-3-flash-preview",
         contents: `Người dùng đang hỏi câu này về một cuốn sách: "${prompt}".
         
         Dựa vào danh sách chương dưới đây, hãy xác định những chương có khả năng chứa câu trả lời nhất.
@@ -425,7 +426,7 @@ export const chatWithEbook = async (apiKey: string, prompt: string, zipInstance:
     }
 
     const finalAnswerResponse = await geminiClient.models.generateContent({
-        model: "gemini-2.5-flash",
+        model: "gemini-3-flash-preview",
         contents: `**Nhiệm vụ:** Trả lời câu hỏi của người dùng một cách ngắn gọn và súc tích, chỉ dựa vào nội dung được cung cấp dưới đây. Nếu câu trả lời không có trong văn bản, hãy nói rằng bạn không tìm thấy thông tin trong đoạn trích này.
         
         **Nội dung được cung cấp:**
@@ -453,4 +454,54 @@ export const chatWithEbook = async (apiKey: string, prompt: string, zipInstance:
     }
     throw new Error("Không thể nhận phản hồi từ AI. Vui lòng thử lại.");
   }
+};
+
+/**
+ * Viết lại nội dung chương truyện cho dễ hiểu hơn.
+ * @param apiKey API Key của người dùng.
+ * @param content Nội dung chương gốc.
+ * @returns Nội dung đã được viết lại.
+ */
+export const rewriteChapterContent = async (apiKey: string, content: string): Promise<{ text: string, usage: { totalTokens: number } }> => {
+    try {
+        const geminiClient = getAiClient(apiKey);
+        // Prompt được thiết kế đặc biệt để xử lý văn phong convert/dịch máy
+        const prompt = `Bạn là một biên tập viên tiểu thuyết chuyên nghiệp và một dịch giả đại tài.
+Nhiệm vụ của bạn là viết lại (biên tập lại) đoạn văn bản dưới đây thành tiếng Việt trôi chảy, tự nhiên, và dễ hiểu, phù hợp với văn phong truyện tiểu thuyết.
+
+**YÊU CẦU CỤ THỂ:**
+1.  **Xử lý văn phong Convert/Dịch máy:** Nếu văn bản đầu vào là dạng "convert" (Hán Việt thô, ví dụ: "hắn là một cái giỏi giang thần y"), hãy chuyển ngữ sang tiếng Việt thuần việt, mượt mà (ví dụ: "Hắn là một vị thần y tài giỏi").
+2.  **Dịch thuật:** Nếu văn bản là tiếng nước ngoài (Anh, Trung, v.v.), hãy dịch sang tiếng Việt.
+3.  **Giữ nguyên ý nghĩa:** Tuyệt đối không thay đổi cốt truyện, tình tiết, hoặc ý nghĩa của câu chuyện.
+4.  **Giữ nguyên định dạng:** Giữ lại các đoạn văn (xuống dòng) như bản gốc để dễ đọc.
+5.  **Văn phong:** Sử dụng từ ngữ phong phú, gợi hình, gợi cảm, phù hợp với ngữ cảnh (tiên hiệp, kiếm hiệp, hiện đại, v.v.).
+6.  **QUAN TRỌNG: CHỈ TRẢ VỀ NỘI DUNG ĐÃ VIẾT LẠI.** Không được thêm bất kỳ lời chào, lời dẫn (như "Dưới đây là...", "Tuyệt vời...", "Bản biên tập:"), hay kết luận nào. Trả về text thuần túy.
+
+**VĂN BẢN GỐC:**
+---
+${content.substring(0, 20000)}
+---
+
+**BẢN VIẾT LẠI (TIẾNG VIỆT):**`;
+
+        const response = await geminiClient.models.generateContent({
+            model: "gemini-3-flash-preview",
+            contents: prompt,
+        });
+
+        const usage = response.usageMetadata || { totalTokenCount: 0 };
+        return {
+            text: response.text,
+            usage: {
+                totalTokens: usage.totalTokenCount || 0
+            }
+        };
+
+    } catch (error) {
+        console.error("Lỗi khi viết lại chương:", error);
+        if (error instanceof Error && error.message.includes('API key not valid')) {
+            throw new Error("API Key không hợp lệ. Vui lòng kiểm tra lại.");
+        }
+        throw new Error("Không thể thực hiện viết lại nội dung. Vui lòng thử lại.");
+    }
 };

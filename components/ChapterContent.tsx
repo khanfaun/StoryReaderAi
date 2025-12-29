@@ -1,9 +1,13 @@
+
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import type { Story, Chapter, ReadingSettings, CharacterStats } from '../types';
 import ChapterListModal from './ChapterListModal';
+import ChapterEditModal from './ChapterEditModal';
 import SettingsPanel from './SettingsPanel';
 import EntityTooltip from './EntityTooltip';
-import { ListIcon } from './icons';
+import { ListIcon, EditIcon, SparklesIcon, SpinnerIcon, PlusIcon, PlayIcon, PauseIcon, StopIcon, CloseIcon, BarsIcon, CogIcon, SlidersIcon, BackwardStepIcon, ForwardStepIcon, VolumeHighIcon } from './icons';
+
+type TtsStatus = 'idle' | 'loading' | 'playing' | 'paused' | 'error' | 'ready';
 
 interface ChapterContentProps {
   story: Story;
@@ -19,150 +23,455 @@ interface ChapterContentProps {
   onNavBarVisibilityChange: (isVisible: boolean) => void;
   cumulativeStats: CharacterStats | null;
   onStatsChange: (newStats: CharacterStats) => void;
+  onContentUpdate?: (newContent: string) => void;
+  onRewrite?: () => Promise<void>;
+  onCreateChapter?: (story: Story, title: string, content: string) => Promise<void>;
+  isBusy?: boolean;
+  isAnalyzing?: boolean;
+  
+  // TTS Props
+  onTtsRequest: () => void;
+  onTtsStop: () => void;
+  onTtsStatusChange: (newStatus: TtsStatus) => void;
+  onTtsChunkChange: (newIndex: number) => void;
+  ttsStatus: TtsStatus;
+  ttsError: string | null;
+  ttsTextChunks: string[];
+  ttsCurrentChunkIndex: number;
+  availableSystemVoices: SpeechSynthesisVoice[];
 }
 
-const ChapterContent: React.FC<ChapterContentProps> = ({ story, currentChapterIndex, content, onBack, onPrev, onNext, onSelectChapter, readChapters, settings, onSettingsChange, onNavBarVisibilityChange, cumulativeStats, onStatsChange }) => {
+// Helper format thời gian mm:ss
+const formatTime = (seconds: number) => {
+    const m = Math.floor(seconds / 60);
+    const s = Math.floor(seconds % 60);
+    return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+};
+
+// Ước tính thời gian dựa trên số ký tự (giả sử tốc độ 1x ~ 20 ký tự/giây cho tiếng Việt)
+const CHAR_PER_SEC = 20;
+
+const ChapterContent: React.FC<ChapterContentProps> = ({ 
+    story, currentChapterIndex, content, onBack, onPrev, onNext, onSelectChapter, 
+    readChapters, settings, onSettingsChange, onNavBarVisibilityChange, 
+    cumulativeStats, onStatsChange, onContentUpdate, onRewrite, onCreateChapter,
+    isBusy = false, isAnalyzing = false,
+    onTtsRequest, onTtsStop, onTtsStatusChange, onTtsChunkChange,
+    ttsStatus, ttsError, ttsTextChunks, ttsCurrentChunkIndex, availableSystemVoices
+}) => {
   const [isListVisible, setIsListVisible] = useState(false);
   const [isNavBarVisible, setIsNavBarVisible] = useState(true);
   const [isSettingsVisible, setIsSettingsVisible] = useState(false);
+  // TTS Setup Modal State
+  const [isTtsSetupVisible, setIsTtsSetupVisible] = useState(false);
+  
+  const [isAudioPlayerVisible, setIsAudioPlayerVisible] = useState(false);
+  const [isPlaylistOpen, setIsPlaylistOpen] = useState(false); // Playlist UI toggle
+  const [isTtsSettingsOpen, setIsTtsSettingsOpen] = useState(false); // TTS Settings UI toggle
+
   const lastScrollY = useRef(0);
+  const activeChunkRef = useRef<HTMLDivElement>(null); // Ref to scroll to active highlighted text
+  const activeWordRef = useRef<HTMLSpanElement>(null); // Ref to scroll to the specific word
+  
+  // Flag to distinguish between user scroll and TTS auto-scroll
+  const programmaticScrollRef = useRef(false);
+
+  // Edit Content State
+  const [isEditingContent, setIsEditingContent] = useState(false);
+  const [editableContent, setEditableContent] = useState(content);
+  const [isRewriting, setIsRewriting] = useState(false);
+  
+  // Add Chapter State
+  const [isAddChapterModalOpen, setIsAddChapterModalOpen] = useState(false);
 
   // State cho chức năng tự động cuộn
   const [popoverTarget, setPopoverTarget] = useState<'top' | 'bottom' | null>(null);
-  const [autoScrollSpeed, setAutoScrollSpeed] = useState(1); // Tốc độ mặc định từ 0-10, đổi về 1
+  const [autoScrollSpeed, setAutoScrollSpeed] = useState(1);
   const [isAutoScrolling, setIsAutoScrolling] = useState(false);
   const scrollIntervalRef = useRef<number | null>(null);
   const autoScrollButtonRefTop = useRef<HTMLDivElement>(null);
   const autoScrollButtonRefBottom = useRef<HTMLDivElement>(null);
   const popoverRef = useRef<HTMLDivElement>(null);
 
+  // TTS Progress State
+  const [ttsProgress, setTtsProgress] = useState(0); // 0 - 100 (Global progress)
+  const [ttsCurrentTime, setTtsCurrentTime] = useState(0); // seconds
+  const [ttsDuration, setTtsDuration] = useState(0); // seconds
+  
+  // Karaoke State: Tracks the specific word being spoken within the current chunk
+  const [currentWordRange, setCurrentWordRange] = useState<{start: number, end: number} | null>(null);
+
+  // Refs
+  const utteranceRef = useRef<SpeechSynthesisUtterance | null>(null);
+  const globalCharIndexRef = useRef(0); // Tracks the absolute character position across all chunks
+
+  // Precompute chunk metadata: Start index, End index, Length for each chunk
+  // This allows mapping global progress to specific chunk + offset
+  const chunkMetadata = useMemo(() => {
+      let cumulativeLength = 0;
+      return ttsTextChunks.map((text, index) => {
+          const start = cumulativeLength;
+          const length = text.length;
+          cumulativeLength += length;
+          return { index, start, length, end: cumulativeLength, text };
+      });
+  }, [ttsTextChunks]);
+
+  const totalChars = chunkMetadata.length > 0 ? chunkMetadata[chunkMetadata.length - 1].end : 0;
+
   useEffect(() => {
     onNavBarVisibilityChange(isNavBarVisible);
   }, [isNavBarVisible, onNavBarVisibilityChange]);
+
+  useEffect(() => {
+      setEditableContent(content);
+      setIsEditingContent(false);
+  }, [content]);
+
+  // Reset progress when chapter changes (content changes)
+  useEffect(() => {
+      setTtsProgress(0);
+      setTtsCurrentTime(0);
+      setCurrentWordRange(null);
+      globalCharIndexRef.current = 0;
+      if (totalChars > 0) {
+          setTtsDuration(totalChars / (CHAR_PER_SEC * settings.ttsSettings.playbackRate));
+      }
+  }, [totalChars, settings.ttsSettings.playbackRate, content]);
+
+  // Sync globalCharIndexRef when ttsCurrentChunkIndex changes from outside (e.g. Next/Prev button)
+  useEffect(() => {
+      const chunk = chunkMetadata[ttsCurrentChunkIndex];
+      if (chunk) {
+          setCurrentWordRange(null); // Reset word highlight on chunk change
+          // If our global tracker is outside the current chunk bounds, reset it to the start of the chunk
+          // This handles manual skipping via buttons
+          if (globalCharIndexRef.current < chunk.start || globalCharIndexRef.current >= chunk.end) {
+              globalCharIndexRef.current = chunk.start;
+              // Update UI immediately
+              setTtsProgress((chunk.start / totalChars) * 100);
+              setTtsCurrentTime(chunk.start / (CHAR_PER_SEC * settings.ttsSettings.playbackRate));
+          }
+      }
+  }, [ttsCurrentChunkIndex, chunkMetadata, totalChars, settings.ttsSettings.playbackRate]);
+
+  // TTS Auto-Scroll Effect: Scroll to highlighted chunk OR word
+  useEffect(() => {
+      if (ttsStatus === 'playing') {
+          // Priority: Scroll to active word if available, otherwise active chunk
+          const target = activeWordRef.current || activeChunkRef.current;
+          if (target) {
+              programmaticScrollRef.current = true;
+              target.scrollIntoView({
+                  behavior: 'smooth',
+                  block: 'center', 
+              });
+              // Reset the programmatic flag after enough time for smooth scroll to complete
+              setTimeout(() => {
+                  programmaticScrollRef.current = false;
+              }, 1000);
+          }
+      }
+  }, [ttsCurrentChunkIndex, ttsStatus, currentWordRange]); // Trigger when word range changes
+
+
+  // --- CORE TTS LOGIC ---
+  useEffect(() => {
+    const synth = window.speechSynthesis;
+    const currentChunk = chunkMetadata[ttsCurrentChunkIndex];
+
+    // 1. Cleanup / Stop conditions
+    if (ttsStatus === 'idle' || ttsStatus === 'error' || !currentChunk) {
+        if (synth.speaking || synth.paused) {
+            synth.cancel();
+        }
+        return;
+    }
+
+    // 2. Pause
+    if (ttsStatus === 'paused') {
+        // We use CANCEL instead of PAUSE to avoid browser bugs.
+        // We rely on globalCharIndexRef to resume correctly.
+        synth.cancel(); 
+        return;
+    }
+
+    // 3. Playing
+    if (ttsStatus === 'playing') {
+        // Calculate where to start within the current chunk
+        // offset = current global pos - chunk start pos
+        let offset = globalCharIndexRef.current - currentChunk.start;
+        
+        // Safety check: offset shouldn't be negative
+        if (offset < 0) offset = 0;
+        // Safety check: if offset is at end of chunk, move to next
+        if (offset >= currentChunk.length) {
+             if (ttsCurrentChunkIndex < ttsTextChunks.length - 1) {
+                 onTtsChunkChange(ttsCurrentChunkIndex + 1);
+             } else {
+                 onTtsStop();
+             }
+             return;
+        }
+
+        // SLICING TEXT: This is the key to "Smart Resume"
+        // Instead of resume(), we speak a new utterance starting from the sliced text.
+        const textToSpeak = currentChunk.text.slice(offset);
+        
+        // Cancel any existing speech before starting new one
+        synth.cancel(); 
+
+        const utterance = new SpeechSynthesisUtterance(textToSpeak);
+        utteranceRef.current = utterance;
+
+        const selectedVoice = availableSystemVoices.find(v => v.voiceURI === settings.ttsSettings.voice);
+        if (selectedVoice) {
+            utterance.voice = selectedVoice;
+        }
+        utterance.rate = settings.ttsSettings.playbackRate;
+        utterance.volume = settings.ttsSettings.volume;
+
+        // Base progress: The global position where this utterance started
+        const baseGlobalIndex = currentChunk.start + offset;
+
+        utterance.onboundary = (event) => {
+            // event.charIndex is relative to the *textToSpeak* (sliced text)
+            // Actual local index (in chunk) = offset + event.charIndex
+            const localCharIndex = offset + event.charIndex;
+            
+            // Actual global index = Base start + event charIndex
+            const currentGlobalIndex = baseGlobalIndex + event.charIndex;
+            globalCharIndexRef.current = currentGlobalIndex;
+            
+            // --- KARAOKE LOGIC ---
+            // Determine word boundary. Browser often gives start index but length varies.
+            // We find the next space/punctuation to estimate length.
+            const remainingTextInChunk = currentChunk.text.slice(localCharIndex);
+            // Match until next space or non-word character or end of string
+            const match = remainingTextInChunk.match(/^([^\s]+)/); // Simple word match
+            const wordLength = match ? match[0].length : 1;
+            
+            setCurrentWordRange({
+                start: localCharIndex,
+                end: localCharIndex + wordLength
+            });
+
+            // Update UI Progress
+            if (totalChars > 0) {
+                const progress = Math.min((currentGlobalIndex / totalChars) * 100, 100);
+                setTtsProgress(progress);
+                setTtsCurrentTime(currentGlobalIndex / (CHAR_PER_SEC * settings.ttsSettings.playbackRate));
+            }
+        };
+
+        utterance.onend = () => {
+            const remainingInChunk = currentChunk.end - globalCharIndexRef.current;
+            if (remainingInChunk < 20 || textToSpeak.length < 20) {
+                 if (ttsCurrentChunkIndex < ttsTextChunks.length - 1) {
+                     const nextChunkStart = chunkMetadata[ttsCurrentChunkIndex + 1].start;
+                     globalCharIndexRef.current = nextChunkStart;
+                     onTtsChunkChange(ttsCurrentChunkIndex + 1);
+                 } else {
+                     onTtsStop(); // Finished story
+                 }
+            }
+        };
+
+        utterance.onerror = (event) => {
+            if (event.error === 'interrupted' || event.error === 'canceled') return;
+            console.error('TTS Error:', event);
+            onTtsStatusChange('error');
+        };
+
+        synth.speak(utterance);
+    }
+
+    return () => {};
+
+  }, [ttsStatus, ttsCurrentChunkIndex, ttsTextChunks, settings.ttsSettings, availableSystemVoices, onTtsChunkChange, onTtsStatusChange, onTtsStop, chunkMetadata, totalChars]);
+
+
+  const handleSeek = (e: React.ChangeEvent<HTMLInputElement>) => {
+      const newProgress = parseFloat(e.target.value);
+      setTtsProgress(newProgress);
+      
+      if (totalChars === 0) return;
+
+      // 1. Calculate target Global Character Index
+      const targetGlobalCharIndex = Math.floor((newProgress / 100) * totalChars);
+      globalCharIndexRef.current = targetGlobalCharIndex;
+      
+      // Update time display
+      setTtsCurrentTime(targetGlobalCharIndex / (CHAR_PER_SEC * settings.ttsSettings.playbackRate));
+
+      // 2. Find which chunk this index belongs to
+      const newChunkIndex = chunkMetadata.findIndex(chunk => targetGlobalCharIndex >= chunk.start && targetGlobalCharIndex < chunk.end);
+      
+      if (newChunkIndex !== -1) {
+          if (newChunkIndex !== ttsCurrentChunkIndex) {
+              onTtsChunkChange(newChunkIndex);
+          } else {
+              if (ttsStatus === 'playing') {
+                  window.speechSynthesis.cancel();
+                  onTtsStatusChange('paused');
+                  setTimeout(() => onTtsStatusChange('playing'), 50);
+              }
+          }
+      }
+  };
+  
+  const handleTtsSettingChange = <K extends keyof ReadingSettings['ttsSettings']>(key: K, value: ReadingSettings['ttsSettings'][K]) => {
+      onSettingsChange({
+          ...settings,
+          ttsSettings: {
+              ...settings.ttsSettings,
+              [key]: value,
+          },
+      });
+      
+      // Update live utterance if possible or needed
+      if (key === 'volume' && utteranceRef.current) {
+          // Note: dynamic volume update depends on browser. Chrome mostly ignores it mid-utterance.
+          // But we set it here for good measure.
+          utteranceRef.current.volume = value as number;
+      }
+
+      // Nếu đang play mà đổi giọng/tốc độ (volume often works dynamically, but let's be safe), cần reload utterance
+      // We skip reload for volume to avoid stutter if user slides it
+      if (ttsStatus === 'playing' && key !== 'volume') {
+          window.speechSynthesis.cancel();
+          onTtsStatusChange('paused');
+          setTimeout(() => onTtsStatusChange('playing'), 100);
+      }
+  };
+
+  // Handle click on specific playlist item
+  const handleJumpToChunk = (index: number) => {
+      const chunk = chunkMetadata[index];
+      if (chunk) {
+          globalCharIndexRef.current = chunk.start;
+          setTtsProgress((chunk.start / totalChars) * 100);
+          setTtsCurrentTime(chunk.start / (CHAR_PER_SEC * settings.ttsSettings.playbackRate));
+          onTtsChunkChange(index);
+          if (ttsStatus !== 'playing') {
+              onTtsStatusChange('playing');
+          }
+      }
+  };
 
   const chapterTitle = story.chapters?.[currentChapterIndex]?.title ?? 'Đang tải...';
   const isFirstChapter = currentChapterIndex === 0;
   const isLastChapter = !story.chapters || currentChapterIndex === story.chapters.length - 1;
   
+  // ... (Auto scroll logic omitted for brevity - same as before) ...
+  // Keeping original auto scroll logic
   const stopAutoScroll = useCallback(() => {
     if (scrollIntervalRef.current) {
         cancelAnimationFrame(scrollIntervalRef.current);
         scrollIntervalRef.current = null;
     }
     setIsAutoScrolling(false);
-    setIsNavBarVisible(true); // Hiển thị lại thanh điều hướng khi dừng cuộn
+    setIsNavBarVisible(true);
   }, []);
   
   const startAutoScroll = useCallback(() => {
-    setPopoverTarget(null); // Đóng popover khi bắt đầu cuộn
-
-    if (autoScrollSpeed === 0) {
-        stopAutoScroll();
-        return;
-    }
-    
-    setIsNavBarVisible(false); // Tự động ẩn thanh điều hướng khi bắt đầu cuộn
+    setPopoverTarget(null);
+    if (autoScrollSpeed === 0) { stopAutoScroll(); return; }
+    setIsNavBarVisible(false);
     setIsAutoScrolling(true);
-    
     let frameCount = 0;
-    // Cơ chế mới để làm chậm tốc độ cuộn:
-    // Tốc độ 10 là nhanh nhất (bỏ qua 1 frame giữa mỗi lần cuộn 1px).
-    // Tốc độ 1 là chậm nhất (bỏ qua 10 frames giữa mỗi lần cuộn 1px).
-    // Điều này tạo ra chuyển động rất chậm và mượt mà, giải quyết vấn đề tốc độ 1, 2 không hoạt động.
     const framesToSkip = 11 - autoScrollSpeed;
-
     const scrollStep = () => {
       frameCount++;
-      // Chỉ cuộn khi bộ đếm frame đạt đến ngưỡng
       if (frameCount >= framesToSkip) {
-        window.scrollBy(0, 1); // Luôn cuộn 1px để đảm bảo chuyển động mượt và nhất quán
-        frameCount = 0; // Đặt lại bộ đếm
+        window.scrollBy(0, 1);
+        frameCount = 0;
       }
-
-      // Kiểm tra nếu đã cuộn đến cuối trang
-      if (window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - 2) { // Thêm lề nhỏ
+      if (window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - 2) {
         stopAutoScroll();
       } else {
         scrollIntervalRef.current = requestAnimationFrame(scrollStep);
       }
     };
-    
-    // Xóa frame animation cũ trước khi bắt đầu một frame mới
-    if (scrollIntervalRef.current) {
-        cancelAnimationFrame(scrollIntervalRef.current);
-    }
+    if (scrollIntervalRef.current) cancelAnimationFrame(scrollIntervalRef.current);
     scrollIntervalRef.current = requestAnimationFrame(scrollStep);
   }, [autoScrollSpeed, stopAutoScroll]);
   
-  // Dừng tự động cuộn khi người dùng cuộn thủ công
   useEffect(() => {
-    const handleManualScroll = () => {
-      if (isAutoScrolling) {
-        stopAutoScroll();
-      }
-    };
+    const handleManualScroll = () => { if (isAutoScrolling) stopAutoScroll(); };
     window.addEventListener('wheel', handleManualScroll);
     window.addEventListener('touchstart', handleManualScroll);
-    
     return () => {
       window.removeEventListener('wheel', handleManualScroll);
       window.removeEventListener('touchstart', handleManualScroll);
     };
   }, [isAutoScrolling, stopAutoScroll]);
   
-  // Dừng cuộn khi chuyển chương hoặc quay lại
-  useEffect(() => {
-    return () => {
-      stopAutoScroll();
-    };
-  }, [currentChapterIndex, stopAutoScroll]);
+  useEffect(() => { return () => { stopAutoScroll(); }; }, [currentChapterIndex, stopAutoScroll]);
   
-  useEffect(() => {
-    const handleScroll = () => {
-      const currentScrollY = window.scrollY;
-      const scrollThreshold = 10;
-      const bottomOffset = 50;
-
-      const isAtBottom = window.innerHeight + currentScrollY >= document.documentElement.scrollHeight - bottomOffset;
-
-      if (isAtBottom) {
-        setIsNavBarVisible(true);
-      } else {
-        if (Math.abs(currentScrollY - lastScrollY.current) < scrollThreshold) {
-          return;
-        }
-        if (currentScrollY < lastScrollY.current || currentScrollY < 100) {
-          setIsNavBarVisible(true);
-        } else {
-          setIsNavBarVisible(false);
-        }
-      }
-      lastScrollY.current = currentScrollY <= 0 ? 0 : currentScrollY;
-    };
-
-    window.addEventListener('scroll', handleScroll, { passive: true });
-    return () => window.removeEventListener('scroll', handleScroll);
-  }, []);
+  // NOTE: Logic tự ẩn thanh nav footer khi cuộn đã được loại bỏ theo yêu cầu.
+  // Thanh nav sẽ luôn hiển thị trừ khi bật chế độ "Tự động cuộn" (auto-scroll) bằng nút riêng.
 
   const handleChapterSelectAndClose = (chapter: Chapter) => {
+    if (isBusy && !isAnalyzing) return;
     onSelectChapter(chapter);
     setIsListVisible(false);
   };
 
   const handleAutoScrollButtonClick = (target: 'top' | 'bottom') => {
-      if (isAutoScrolling) {
-          stopAutoScroll();
-      } else {
-          setPopoverTarget(prev => (prev === target ? null : target));
+      if (isAutoScrolling) stopAutoScroll();
+      else setPopoverTarget(prev => (prev === target ? null : target));
+  };
+
+  const handleSaveContent = () => {
+      if (onContentUpdate) onContentUpdate(editableContent);
+      setIsEditingContent(false);
+  };
+
+  const handleCancelEdit = () => {
+      setEditableContent(content);
+      setIsEditingContent(false);
+  };
+  
+  const handleAiRewriteClick = async () => {
+      if (onRewrite) {
+          setIsRewriting(true);
+          try { await onRewrite(); } finally { setIsRewriting(false); }
       }
   };
   
+  const handleConfirmAddChapter = async (title: string, newContent: string) => {
+      if (onCreateChapter) await onCreateChapter(story, title, newContent);
+  };
+  
+  const handleTtsButtonClick = () => {
+      if (isAudioPlayerVisible) {
+          onTtsStop();
+          setIsAudioPlayerVisible(false);
+          setIsTtsSettingsOpen(false); // Close settings if player closes
+          return;
+      }
+      if (settings.ttsSettings.showTtsSetupOnPlay) {
+          setIsTtsSetupVisible(true);
+      } else {
+          setIsAudioPlayerVisible(true);
+          if (ttsStatus === 'idle' || ttsStatus === 'error') {
+              onTtsRequest();
+          }
+      }
+  };
+
+  const handleConfirmTtsSetup = () => {
+      setIsTtsSetupVisible(false);
+      setIsAudioPlayerVisible(true);
+      onTtsRequest();
+  };
+
+  
   const entityMapData = useMemo(() => {
     if (!cumulativeStats) return { map: new Map(), regex: null };
-
     const map = new Map<string, any>();
     const allNames: string[] = [];
-
     const addEntity = (entity: any) => {
         if (entity && entity.ten && typeof entity.ten === 'string' && entity.ten.trim().length > 1) {
             const trimmedName = entity.ten.trim();
@@ -172,22 +481,9 @@ const ChapterContent: React.FC<ChapterContentProps> = ({ story, currentChapterIn
             }
         }
     };
-    
-    const addEntities = (entityArray: any[] | undefined) => {
-        if (entityArray) {
-            entityArray.forEach(addEntity);
-        }
-    };
+    const addEntities = (arr: any[] | undefined) => { if (arr) arr.forEach(addEntity); };
 
-    const mainChar = cumulativeStats.trangThai?.ten;
-    if (mainChar && mainChar.trim()) {
-        const charEntity = {
-            ten: mainChar.trim(),
-            moTa: `Nhân vật chính. Cảnh giới hiện tại: ${cumulativeStats.canhGioi || 'Chưa rõ'}`
-        };
-        addEntity(charEntity);
-    }
-    
+    if (cumulativeStats.trangThai?.ten) addEntity({ ten: cumulativeStats.trangThai.ten, moTa: `Nhân vật chính. Cảnh giới: ${cumulativeStats.canhGioi || 'Chưa rõ'}` });
     addEntities(cumulativeStats.trangThai?.tuChat);
     addEntities(cumulativeStats.balo);
     addEntities(cumulativeStats.congPhap);
@@ -197,33 +493,32 @@ const ChapterContent: React.FC<ChapterContentProps> = ({ story, currentChapterIn
     addEntities(cumulativeStats.diaDiem);
     
     if (allNames.length === 0) return { map, regex: null };
-
     allNames.sort((a, b) => b.length - a.length);
-
     const escapedNames = allNames.map(name => name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
-    
     const regex = new RegExp(`(${escapedNames.join('|')})`, 'gi');
-
     return { map, regex };
   }, [cumulativeStats]);
   
-  const renderContentWithTooltips = useCallback((text: string) => {
-    const { map, regex } = entityMapData;
-    if (!regex || map.size === 0) {
+  const renderContentWithTooltips = useCallback((text: string, forcePlainText = false) => {
+    // If forcing plain text (for active karaoke mode to prevent nesting issues)
+    if (forcePlainText) {
         return text.split('\n').map((paragraph, index) => (
-            <p key={index} className="mb-4">{paragraph}</p>
+            <p key={index} className="mb-4 break-words">{paragraph}</p>
         ));
     }
 
+    const { map, regex } = entityMapData;
+    if (!regex || map.size === 0) {
+        return text.split('\n').map((paragraph, index) => (
+            <p key={index} className="mb-4 break-words">{paragraph}</p>
+        ));
+    }
     return text.split('\n').map((paragraph, pIndex) => {
         if (!paragraph.trim()) return <p key={pIndex} className="mb-4" />;
-        
         const parts = paragraph.split(regex);
-
         return (
-            <p key={pIndex} className="mb-4">
+            <p key={pIndex} className="mb-4 break-words">
                 {parts.map((part, index) => {
-                    // Even indices are text, odd are matches
                     if (index % 2 === 1) { 
                         const entity = map.get(part.toLowerCase());
                         if (entity) {
@@ -240,6 +535,40 @@ const ChapterContent: React.FC<ChapterContentProps> = ({ story, currentChapterIn
         );
     });
   }, [entityMapData]);
+
+  // Special renderer for the ACTIVE chunk during TTS (Karaoke Mode)
+  const renderKaraokeChunk = (text: string) => {
+      if (!currentWordRange) {
+          return <p className="mb-4 break-words whitespace-pre-wrap">{text}</p>;
+      }
+
+      const { start, end } = currentWordRange;
+      
+      const passedText = text.slice(0, start);
+      const activeWord = text.slice(start, end);
+      const remainingText = text.slice(end);
+
+      return (
+          <div className="mb-4 break-words whitespace-pre-wrap">
+              {/* Passed Text: Standard */}
+              <span>{passedText}</span>
+              
+              {/* Active Word: Highlighted Color Only */}
+              <span 
+                ref={activeWordRef}
+                style={{ 
+                    color: settings.highlightColor, 
+                }}
+                className="transition-colors duration-100 font-medium"
+              >
+                  {activeWord}
+              </span>
+              
+              {/* Remaining Text: Standard */}
+              <span>{remainingText}</span>
+          </div>
+      );
+  };
 
   const autoScrollPopover = (
     <div 
@@ -274,72 +603,403 @@ const ChapterContent: React.FC<ChapterContentProps> = ({ story, currentChapterIn
   );
 
   const navButtons = (target: 'top' | 'bottom') => {
-    const ref = target === 'top' ? autoScrollButtonRefTop : autoScrollButtonRefBottom;
+    // 1. TOP NAV
+    if (target === 'top') {
+        const TtsButton = () => {
+            const isActive = isAudioPlayerVisible;
+            return (
+                <button
+                    onClick={handleTtsButtonClick}
+                    className={`flex-shrink-0 text-white p-2 rounded-lg transition-colors duration-200 ${isActive ? 'bg-[var(--theme-accent-primary)]/80' : 'bg-[var(--theme-accent-primary)] hover:brightness-110'} disabled:opacity-50 disabled:cursor-not-allowed`}
+                    aria-label="Mở/đóng trình phát âm thanh"
+                >
+                    {ttsStatus === 'loading' ? <SpinnerIcon className="h-6 w-6 animate-spin" /> : <PlayIcon className="h-6 w-6" />}
+                </button>
+            );
+        };
+
+        return (
+            <div className="container mx-auto px-2 flex justify-center items-center gap-1 sm:gap-2">
+              <button onClick={onPrev} disabled={isFirstChapter || (isBusy && !isAnalyzing)} className="whitespace-nowrap bg-[var(--theme-bg-surface)] brightness-125 hover:brightness-150 text-[var(--theme-text-primary)] font-bold text-xs sm:text-sm py-2 px-3 sm:px-4 rounded-lg transition-all duration-300 disabled:opacity-50">Chương trước</button>
+              <button onClick={() => setIsListVisible(true)} disabled={isBusy && !isAnalyzing} className="flex-shrink-0 bg-[var(--theme-text-primary)] text-[var(--theme-bg-surface)] hover:brightness-90 font-bold p-2 rounded-lg transition-all duration-300 disabled:opacity-50"><ListIcon className="h-6 w-6" /></button>
+              <button onClick={onNext} disabled={isLastChapter || (isBusy && !isAnalyzing)} className="whitespace-nowrap bg-[var(--theme-bg-surface)] brightness-125 hover:brightness-150 text-[var(--theme-text-primary)] font-bold text-xs sm:text-sm py-2 px-3 sm:px-4 rounded-lg transition-all duration-300 disabled:opacity-50">Chương sau</button>
+              <div className="flex items-center gap-2 border-l border-[var(--theme-border)]/50 pl-2 sm:pl-3"><TtsButton /></div>
+              <div ref={autoScrollButtonRefTop} className="relative flex-shrink-0 border-l border-[var(--theme-border)]/50 pl-2 sm:pl-3">
+                <button onClick={() => handleAutoScrollButtonClick('top')} className={`p-2 rounded-lg transition-all duration-300 ${isAutoScrolling ? 'bg-[var(--theme-accent-primary)] text-white' : 'bg-[var(--theme-bg-surface)] brightness-125 hover:brightness-150 text-[var(--theme-text-primary)]'}`}>
+                    {isAutoScrolling ? <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M10 9v6m4-6v6m7-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg> : <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M19 13l-7 7-7-7m14-8l-7 7-7-7" /></svg>}
+                </button>
+              </div>
+               <button onClick={() => setIsSettingsVisible(true)} disabled={isBusy && !isAnalyzing} className="flex-shrink-0 bg-[var(--theme-bg-surface)] brightness-125 hover:brightness-150 text-[var(--theme-text-primary)] p-2 rounded-lg transition-all duration-300 disabled:opacity-50">
+               <CogIcon className="w-6 h-6" />
+               </button>
+            </div>
+        );
+    }
+
+    // 2. BOTTOM NAV
+    if (isAudioPlayerVisible) {
+        const handleFooterPlayPause = () => {
+            if (ttsStatus === 'playing') onTtsStatusChange('paused');
+            else if (ttsStatus === 'paused' || ttsStatus === 'ready') onTtsStatusChange('playing');
+            else if (ttsStatus === 'idle' || ttsStatus === 'error') {
+                onTtsRequest();
+            }
+        };
+
+        const handleClosePlayer = () => {
+            onTtsStop();
+            setIsAudioPlayerVisible(false);
+            setIsTtsSettingsOpen(false);
+        };
+
+        return (
+            <div className="container mx-auto px-2 flex justify-between items-center gap-2">
+                <div className="flex items-center gap-1 sm:gap-2">
+                    <button onClick={onPrev} disabled={isFirstChapter} className="bg-[var(--theme-bg-surface)] brightness-125 hover:brightness-150 text-[var(--theme-text-primary)] font-bold py-2 px-3 rounded-lg transition-all duration-300 disabled:opacity-50" title="Chương trước">
+                        <svg className="w-5 h-5 sm:hidden" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" /></svg>
+                        <span className="hidden sm:inline">Trước</span>
+                    </button>
+                    <button onClick={() => setIsListVisible(true)} className="flex-shrink-0 bg-[var(--theme-text-primary)] text-[var(--theme-bg-surface)] hover:brightness-90 font-bold p-2 rounded-lg transition-all duration-300" title="Danh sách chương">
+                        <ListIcon className="h-6 w-6" />
+                    </button>
+                    <button onClick={onNext} disabled={isLastChapter} className="bg-[var(--theme-bg-surface)] brightness-125 hover:brightness-150 text-[var(--theme-text-primary)] font-bold py-2 px-3 rounded-lg transition-all duration-300 disabled:opacity-50" title="Chương sau">
+                        <span className="hidden sm:inline">Sau</span>
+                        <svg className="w-5 h-5 sm:hidden" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" /></svg>
+                    </button>
+                </div>
+
+                <div className="flex flex-1 flex-col items-center justify-center bg-slate-800/80 rounded-2xl px-4 py-2 border border-[var(--theme-accent-primary)]/30 shadow-lg mx-1 sm:mx-2 max-w-md relative">
+                    {/* Playlist Popover */}
+                    {isPlaylistOpen && (
+                        <div className="absolute bottom-full mb-2 left-0 right-0 max-h-60 bg-slate-900 border border-slate-700 rounded-lg shadow-xl overflow-y-auto z-20 p-2 animate-fade-in-up">
+                            <div className="flex justify-between items-center mb-2 px-1">
+                                <span className="text-xs font-bold text-slate-300">Danh sách phát ({chunkMetadata.length} đoạn)</span>
+                                <button onClick={() => setIsPlaylistOpen(false)} className="text-slate-500 hover:text-white"><CloseIcon className="w-4 h-4"/></button>
+                            </div>
+                            <ul className="space-y-1">
+                                {chunkMetadata.map((chunk) => (
+                                    <li key={chunk.index}>
+                                        <button 
+                                            onClick={() => handleJumpToChunk(chunk.index)}
+                                            className={`w-full text-left text-xs p-2 rounded flex items-center gap-2 transition-colors ${chunk.index === ttsCurrentChunkIndex ? 'bg-[var(--theme-accent-primary)] text-white' : 'hover:bg-slate-800 text-slate-400'}`}
+                                        >
+                                            {chunk.index === ttsCurrentChunkIndex && ttsStatus === 'playing' && <SpinnerIcon className="w-3 h-3 animate-spin"/>}
+                                            <span className="font-mono opacity-50">#{chunk.index + 1}</span>
+                                            <span className="truncate">{chunk.text.substring(0, 40)}...</span>
+                                        </button>
+                                    </li>
+                                ))}
+                            </ul>
+                        </div>
+                    )}
+
+                    {/* TTS Settings Popover */}
+                    {isTtsSettingsOpen && (
+                        <div className="absolute bottom-full mb-2 z-20 bg-slate-900 border border-slate-700 rounded-lg shadow-xl p-3 animate-fade-in-up w-64 left-1/2 -translate-x-1/2">
+                            <div className="flex justify-between items-center mb-3">
+                                <span className="text-xs font-bold text-slate-300">Cấu hình giọng đọc</span>
+                                <button onClick={() => setIsTtsSettingsOpen(false)} className="text-slate-500 hover:text-white"><CloseIcon className="w-4 h-4"/></button>
+                            </div>
+                            <div className="space-y-3">
+                                <div>
+                                    <label className="block text-[10px] text-slate-400 mb-1">Giọng đọc</label>
+                                    <select
+                                        value={settings.ttsSettings.voice}
+                                        onChange={e => handleTtsSettingChange('voice', e.target.value)}
+                                        className="w-full bg-slate-800 border border-slate-600 rounded p-1 text-xs text-slate-200 focus:outline-none focus:border-[var(--theme-accent-primary)]"
+                                    >
+                                        <option value="">Mặc định</option>
+                                        {availableSystemVoices.map(voice => (
+                                            <option key={voice.voiceURI} value={voice.voiceURI}>{voice.name}</option>
+                                        ))}
+                                    </select>
+                                </div>
+                                <div>
+                                    <div className="flex justify-between text-[10px] text-slate-400 mb-1">
+                                        <span>Tốc độ</span>
+                                        <span>{settings.ttsSettings.playbackRate}x</span>
+                                    </div>
+                                    <input
+                                        type="range"
+                                        min="0.5"
+                                        max="2.0"
+                                        step="0.1"
+                                        value={settings.ttsSettings.playbackRate}
+                                        onChange={e => handleTtsSettingChange('playbackRate', parseFloat(e.target.value))}
+                                        className="w-full h-1 bg-slate-600 rounded-lg appearance-none cursor-pointer accent-[var(--theme-accent-primary)] hover:accent-[var(--theme-accent-primary)]"
+                                    />
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
+                    <div className="w-full flex items-center gap-2 mb-1">
+                        <span className="text-[10px] text-slate-300 min-w-[35px] text-right font-mono">{formatTime(ttsCurrentTime)}</span>
+                        <input
+                            type="range"
+                            min="0"
+                            max="100"
+                            step="0.1"
+                            value={ttsProgress}
+                            onChange={handleSeek}
+                            className="w-full h-1 bg-slate-600 rounded-lg appearance-none cursor-pointer accent-[var(--theme-accent-primary)] hover:accent-[var(--theme-accent-primary)]"
+                        />
+                        <span className="text-[10px] text-slate-400 min-w-[35px] font-mono">{formatTime(ttsDuration)}</span>
+                    </div>
+
+                    <div className="flex items-center gap-3">
+                        <button 
+                            onClick={() => setIsPlaylistOpen(!isPlaylistOpen)}
+                            className={`p-1 rounded-full hover:text-white transition-colors ${isPlaylistOpen ? 'text-[var(--theme-accent-primary)] bg-slate-700' : 'text-slate-300 hover:bg-white/10'}`}
+                            title="Danh sách phát"
+                        >
+                            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M4 6h16M4 12h16M4 18h16" />
+                            </svg>
+                        </button>
+
+                        <button 
+                            onClick={() => onTtsChunkChange(ttsCurrentChunkIndex - 1)} 
+                            disabled={ttsCurrentChunkIndex === 0} 
+                            className="p-1 text-slate-300 hover:text-white disabled:opacity-30 rounded-full hover:bg-white/10"
+                            title="Đoạn trước"
+                        >
+                            <BackwardStepIcon className="w-5 h-5 text-white" />
+                        </button>
+                        
+                        <button 
+                            onClick={handleFooterPlayPause} 
+                            className="w-8 h-8 flex items-center justify-center bg-[var(--theme-accent-primary)] hover:brightness-110 text-white rounded-full transition-transform hover:scale-105 shadow-md border border-[var(--theme-accent-primary)]/50"
+                            disabled={ttsStatus === 'loading'}
+                        >
+                            {ttsStatus === 'loading' ? <SpinnerIcon className="w-4 h-4 animate-spin" /> : (ttsStatus === 'playing' ? <PauseIcon className="w-4 h-4"/> : <PlayIcon className="w-4 h-4 ml-0.5"/>)}
+                        </button>
+
+                        <button 
+                            onClick={() => onTtsChunkChange(ttsCurrentChunkIndex + 1)} 
+                            disabled={ttsCurrentChunkIndex >= ttsTextChunks.length - 1} 
+                            className="p-1 text-slate-300 hover:text-white disabled:opacity-30 rounded-full hover:bg-white/10"
+                            title="Đoạn sau"
+                        >
+                            <ForwardStepIcon className="w-5 h-5 text-white" />
+                        </button>
+
+                        <div className="w-px h-4 bg-slate-600 mx-1 opacity-50"></div>
+                        
+                        {/* Volume Control - Visible directly in main UI */}
+                        <div className="flex items-center gap-2 group mr-1">
+                            <VolumeHighIcon className="w-4 h-4 text-slate-300 group-hover:text-white" />
+                            <input
+                                type="range"
+                                min="0"
+                                max="1"
+                                step="0.1"
+                                value={settings.ttsSettings.volume}
+                                onChange={e => handleTtsSettingChange('volume', parseFloat(e.target.value))}
+                                className="w-16 h-1 bg-slate-600 rounded-lg appearance-none cursor-pointer accent-[var(--theme-accent-primary)] hover:accent-[var(--theme-accent-primary)]"
+                                title={`Âm lượng: ${Math.round(settings.ttsSettings.volume * 100)}%`}
+                            />
+                        </div>
+
+                        {/* TTS Settings Toggle Button */}
+                        <button 
+                            onClick={() => setIsTtsSettingsOpen(!isTtsSettingsOpen)}
+                            className={`p-1 rounded-full hover:text-white transition-colors ${isTtsSettingsOpen ? 'text-[var(--theme-accent-primary)] bg-slate-700' : 'text-slate-300 hover:bg-white/10'}`}
+                            title="Cấu hình giọng đọc"
+                        >
+                            <SlidersIcon className="w-4 h-4" />
+                        </button>
+
+                        <button 
+                            onClick={handleClosePlayer} 
+                            className="p-1 rounded-full text-slate-400 hover:text-white hover:bg-slate-700 transition-colors"
+                            title="Đóng trình phát"
+                        >
+                            <CloseIcon className="w-4 h-4"/>
+                        </button>
+                    </div>
+                </div>
+
+                <div>
+                    <button onClick={() => setIsSettingsVisible(true)} className="bg-[var(--theme-bg-surface)] brightness-125 hover:brightness-150 text-[var(--theme-text-primary)] p-2 rounded-lg transition-all duration-300" title="Cài đặt">
+                        <CogIcon className="w-6 h-6" />
+                    </button>
+                </div>
+            </div>
+        );
+    }
+
+    // 3. BOTTOM NAV (Default)
     return (
         <div className="container mx-auto px-2 flex justify-center items-center gap-1 sm:gap-2">
-          <button onClick={onPrev} disabled={isFirstChapter} className="whitespace-nowrap bg-[var(--theme-bg-surface)] brightness-125 hover:brightness-150 text-[var(--theme-text-primary)] font-bold text-xs sm:text-sm py-2 px-3 sm:px-4 rounded-lg transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed">Chương trước</button>
-          <button onClick={() => setIsListVisible(true)} className="flex-shrink-0 bg-[var(--theme-text-primary)] text-[var(--theme-bg-surface)] hover:brightness-90 font-bold p-2 rounded-lg transition-all duration-300" aria-label="Danh sách chương">
+          <button 
+            onClick={onPrev} 
+            disabled={isFirstChapter || (isBusy && !isAnalyzing)} 
+            className="whitespace-nowrap bg-[var(--theme-bg-surface)] brightness-125 hover:brightness-150 text-[var(--theme-text-primary)] font-bold text-xs sm:text-sm py-2 px-3 sm:px-4 rounded-lg transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            Chương trước
+          </button>
+          <button 
+            onClick={() => setIsListVisible(true)} 
+            disabled={isBusy && !isAnalyzing}
+            className="flex-shrink-0 bg-[var(--theme-text-primary)] text-[var(--theme-bg-surface)] hover:brightness-90 font-bold p-2 rounded-lg transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed" 
+            aria-label="Danh sách chương"
+          >
             <ListIcon className="h-6 w-6" />
           </button>
-          <button onClick={onNext} disabled={isLastChapter} className="whitespace-nowrap bg-[var(--theme-bg-surface)] brightness-125 hover:brightness-150 text-[var(--theme-text-primary)] font-bold text-xs sm:text-sm py-2 px-3 sm:px-4 rounded-lg transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed">Chương sau</button>
-          <button onClick={() => setIsSettingsVisible(true)} className="flex-shrink-0 bg-[var(--theme-bg-surface)] brightness-125 hover:brightness-150 text-[var(--theme-text-primary)] p-2 rounded-lg transition-all duration-300">
-            <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-            </svg>
+          <button 
+            onClick={onNext} 
+            disabled={isLastChapter || (isBusy && !isAnalyzing)} 
+            className="whitespace-nowrap bg-[var(--theme-bg-surface)] brightness-125 hover:brightness-150 text-[var(--theme-text-primary)] font-bold text-xs sm:text-sm py-2 px-3 sm:px-4 rounded-lg transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            Chương sau
           </button>
-          {/* Nút tự động cuộn và popover */}
-          <div ref={ref} className="relative flex-shrink-0">
+          <div className="flex items-center gap-2 border-l border-[var(--theme-border)]/50 pl-2 sm:pl-3">
+             <button
+                onClick={handleTtsButtonClick}
+                className={`flex-shrink-0 text-white p-2 rounded-lg transition-colors duration-200 bg-[var(--theme-accent-primary)] hover:brightness-110 disabled:opacity-50 disabled:cursor-not-allowed`}
+                aria-label="Mở/đóng trình phát âm thanh"
+                disabled={isRewriting}
+            >
+                {ttsStatus === 'loading' ? <SpinnerIcon className="h-6 w-6 animate-spin" /> : <PlayIcon className="h-6 w-6" />}
+            </button>
+          </div>
+          <div ref={autoScrollButtonRefBottom} className="relative flex-shrink-0 border-l border-[var(--theme-border)]/50 pl-2 sm:pl-3">
             <button 
-                onClick={() => handleAutoScrollButtonClick(target)} 
+                onClick={() => handleAutoScrollButtonClick('bottom')} 
                 className={`p-2 rounded-lg transition-all duration-300 ${isAutoScrolling ? 'bg-[var(--theme-accent-primary)] text-white' : 'bg-[var(--theme-bg-surface)] brightness-125 hover:brightness-150 text-[var(--theme-text-primary)]'}`}
                 aria-label={isAutoScrolling ? "Dừng cuộn" : "Bắt đầu cuộn tự động"}
                 >
                 {isAutoScrolling ? (
-                    // Pause Icon
                     <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                         <path strokeLinecap="round" strokeLinejoin="round" d="M10 9v6m4-6v6m7-3a9 9 0 11-18 0 9 9 0 0118 0z" />
                     </svg>
                 ) : (
-                    // Play/Scroll Icon
                     <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                         <path strokeLinecap="round" strokeLinejoin="round" d="M19 13l-7 7-7-7m14-8l-7 7-7-7" />
                     </svg>
                 )}
             </button>
           </div>
+           <button 
+            onClick={() => setIsSettingsVisible(true)} 
+            disabled={isBusy && !isAnalyzing}
+            className="flex-shrink-0 bg-[var(--theme-bg-surface)] brightness-125 hover:brightness-150 text-[var(--theme-text-primary)] p-2 rounded-lg transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            <CogIcon className="w-6 h-6" />
+          </button>
         </div>
       );
     };
 
   return (
     <>
-      <div className="bg-[var(--reader-bg)] rounded-lg shadow-xl p-4 sm:p-8 lg:p-12 w-full animate-fade-in border border-[var(--theme-border)] pb-24">
-        <button
-          onClick={onBack}
-          className="mb-6 bg-[var(--theme-accent-primary)] hover:brightness-90 text-white font-bold py-2 px-4 rounded-lg transition-colors duration-300"
-        >
-          &larr; Quay lại
-        </button>
+      <div className="bg-[var(--theme-bg-base)] rounded-lg shadow-xl p-4 sm:p-8 lg:p-12 w-full animate-fade-in border border-[var(--theme-border)] pb-24">
+        <div className="mb-6 flex justify-between items-center flex-wrap gap-2">
+            <button
+                onClick={onBack}
+                disabled={isBusy && !isAnalyzing}
+                className="bg-[var(--theme-accent-primary)] hover:brightness-90 text-white font-bold py-2 px-4 rounded-lg transition-colors duration-300 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+            &larr; Quay lại
+            </button>
+            
+            {onContentUpdate && !isEditingContent && (
+                <div className="flex gap-2">
+                    <button
+                        onClick={() => setIsEditingContent(true)}
+                        disabled={isBusy && !isAnalyzing}
+                        className="flex items-center gap-2 bg-slate-600 hover:bg-slate-500 text-white font-bold py-2 px-4 rounded-lg transition-colors duration-300 disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                        <EditIcon className="w-5 h-5" />
+                        <span className="hidden sm:inline">Sửa nội dung</span>
+                    </button>
+                    {onCreateChapter && (
+                        <button
+                            onClick={() => setIsAddChapterModalOpen(true)}
+                            disabled={isBusy && !isAnalyzing}
+                            className="flex items-center gap-2 bg-green-600 hover:bg-green-500 text-white font-bold py-2 px-4 rounded-lg transition-colors duration-300 disabled:opacity-50 disabled:cursor-not-allowed"
+                            title="Thêm chương mới"
+                        >
+                            <PlusIcon className="w-5 h-5" />
+                        </button>
+                    )}
+                </div>
+            )}
+        </div>
 
         <h2 className="text-3xl font-bold text-center text-[var(--reader-title)] mb-4">{chapterTitle}</h2>
+        
+        {ttsError && isAudioPlayerVisible && (
+             <div className="my-2 p-2 bg-rose-900/50 text-rose-300 text-center rounded text-sm border border-rose-700">
+                 Lỗi Audio: {ttsError}
+             </div>
+        )}
 
         <div className="py-4 border-y border-[var(--theme-border)]">
           {navButtons('top')}
         </div>
 
-        <div
-          className="prose max-w-none text-justify mt-6"
-          style={{ 
-              minHeight: '50vh', 
-              color: 'var(--reader-text)', 
-              fontSize: 'var(--reader-font-size)',
-              fontFamily: 'var(--reader-font-family)',
-              lineHeight: 1.8,
-          }}
-        >
-          {renderContentWithTooltips(content)}
-        </div>
+        {isEditingContent ? (
+            <div className="mt-6">
+                <div className="flex justify-between items-center mb-2">
+                    <h3 className="text-lg font-semibold text-[var(--theme-text-primary)]">Chỉnh sửa nội dung</h3>
+                    {onRewrite && (
+                        <button
+                            onClick={handleAiRewriteClick}
+                            className="flex items-center gap-2 bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-500 hover:to-blue-500 text-white text-sm font-bold py-1.5 px-3 rounded-lg transition-colors duration-300 disabled:opacity-50 disabled:cursor-not-allowed"
+                            disabled={isRewriting}
+                            title="Dùng AI viết lại/dịch lại cho dễ hiểu"
+                        >
+                            {isRewriting ? <SpinnerIcon className="w-4 h-4 animate-spin" /> : <SparklesIcon className="w-4 h-4" />}
+                            <span>AI Viết lại</span>
+                        </button>
+                    )}
+                </div>
+                <textarea
+                    value={editableContent}
+                    onChange={(e) => setEditableContent(e.target.value)}
+                    className="w-full h-[60vh] p-4 rounded-md bg-[var(--theme-bg-base)] text-[var(--theme-text-primary)] border border-[var(--theme-border)] focus:ring-2 focus:ring-[var(--theme-accent-primary)] focus:outline-none"
+                    style={{ 
+                        fontSize: 'var(--reader-font-size)',
+                        fontFamily: 'var(--reader-font-family)',
+                    }}
+                />
+                <div className="flex justify-end gap-4 mt-4">
+                    <button onClick={handleCancelEdit} className="px-6 py-2 bg-slate-600 text-white rounded-lg hover:bg-slate-500 font-bold">Hủy</button>
+                    <button onClick={handleSaveContent} className="px-6 py-2 bg-green-600 text-white rounded-lg hover:bg-green-500 font-bold">Lưu thay đổi</button>
+                </div>
+            </div>
+        ) : (
+            <div
+            className="prose max-w-none text-justify mt-6 break-words whitespace-pre-wrap overflow-hidden"
+            style={{ 
+                minHeight: '50vh', 
+                color: 'var(--reader-text)', 
+                fontSize: 'var(--reader-font-size)',
+                fontFamily: 'var(--reader-font-family)',
+                lineHeight: 1.8,
+            }}
+            >
+            {ttsStatus !== 'idle' && ttsTextChunks.length > 0 ? (
+                ttsTextChunks.map((chunk, index) => {
+                    const isActive = index === ttsCurrentChunkIndex;
+                    
+                    return (
+                        <div
+                            key={index}
+                            ref={isActive ? activeChunkRef : null}
+                            className={`transition-all duration-300 my-2 ${!isActive ? 'hover:bg-[var(--theme-text-secondary)]/5' : ''}`}
+                        >
+                            {isActive ? renderKaraokeChunk(chunk) : renderContentWithTooltips(chunk)}
+                        </div>
+                    );
+                })
+            ) : (
+                renderContentWithTooltips(content)
+            )}
+            </div>
+        )}
       </div>
       
       {popoverTarget && autoScrollPopover}
@@ -357,11 +1017,32 @@ const ChapterContent: React.FC<ChapterContentProps> = ({ story, currentChapterIn
         readChapters={readChapters}
       />
       
+      {/* Default Settings Panel */}
       <SettingsPanel 
         isOpen={isSettingsVisible}
         onClose={() => setIsSettingsVisible(false)}
         settings={settings}
         onSettingsChange={onSettingsChange}
+        availableSystemVoices={availableSystemVoices}
+        mode="default"
+      />
+
+      {/* TTS Setup Settings Panel */}
+      <SettingsPanel 
+        isOpen={isTtsSetupVisible}
+        onClose={() => setIsTtsSetupVisible(false)}
+        settings={settings}
+        onSettingsChange={onSettingsChange}
+        availableSystemVoices={availableSystemVoices}
+        mode="tts-setup"
+        onConfirmTts={handleConfirmTtsSetup}
+      />
+      
+      <ChapterEditModal
+        isOpen={isAddChapterModalOpen}
+        onClose={() => setIsAddChapterModalOpen(false)}
+        onSave={handleConfirmAddChapter}
+        nextChapterIndex={(story.chapters?.length || 0) + 1}
       />
     </>
   );

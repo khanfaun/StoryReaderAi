@@ -1,9 +1,11 @@
 
 const API_KEY_STORAGE_KEY = 'google_gemini_api_key';
 const TOKEN_USAGE_MAP_KEY = 'google_gemini_token_usage_map';
+export const TTS_FREE_TIER_CHARS = 1000000; // 1 million characters per month for TTS free tier
 
 export interface TokenUsage {
   totalTokens: number;
+  ttsCharacters: number;
   lastReset: number; // timestamp
 }
 
@@ -36,6 +38,7 @@ export const hasApiKey = (): boolean => {
 
 const getDefaultUsage = (): TokenUsage => ({
     totalTokens: 0,
+    ttsCharacters: 0,
     lastReset: new Date().getTime(),
 });
 

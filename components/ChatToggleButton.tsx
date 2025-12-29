@@ -1,3 +1,4 @@
+
 import React from 'react';
 import { ChatIcon } from './icons';
 
@@ -13,7 +14,7 @@ const ChatToggleButton: React.FC<ChatToggleButtonProps> = ({ onClick, isPanelOpe
   return (
     <button
       onClick={onClick}
-      className={`fixed ${bottomClass} left-6 bg-blue-600 hover:bg-blue-500 text-white rounded-full w-14 h-14 flex items-center justify-center shadow-lg z-50 transition-all duration-300 transform hover:scale-110`}
+      className={`fixed ${bottomClass} left-6 bg-[var(--theme-accent-primary)] hover:brightness-110 text-white rounded-full w-14 h-14 flex items-center justify-center shadow-lg z-50 transition-all duration-300 transform hover:scale-110`}
       aria-label={isPanelOpen ? "Đóng bảng trò chuyện AI" : "Mở bảng trò chuyện AI"}
     >
       <ChatIcon className="w-7 h-7" />
