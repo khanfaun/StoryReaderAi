@@ -2,37 +2,95 @@
 import { GoogleGenAI, Type } from "@google/genai";
 import type { CharacterStats, Story, Chapter } from "../types";
 import { isAiStudio } from './apiKeyService';
-
-// The AI client instance is now managed dynamically based on the provided API key.
-let ai: GoogleGenAI | undefined;
-let currentKey: string | undefined;
+import * as apiKeyService from './apiKeyService';
 
 /**
- * Gets an instance of the GoogleGenAI client, creating or re-creating it if the API key has changed.
- * This function handles the environment-specific key usage (user-provided vs. AI Studio environment).
- * @param {string} apiKey - The API key provided by the user from local storage.
+ * Creates a new GoogleGenAI client instance. This is now a simple factory function.
+ * @param {string} apiKey - The API key to use.
  * @throws {Error} if the API key is not available.
  * @returns {GoogleGenAI} The initialized GoogleGenAI client.
  */
 const getAiClient = (apiKey: string): GoogleGenAI => {
-    // In AI Studio, always use the environment variable key.
-    // On the web, use the key provided by the user.
     const keyToUse = isAiStudio() ? process.env.API_KEY! : apiKey;
-  
-    // If we have an instance and the key hasn't changed, reuse it.
-    if (ai && currentKey === keyToUse) {
-      return ai;
-    }
-  
     if (!keyToUse) {
       throw new Error("API Key is not provided or configured.");
     }
-  
-    // Create a new instance if the key has changed or it's the first time.
-    ai = new GoogleGenAI({ apiKey: keyToUse });
-    currentKey = keyToUse;
-    return ai;
+    return new GoogleGenAI({ apiKey: keyToUse });
 };
+
+/**
+ * Checks if an error is related to quota/billing issues.
+ * @param error The error object.
+ * @returns True if the error is a quota error, false otherwise.
+ */
+function isQuotaError(error: unknown): boolean {
+    if (error instanceof Error) {
+        const message = error.message.toLowerCase();
+        return message.includes('quota') || 
+               message.includes('billing') || 
+               message.includes('resource has been exhausted');
+    }
+    return false;
+}
+
+/**
+ * A robust wrapper for executing Gemini API calls with automatic key rotation and retries on quota errors.
+ * @param apiFunction The actual API call to execute. It receives the Gemini client as an argument.
+ * @param onKeySwitched An optional callback to notify the UI that the active key has changed.
+ * @returns The result of the API call.
+ * @throws An error if all keys fail or if a non-quota error occurs.
+ */
+async function executeApiCallWithRetry<T>(
+    apiFunction: (client: GoogleGenAI) => Promise<T>,
+    onKeySwitched?: () => void
+): Promise<T> {
+    const allKeys = apiKeyService.getApiKeys();
+    if (allKeys.length === 0) {
+        throw new Error("Không có API Key nào được lưu. Vui lòng thêm một key.");
+    }
+
+    const activeKey = apiKeyService.getActiveApiKey();
+    const startIndex = activeKey ? allKeys.findIndex(k => k.id === activeKey.id) : 0;
+    
+    // We will try each key once, starting from the current active one
+    for (let i = 0; i < allKeys.length; i++) {
+        const keyIndex = (startIndex + i) % allKeys.length;
+        const keyToTry = allKeys[keyIndex];
+
+        try {
+            // Set this key as active for the current attempt
+            apiKeyService.setActiveApiKeyId(keyToTry.id);
+            // If we are trying a new key, notify the caller
+            if (i > 0 && onKeySwitched) {
+                onKeySwitched();
+            }
+
+            const client = getAiClient(keyToTry.key);
+            // Execute the provided API function
+            const result = await apiFunction(client);
+            return result; // Success! Exit the loop and return the result.
+        
+        } catch (error) {
+            console.warn(`Thử key ${keyToTry.key.slice(-4)} thất bại. Lỗi:`, error);
+            if (isQuotaError(error)) {
+                // It's a quota error, let the loop continue to the next key.
+                if (i < allKeys.length - 1) {
+                    console.log(`Key ${keyToTry.key.slice(-4)} đã hết hạn mức. Tự động chuyển sang key tiếp theo...`);
+                }
+                continue; 
+            } else {
+                // It's a different error (e.g., invalid prompt, network issue), so we should not retry.
+                // Re-throw the original error to be handled by the UI.
+                throw error;
+            }
+        }
+    }
+
+    // If the loop completes, it means all keys failed due to quota issues.
+    apiKeyService.setActiveApiKeyId(null); // Deactivate key since all failed
+    if (onKeySwitched) onKeySwitched();
+    throw new Error("Tất cả các API key đều đã hết hạn mức hoặc không hợp lệ. Vui lòng thêm key mới hoặc kiểm tra lại.");
+}
 
 
 /**
@@ -45,16 +103,14 @@ export const validateApiKey = async (apiKey: string): Promise<void> => {
     throw new Error("API Key không được để trống.");
   }
   
-  // Do not use the cached client. Create a new one with the key to be tested.
   const validationClient = new GoogleGenAI({ apiKey });
 
   try {
-    // Perform a simple, low-cost query to check if the key is valid.
     await validationClient.models.generateContent({
         model: "gemini-3-flash-preview",
         contents: 'Validate',
         config: {
-            thinkingConfig: { thinkingBudget: 0 }, // Disable thinking for faster validation
+            thinkingConfig: { thinkingBudget: 0 },
         },
     });
   } catch (error) {
@@ -67,11 +123,9 @@ export const validateApiKey = async (apiKey: string): Promise<void> => {
          throw new Error("API Key không có quyền truy cập. Vui lòng kiểm tra quyền của key.");
       }
     }
-    // Generic error for network issues, etc.
     throw new Error("Không thể xác thực API Key. Vui lòng kiểm tra lại hoặc thử lại sau.");
   }
 };
-
 
 const infoItemArraySchema = {
   type: Type.ARRAY,
@@ -234,10 +288,9 @@ Khi mô tả một mối quan hệ trong trường \`moTa\`, hãy sử dụng c�
 **NỘI DUNG CHƯƠNG MỚI:**
 "{chapterContent}"`;
 
-async function executeAnalysis(apiKey: string, prompt: string, schema: any): Promise<{ data: any; usage: { totalTokens: number } }> {
-    try {
-        const geminiClient = getAiClient(apiKey);
-        const response = await geminiClient.models.generateContent({
+async function executeAnalysis(prompt: string, schema: any, onKeySwitched?: () => void): Promise<{ data: any; usage: { totalTokens: number } }> {
+    const { data: response, usage } = await executeApiCallWithRetry(async (client) => {
+        const genResponse = await client.models.generateContent({
             model: "gemini-3-flash-preview",
             contents: prompt,
             config: {
@@ -245,49 +298,44 @@ async function executeAnalysis(apiKey: string, prompt: string, schema: any): Pro
                 responseSchema: schema,
             },
         });
-        const jsonText = response.text.trim();
-        const usage = response.usageMetadata || { totalTokenCount: 0 };
-        return {
-            data: jsonText ? JSON.parse(jsonText) : null,
-            usage: {
-                totalTokens: usage.totalTokenCount || 0
-            }
-        };
-    } catch (error) {
-        console.error("Lỗi khi thực hiện phân tích:", error);
-        if (error instanceof Error && error.message.includes('API key not valid')) {
-            throw new Error("API Key không hợp lệ. Vui lòng kiểm tra lại trong mục cài đặt.");
-        }
-        throw error;
-    }
+        const usageMetadata = genResponse.usageMetadata || { totalTokenCount: 0 };
+        return { data: genResponse, usage: { totalTokens: usageMetadata.totalTokenCount || 0 }};
+    }, onKeySwitched);
+    
+    const jsonText = response.text.trim();
+    return {
+        data: jsonText ? JSON.parse(jsonText) : null,
+        usage: usage
+    };
 }
 
-export const analyzeChapterForPrimaryCharacter = async (apiKey: string, chapterContent: string, previousStats: CharacterStats | null): Promise<{ data: Partial<CharacterStats> | null, usage: { totalTokens: number }}> => {
+
+export const analyzeChapterForPrimaryCharacter = async (chapterContent: string, previousStats: CharacterStats | null, onKeySwitched?: () => void): Promise<{ data: Partial<CharacterStats> | null, usage: { totalTokens: number }}> => {
     const taskPrompt = `**NHIỆM VỤ:**\nĐọc nội dung **CHƯƠNG MỚI** và chỉ trích xuất những thông tin **MỚI** hoặc **THAY ĐỔI** liên quan đến **TRẠNG THÁI CỦA NHÂN VẬT CHÍNH** (tên, cảnh giới, cấp độ, vật phẩm, công pháp, trang bị, tư chất).`;
     const fullPrompt = BASE_PROMPT
         .replace('{previousStats}', JSON.stringify(previousStats ?? {}, null, 2))
         .replace('**NHIỆM VỤ:**', taskPrompt)
         .replace('{chapterContent}', chapterContent.substring(0, 15000));
-    return executeAnalysis(apiKey, fullPrompt, primaryCharacterSchema);
+    return executeAnalysis(fullPrompt, primaryCharacterSchema, onKeySwitched);
 };
 
-export const analyzeChapterForWorldInfo = async (apiKey: string, chapterContent: string, previousStats: CharacterStats | null): Promise<{ data: Partial<CharacterStats> | null, usage: { totalTokens: number }}> => {
+export const analyzeChapterForWorldInfo = async (chapterContent: string, previousStats: CharacterStats | null, onKeySwitched?: () => void): Promise<{ data: Partial<CharacterStats> | null, usage: { totalTokens: number }}> => {
     const taskPrompt = `**NHIỆM VỤ:**\nĐọc nội dung **CHƯƠNG MỚI** và chỉ trích xuất những thông tin **MỚI** hoặc **THAY ĐỔI** liên quan đến **THẾ GIỚI TRUYỆN** (nhân vật phụ, thế lực, địa điểm, vị trí hiện tại của nhân vật chính).`;
     const fullPrompt = BASE_PROMPT
         .replace('{previousStats}', JSON.stringify(previousStats ?? {}, null, 2))
         .replace('**NHIỆM VỤ:**', taskPrompt)
         .replace('{chapterContent}', chapterContent.substring(0, 15000));
-    return executeAnalysis(apiKey, fullPrompt, worldInfoSchema);
+    return executeAnalysis(fullPrompt, worldInfoSchema, onKeySwitched);
 };
 
-export const analyzeChapterForCharacterStats = async (apiKey: string, chapterContent: string, previousStats: CharacterStats | null): Promise<{ data: CharacterStats | null, usage: { totalTokens: number }}> => {
+export const analyzeChapterForCharacterStats = async (chapterContent: string, previousStats: CharacterStats | null, onKeySwitched?: () => void): Promise<{ data: CharacterStats | null, usage: { totalTokens: number }}> => {
     const taskPrompt = `**NHIỆM VỤ:**\nĐọc nội dung **CHƯƠNG MỚI** và chỉ trích xuất những thông tin **MỚI** hoặc **THAY ĐỔI** so với "DỮ LIỆU HIỆN TẠI".`;
      const fullPrompt = BASE_PROMPT
         .replace('{previousStats}', JSON.stringify(previousStats ?? {}, null, 2))
         .replace('**NHIỆM VỤ:**', taskPrompt)
         .replace('{chapterContent}', chapterContent.substring(0, 15000));
         
-    const { data: stats, usage } = await executeAnalysis(apiKey, fullPrompt, characterStatsSchema);
+    const { data: stats, usage } = await executeAnalysis(fullPrompt, characterStatsSchema, onKeySwitched);
     
     if (!stats) return { data: null, usage };
 
@@ -309,99 +357,75 @@ export const analyzeChapterForCharacterStats = async (apiKey: string, chapterCon
 };
 
 
-/**
- * Trò chuyện với AI về nội dung của một chương cụ thể.
- * @param apiKey API Key của người dùng.
- * @param prompt Câu hỏi của người dùng.
- * @param chapterContent Nội dung văn bản của chương hiện tại.
- * @param storyTitle Tiêu đề của truyện để cung cấp ngữ cảnh.
- * @returns Câu trả lời từ AI.
- */
-export const chatWithChapterContent = async (apiKey: string, prompt: string, chapterContent: string, storyTitle: string): Promise<{ text: string, usage: { totalTokens: number }}> => {
-  try {
-    const geminiClient = getAiClient(apiKey);
-    const response = await geminiClient.models.generateContent({
-        model: "gemini-3-flash-preview",
-        contents: `**Bối cảnh:** Bạn là một trợ lý AI hữu ích, đang thảo luận về cuốn sách "${storyTitle}".
-        **Nhiệm vụ:** Trả lời câu hỏi của người dùng chỉ dựa vào nội dung được cung cấp từ chương truyện hiện tại. Nếu câu trả lời không có trong văn bản, hãy nói rằng bạn không tìm thấy thông tin trong đoạn trích này.
+export const chatWithChapterContent = async (prompt: string, chapterContent: string, storyTitle: string, onKeySwitched?: () => void): Promise<{ text: string, usage: { totalTokens: number }}> => {
+    const { data: response, usage } = await executeApiCallWithRetry(async (client) => {
+        const genResponse = await client.models.generateContent({
+            model: "gemini-3-flash-preview",
+            contents: `**Bối cảnh:** Bạn là một trợ lý AI hữu ích, đang thảo luận về cuốn sách "${storyTitle}".
+            **Nhiệm vụ:** Trả lời câu hỏi của người dùng chỉ dựa vào nội dung được cung cấp từ chương truyện hiện tại. Nếu câu trả lời không có trong văn bản, hãy nói rằng bạn không tìm thấy thông tin trong đoạn trích này.
 
-        **Nội dung chương:**
-        ---
-        ${chapterContent.substring(0, 15000)}
-        ---
+            **Nội dung chương:**
+            ---
+            ${chapterContent.substring(0, 15000)}
+            ---
 
-        **Câu hỏi của người dùng:** "${prompt}"
+            **Câu hỏi của người dùng:** "${prompt}"
 
-        **Câu trả lời của bạn:**`,
-    });
-    const usage = response.usageMetadata || { totalTokenCount: 0 };
-    return {
-      text: response.text,
-      usage: {
-        totalTokens: usage.totalTokenCount || 0
-      }
-    };
-  } catch (error) {
-    console.error("Lỗi khi trò chuyện về nội dung chương:", error);
-    if (error instanceof Error && error.message.includes('API key not valid')) {
-        throw new Error("API Key không hợp lệ. Vui lòng kiểm tra lại.");
-    }
-    throw new Error("Không thể nhận phản hồi từ AI. Vui lòng thử lại.");
-  }
+            **Câu trả lời của bạn:**`,
+        });
+        const usageMetadata = genResponse.usageMetadata || { totalTokenCount: 0 };
+        return { data: genResponse, usage: { totalTokens: usageMetadata.totalTokenCount || 0 }};
+    }, onKeySwitched);
+
+    return { text: response.text, usage };
 };
 
 
-/**
- * Trò chuyện với AI về nội dung của toàn bộ Ebook.
- * Sử dụng quy trình hai bước: 1. Xác định các chương liên quan. 2. Trả lời câu hỏi dựa trên nội dung các chương đó.
- * @param apiKey API Key của người dùng.
- * @param prompt Câu hỏi của người dùng.
- * @param zipInstance Instance JSZip của file Ebook.
- * @param chapterList Danh sách các chương trong Ebook.
- * @returns Câu trả lời từ AI.
- */
-export const chatWithEbook = async (apiKey: string, prompt: string, zipInstance: any, chapterList: Chapter[]): Promise<{ text: string, usage: { totalTokens: number }}> => {
-  const geminiClient = getAiClient(apiKey);
-  try {
-    // === BƯỚC 1: Xác định các chương có liên quan ===
-    const chapterListText = chapterList.map((c, i) => `${i + 1}. Tiêu đề: "${c.title}", Tên file: "${c.url}"`).join('\n');
-    
-    const chapterSelectionResponse = await geminiClient.models.generateContent({
-        model: "gemini-3-flash-preview",
-        contents: `Người dùng đang hỏi câu này về một cuốn sách: "${prompt}".
-        
-        Dựa vào danh sách chương dưới đây, hãy xác định những chương có khả năng chứa câu trả lời nhất.
-        
-        Danh sách chương:
-        ${chapterListText}
+export const chatWithEbook = async (prompt: string, zipInstance: any, chapterList: Chapter[], onKeySwitched?: () => void): Promise<{ text: string, usage: { totalTokens: number }}> => {
+    let totalUsage = 0;
 
-        Hãy trả về một danh sách các tên file (filename) có liên quan nhất. Chỉ bao gồm tối đa 5 file có liên quan nhất.`,
-        config: {
-            responseMimeType: "application/json",
-            responseSchema: {
-                type: Type.OBJECT,
-                properties: {
-                    relevant_files: {
-                        type: Type.ARRAY,
-                        description: "Một mảng các chuỗi tên file (url) từ danh sách chương được cung cấp.",
-                        items: { type: Type.STRING }
+    const { data: chapterSelectionResponse, usage: usage1 } = await executeApiCallWithRetry(async (client) => {
+        const chapterListText = chapterList.map((c, i) => `${i + 1}. Tiêu đề: "${c.title}", Tên file: "${c.url}"`).join('\n');
+        const genResponse = await client.models.generateContent({
+            model: "gemini-3-flash-preview",
+            contents: `Người dùng đang hỏi câu này về một cuốn sách: "${prompt}".
+            
+            Dựa vào danh sách chương dưới đây, hãy xác định những chương có khả năng chứa câu trả lời nhất.
+            
+            Danh sách chương:
+            ${chapterListText}
+
+            Hãy trả về một danh sách các tên file (filename) có liên quan nhất. Chỉ bao gồm tối đa 5 file có liên quan nhất.`,
+            config: {
+                responseMimeType: "application/json",
+                responseSchema: {
+                    type: Type.OBJECT,
+                    properties: {
+                        relevant_files: {
+                            type: Type.ARRAY,
+                            description: "Một mảng các chuỗi tên file (url) từ danh sách chương được cung cấp.",
+                            items: { type: Type.STRING }
+                        }
                     }
                 }
             }
-        }
-    });
-
+        });
+        const usageMetadata = genResponse.usageMetadata || { totalTokenCount: 0 };
+        return { data: genResponse, usage: { totalTokens: usageMetadata.totalTokenCount || 0 }};
+    }, onKeySwitched);
+    
+    totalUsage += usage1.totalTokens;
+    
     const relevantFilesData = JSON.parse(chapterSelectionResponse.text) as { relevant_files: string[] };
     const relevantFiles = relevantFilesData.relevant_files;
 
     if (!relevantFiles || relevantFiles.length === 0) {
       return { 
         text: "Tôi không tìm thấy chương nào có vẻ liên quan đến câu hỏi của bạn trong Ebook này.",
-        usage: { totalTokens: chapterSelectionResponse.usageMetadata?.totalTokenCount || 0 }
+        usage: { totalTokens: totalUsage }
       };
     }
 
-    // === BƯỚC 2: Trích xuất nội dung và trả lời câu hỏi ===
     let contextContent = "";
     const parser = new DOMParser();
 
@@ -421,52 +445,36 @@ export const chatWithEbook = async (apiKey: string, prompt: string, zipInstance:
     if (!contextContent.trim()) {
       return {
         text: "Tôi đã xác định được các chương liên quan nhưng không thể trích xuất nội dung từ chúng. File Ebook có thể bị lỗi.",
-        usage: { totalTokens: chapterSelectionResponse.usageMetadata?.totalTokenCount || 0 }
+        usage: { totalTokens: totalUsage }
       };
     }
 
-    const finalAnswerResponse = await geminiClient.models.generateContent({
-        model: "gemini-3-flash-preview",
-        contents: `**Nhiệm vụ:** Trả lời câu hỏi của người dùng một cách ngắn gọn và súc tích, chỉ dựa vào nội dung được cung cấp dưới đây. Nếu câu trả lời không có trong văn bản, hãy nói rằng bạn không tìm thấy thông tin trong đoạn trích này.
-        
-        **Nội dung được cung cấp:**
-        ${contextContent.substring(0, 20000)}
+    const { data: finalAnswerResponse, usage: usage2 } = await executeApiCallWithRetry(async (client) => {
+        const genResponse = await client.models.generateContent({
+            model: "gemini-3-flash-preview",
+            contents: `**Nhiệm vụ:** Trả lời câu hỏi của người dùng một cách ngắn gọn và súc tích, chỉ dựa vào nội dung được cung cấp dưới đây. Nếu câu trả lời không có trong văn bản, hãy nói rằng bạn không tìm thấy thông tin trong đoạn trích này.
+            
+            **Nội dung được cung cấp:**
+            ${contextContent.substring(0, 20000)}
 
-        **Câu hỏi của người dùng:** "${prompt}"
+            **Câu hỏi của người dùng:** "${prompt}"
 
-        **Câu trả lời của bạn:**`,
-    });
+            **Câu trả lời của bạn:**`,
+        });
+        const usageMetadata = genResponse.usageMetadata || { totalTokenCount: 0 };
+        return { data: genResponse, usage: { totalTokens: usageMetadata.totalTokenCount || 0 }};
+    }, onKeySwitched);
     
-    const usage1 = chapterSelectionResponse.usageMetadata || { totalTokenCount: 0 };
-    const usage2 = finalAnswerResponse.usageMetadata || { totalTokenCount: 0 };
+    totalUsage += usage2.totalTokens;
 
     return {
       text: finalAnswerResponse.text,
-      usage: {
-        totalTokens: (usage1.totalTokenCount || 0) + (usage2.totalTokenCount || 0)
-      }
+      usage: { totalTokens: totalUsage }
     };
-
-  } catch (error) {
-    console.error("Lỗi khi trò chuyện về Ebook:", error);
-    if (error instanceof Error && error.message.includes('API key not valid')) {
-        throw new Error("API Key không hợp lệ. Vui lòng kiểm tra lại.");
-    }
-    throw new Error("Không thể nhận phản hồi từ AI. Vui lòng thử lại.");
-  }
 };
 
-/**
- * Viết lại nội dung chương truyện cho dễ hiểu hơn.
- * @param apiKey API Key của người dùng.
- * @param content Nội dung chương gốc.
- * @returns Nội dung đã được viết lại.
- */
-export const rewriteChapterContent = async (apiKey: string, content: string): Promise<{ text: string, usage: { totalTokens: number } }> => {
-    try {
-        const geminiClient = getAiClient(apiKey);
-        // Prompt được thiết kế đặc biệt để xử lý văn phong convert/dịch máy
-        const prompt = `Bạn là một biên tập viên tiểu thuyết chuyên nghiệp và một dịch giả đại tài.
+export const rewriteChapterContent = async (content: string, onKeySwitched?: () => void): Promise<{ text: string, usage: { totalTokens: number } }> => {
+    const prompt = `Bạn là một biên tập viên tiểu thuyết chuyên nghiệp và một dịch giả đại tài.
 Nhiệm vụ của bạn là viết lại (biên tập lại) đoạn văn bản dưới đây thành tiếng Việt trôi chảy, tự nhiên, và dễ hiểu, phù hợp với văn phong truyện tiểu thuyết.
 
 **YÊU CẦU CỤ THỂ:**
@@ -484,24 +492,14 @@ ${content.substring(0, 20000)}
 
 **BẢN VIẾT LẠI (TIẾNG VIỆT):**`;
 
-        const response = await geminiClient.models.generateContent({
+    const { data: response, usage } = await executeApiCallWithRetry(async (client) => {
+        const genResponse = await client.models.generateContent({
             model: "gemini-3-flash-preview",
             contents: prompt,
         });
+        const usageMetadata = genResponse.usageMetadata || { totalTokenCount: 0 };
+        return { data: genResponse, usage: { totalTokens: usageMetadata.totalTokenCount || 0 }};
+    }, onKeySwitched);
 
-        const usage = response.usageMetadata || { totalTokenCount: 0 };
-        return {
-            text: response.text,
-            usage: {
-                totalTokens: usage.totalTokenCount || 0
-            }
-        };
-
-    } catch (error) {
-        console.error("Lỗi khi viết lại chương:", error);
-        if (error instanceof Error && error.message.includes('API key not valid')) {
-            throw new Error("API Key không hợp lệ. Vui lòng kiểm tra lại.");
-        }
-        throw new Error("Không thể thực hiện viết lại nội dung. Vui lòng thử lại.");
-    }
+    return { text: response.text, usage };
 };

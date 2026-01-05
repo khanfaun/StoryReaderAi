@@ -1,6 +1,6 @@
 
 import React, { useState, useCallback, useEffect, useRef, useMemo } from 'react';
-import type { Story, Chapter, CharacterStats, ReadingSettings, ReadingHistoryItem, ChatMessage, PartialStory } from './types';
+import type { Story, Chapter, CharacterStats, ReadingSettings, ReadingHistoryItem, ChatMessage, PartialStory, ApiKeyInfo } from './types';
 import { searchStory, getChapterContent, getStoryDetails, getStoryFromUrl, parseHtml, parseChapterContentFromDoc, parseStoryDetailsFromDoc } from './services/truyenfullService';
 import { analyzeChapterForCharacterStats, chatWithEbook, chatWithChapterContent, validateApiKey, analyzeChapterForPrimaryCharacter, analyzeChapterForWorldInfo, rewriteChapterContent } from './services/geminiService';
 import { getCachedChapter, setCachedChapter } from './services/cacheService';
@@ -134,7 +134,6 @@ const App: React.FC = () => {
   const [deleteConfirmation, setDeleteConfirmation] = useState<{ isOpen: boolean; item?: ReadingHistoryItem }>({ isOpen: false });
 
   // State for API Key management
-  const [apiKey, setApiKey] = useState<string | null>(apiKeyService.getApiKey());
   const [isApiKeyModalOpen, setIsApiKeyModalOpen] = useState<boolean>(!apiKeyService.hasApiKey());
   const [tokenUsage, setTokenUsage] = useState<apiKeyService.TokenUsage>(apiKeyService.getTokenUsage());
   
@@ -297,6 +296,8 @@ const App: React.FC = () => {
             console.error("Failed to parse settings from loaded file", e);
         }
     }
+    setTokenUsage(apiKeyService.getTokenUsage());
+    setIsApiKeyModalOpen(!apiKeyService.hasApiKey());
     
     setIsDataLoading(false);
   }, [setSettings]);
@@ -306,7 +307,6 @@ const App: React.FC = () => {
     const loadInitialData = async () => {
       setIsLoading(true);
       await reloadDataFromStorage();
-      setTokenUsage(apiKeyService.getTokenUsage());
       
       const hasSeenUpdate = localStorage.getItem(UPDATE_MODAL_VERSION);
       if (!hasSeenUpdate) {
@@ -342,24 +342,27 @@ const App: React.FC = () => {
         const errorMessage = error instanceof Error ? error.message : "Đã xảy ra lỗi không xác định.";
         setError(errorMessage);
         if (errorMessage.includes('API Key không hợp lệ')) {
-            apiKeyService.clearApiKey();
-            setApiKey(null);
+            const activeKey = apiKeyService.getActiveApiKey();
+            if (activeKey) {
+                apiKeyService.setActiveApiKeyId(null);
+            }
             setIsApiKeyModalOpen(true);
         }
   }, []);
   
   const handleTokenUsageUpdate = useCallback((usageData?: { totalTokens?: number, ttsCharacters?: number }) => {
     if (!usageData || (!usageData.totalTokens && !usageData.ttsCharacters)) return;
-    if (!apiKey) return;
+    const activeApiKey = apiKeyService.getApiKey();
+    if (!activeApiKey) return;
     
     setTokenUsage(prevUsage => {
       const newTotalTokens = prevUsage.totalTokens + (usageData.totalTokens || 0);
       const newTtsChars = prevUsage.ttsCharacters + (usageData.ttsCharacters || 0);
       const newUsageState = { ...prevUsage, totalTokens: newTotalTokens, ttsCharacters: newTtsChars };
-      apiKeyService.saveTokenUsage(apiKey, newUsageState);
+      apiKeyService.saveTokenUsage(activeApiKey, newUsageState);
       return newUsageState;
     });
-  }, [apiKey]);
+  }, []);
     
   const processAndAnalyzeContent = useCallback(async (storyToLoad: Story, chapterUrl: string, content: string) => {
     const currentOpId = ++operationIdRef.current;
@@ -372,12 +375,13 @@ const App: React.FC = () => {
         console.error("Failed to initial cache chapter", e);
     }
     
-    if (!content || content.trim().length === 0 || !apiKey) return;
+    const currentApiKey = apiKeyService.getApiKey();
+    if (!content || content.trim().length === 0 || !currentApiKey) return;
 
     setIsAnalyzing(true);
     try {
       const currentStats = getStoryState(storyToLoad.url) ?? {};
-      const { data: chapterStats, usage } = await analyzeChapterForCharacterStats(apiKey, content, currentStats);
+      const { data: chapterStats, usage } = await analyzeChapterForCharacterStats(currentApiKey, content, currentStats);
       
       if (currentOpId !== operationIdRef.current) return; 
 
@@ -392,7 +396,7 @@ const App: React.FC = () => {
     } finally {
       if (currentOpId === operationIdRef.current) setIsAnalyzing(false);
     }
-  }, [apiKey, handleApiError, handleTokenUsageUpdate, saveStoryState]);
+  }, [handleApiError, handleTokenUsageUpdate, saveStoryState]);
 
   const fetchChapter = useCallback(async (storyToLoad: Story, chapterIndex: number) => {
     if (!storyToLoad || !storyToLoad.chapters || chapterIndex < 0 || chapterIndex >= storyToLoad.chapters.length) return;
@@ -478,9 +482,10 @@ const App: React.FC = () => {
         setChapterContent(newContent);
 
         try {
+            // FIX: Use the 'cumulativeStats' state which is the source of truth, instead of re-reading from localStorage.
             await setCachedChapter(story.url, chapter.url, { 
                 content: newContent, 
-                stats: getStoryState(story.url)
+                stats: cumulativeStats
             });
         } catch (e) {
             setError("Không thể lưu nội dung chỉnh sửa vào bộ nhớ.");
@@ -644,7 +649,8 @@ const App: React.FC = () => {
   }, [story]);
 
   const handleRewriteChapter = useCallback(async () => {
-      if (!apiKey) {
+      const currentApiKey = apiKeyService.getApiKey();
+      if (!currentApiKey) {
           setIsApiKeyModalOpen(true);
           return;
       }
@@ -653,7 +659,7 @@ const App: React.FC = () => {
       }
       setIsRewriting(true);
       try {
-          const { text, usage } = await rewriteChapterContent(apiKey, chapterContent);
+          const { text, usage } = await rewriteChapterContent(currentApiKey, chapterContent);
           handleTokenUsageUpdate({ totalTokens: usage.totalTokens });
           await handleUpdateChapterContent(text);
       } catch (err) {
@@ -661,7 +667,7 @@ const App: React.FC = () => {
       } finally {
           setIsRewriting(false);
       }
-  }, [apiKey, chapterContent, story, selectedChapterIndex, handleApiError, handleTokenUsageUpdate]);
+  }, [chapterContent, story, selectedChapterIndex, handleApiError, handleTokenUsageUpdate]);
 
   const handleCreateChapter = async (targetStory: Story, title: string, content: string) => {
      if (targetStory.source !== 'Local' && targetStory.source !== 'Ebook') {
@@ -1011,7 +1017,8 @@ const App: React.FC = () => {
   }, []);
 
   const handleReanalyzePrimary = useCallback(async () => {
-      if (!apiKey) {
+      const currentApiKey = apiKeyService.getApiKey();
+      if (!currentApiKey) {
           setIsApiKeyModalOpen(true);
           return;
       }
@@ -1021,7 +1028,7 @@ const App: React.FC = () => {
       const currentOpId = ++operationIdRef.current;
 
       try {
-          const { data, usage } = await analyzeChapterForPrimaryCharacter(apiKey, chapterContent, cumulativeStats);
+          const { data, usage } = await analyzeChapterForPrimaryCharacter(currentApiKey, chapterContent, cumulativeStats);
           
           if (currentOpId !== operationIdRef.current) return;
 
@@ -1039,10 +1046,11 @@ const App: React.FC = () => {
       } finally {
           if (currentOpId === operationIdRef.current) setIsAnalyzing(false);
       }
-  }, [apiKey, chapterContent, story, cumulativeStats, handleTokenUsageUpdate, saveStoryState, handleApiError]);
+  }, [chapterContent, story, cumulativeStats, handleTokenUsageUpdate, saveStoryState, handleApiError]);
 
   const handleReanalyzeWorld = useCallback(async () => {
-      if (!apiKey) {
+      const currentApiKey = apiKeyService.getApiKey();
+      if (!currentApiKey) {
           setIsApiKeyModalOpen(true);
           return;
       }
@@ -1052,7 +1060,7 @@ const App: React.FC = () => {
       const currentOpId = ++operationIdRef.current;
 
       try {
-          const { data, usage } = await analyzeChapterForWorldInfo(apiKey, chapterContent, cumulativeStats);
+          const { data, usage } = await analyzeChapterForWorldInfo(currentApiKey, chapterContent, cumulativeStats);
           
           if (currentOpId !== operationIdRef.current) return;
 
@@ -1070,10 +1078,11 @@ const App: React.FC = () => {
       } finally {
           if (currentOpId === operationIdRef.current) setIsAnalyzing(false);
       }
-  }, [apiKey, chapterContent, story, cumulativeStats, handleTokenUsageUpdate, saveStoryState, handleApiError]);
+  }, [chapterContent, story, cumulativeStats, handleTokenUsageUpdate, saveStoryState, handleApiError]);
 
   const handleSendMessage = async (message: string) => {
-      if (!apiKey) {
+      const currentApiKey = apiKeyService.getApiKey();
+      if (!currentApiKey) {
           setIsApiKeyModalOpen(true);
           return;
       }
@@ -1087,11 +1096,11 @@ const App: React.FC = () => {
           let usageTokenCount = 0;
 
           if (chapterContent && story) {
-              const result = await chatWithChapterContent(apiKey, message, chapterContent, story.title);
+              const result = await chatWithChapterContent(currentApiKey, message, chapterContent, story.title);
               responseText = result.text;
               usageTokenCount = result.usage.totalTokens;
           } else if (ebookInstance && story?.chapters) {
-              const result = await chatWithEbook(apiKey, message, ebookInstance.zip, story.chapters);
+              const result = await chatWithEbook(currentApiKey, message, ebookInstance.zip, story.chapters);
               responseText = result.text;
               usageTokenCount = result.usage.totalTokens;
           } else {
@@ -1108,22 +1117,13 @@ const App: React.FC = () => {
       }
   };
 
-  const handleValidateAndSaveApiKey = async (key: string): Promise<true | string> => {
+  const handleValidateKey = async (key: string): Promise<true | string> => {
       try {
           await validateApiKey(key);
-          apiKeyService.saveApiKey(key);
-          setApiKey(key);
-          setTokenUsage(apiKeyService.getTokenUsage());
           return true;
       } catch (e) {
           return (e as Error).message;
       }
-  };
-
-  const handleDeleteApiKey = () => {
-      apiKeyService.clearApiKey();
-      setApiKey(null);
-      setTokenUsage(apiKeyService.getTokenUsage());
   };
 
   const handleRequestDeleteEbook = async (item: ReadingHistoryItem) => {
@@ -1388,7 +1388,7 @@ const App: React.FC = () => {
     ? "w-full px-4 sm:px-8 py-8 sm:py-12 flex-grow"
     : "max-w-screen-2xl mx-auto px-4 py-8 sm:py-12 flex-grow";
   
-  const appContentClass = (isApiKeyModalOpen && !apiKey) || isUpdateModalOpen || isHelpModalOpen || manualImportState.isOpen || isCreateStoryModalOpen ? 'blur-sm pointer-events-none' : '';
+  const appContentClass = isApiKeyModalOpen || isUpdateModalOpen || isHelpModalOpen || manualImportState.isOpen || isCreateStoryModalOpen ? 'blur-sm pointer-events-none' : '';
 
   return (
     <div className="flex flex-col min-h-screen bg-[var(--theme-bg-base)] text-[var(--theme-text-primary)] font-sans transition-colors duration-300">
@@ -1466,11 +1466,9 @@ const App: React.FC = () => {
       <ApiKeyModal
         isOpen={isApiKeyModalOpen}
         onClose={() => setIsApiKeyModalOpen(false)}
-        onValidateAndSave={handleValidateAndSaveApiKey}
-        onDelete={handleDeleteApiKey}
-        currentKey={apiKey}
-        tokenUsage={tokenUsage}
+        onValidateKey={handleValidateKey}
         onDataChange={reloadDataFromStorage}
+        tokenUsage={tokenUsage}
       />
       <ManualImportModal 
         isOpen={manualImportState.isOpen}

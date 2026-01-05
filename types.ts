@@ -125,3 +125,8 @@ export interface GoogleUser {
   email: string;
   imageUrl: string;
 }
+
+export interface ApiKeyInfo {
+  id: string; // Unique identifier, e.g., Date.now().toString()
+  key: string; // The actual API key value
+}

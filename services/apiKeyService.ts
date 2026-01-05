@@ -1,5 +1,8 @@
 
-const API_KEY_STORAGE_KEY = 'google_gemini_api_key';
+import type { ApiKeyInfo } from '../types';
+
+const API_KEY_LIST_KEY = 'google_gemini_api_key_list';
+const ACTIVE_API_KEY_ID_KEY = 'google_gemini_active_api_key_id';
 const TOKEN_USAGE_MAP_KEY = 'google_gemini_token_usage_map';
 export const TTS_FREE_TIER_CHARS = 1000000; // 1 million characters per month for TTS free tier
 
@@ -9,32 +12,86 @@ export interface TokenUsage {
   lastReset: number; // timestamp
 }
 
-// Type for the new storage structure
-type TokenUsageMap = {
+export type TokenUsageMap = {
   [apiKey: string]: TokenUsage;
 };
-
 
 export const isAiStudio = (): boolean => {
   return window.location.hostname.includes('aistudio.google.com');
 };
 
-export const saveApiKey = (key: string): void => {
-  localStorage.setItem(API_KEY_STORAGE_KEY, key);
+// --- Key List Management ---
+
+export const getApiKeys = (): ApiKeyInfo[] => {
+  const stored = localStorage.getItem(API_KEY_LIST_KEY);
+  return stored ? JSON.parse(stored) : [];
 };
 
+export const saveApiKeys = (keys: ApiKeyInfo[]): void => {
+  localStorage.setItem(API_KEY_LIST_KEY, JSON.stringify(keys));
+};
+
+export const addApiKey = (key: string): ApiKeyInfo => {
+  const keys = getApiKeys();
+  const newKeyInfo = { id: Date.now().toString(), key };
+  keys.push(newKeyInfo);
+  saveApiKeys(keys);
+  return newKeyInfo;
+};
+
+export const deleteApiKey = (id: string): void => {
+  let keys = getApiKeys();
+  const keyToDelete = keys.find(k => k.id === id);
+  if (!keyToDelete) return;
+
+  keys = keys.filter(k => k.id !== id);
+  saveApiKeys(keys);
+
+  if (getActiveApiKeyId() === id) {
+    setActiveApiKeyId(null);
+  }
+
+  const storedMapStr = localStorage.getItem(TOKEN_USAGE_MAP_KEY);
+  if (storedMapStr) {
+    let usageMap: TokenUsageMap = JSON.parse(storedMapStr);
+    if (usageMap[keyToDelete.key]) {
+      delete usageMap[keyToDelete.key];
+      localStorage.setItem(TOKEN_USAGE_MAP_KEY, JSON.stringify(usageMap));
+    }
+  }
+};
+
+// --- Active Key Management ---
+
+export const setActiveApiKeyId = (id: string | null): void => {
+  if (id) {
+    localStorage.setItem(ACTIVE_API_KEY_ID_KEY, id);
+  } else {
+    localStorage.removeItem(ACTIVE_API_KEY_ID_KEY);
+  }
+};
+
+export const getActiveApiKeyId = (): string | null => {
+  return localStorage.getItem(ACTIVE_API_KEY_ID_KEY);
+};
+
+export const getActiveApiKey = (): ApiKeyInfo | null => {
+  const activeId = getActiveApiKeyId();
+  if (!activeId) return null;
+  const keys = getApiKeys();
+  return keys.find(k => k.id === activeId) || null;
+};
+
+// Main function used by the app to get the current key string
 export const getApiKey = (): string | null => {
-  return localStorage.getItem(API_KEY_STORAGE_KEY);
-};
-
-export const clearApiKey = (): void => {
-  // Only clears the active key, preserving the token usage data for all keys.
-  localStorage.removeItem(API_KEY_STORAGE_KEY);
+  return getActiveApiKey()?.key || null;
 };
 
 export const hasApiKey = (): boolean => {
-  return !!getApiKey();
+  return !!getActiveApiKey();
 };
+
+// --- Token Usage Management ---
 
 const getDefaultUsage = (): TokenUsage => ({
     totalTokens: 0,
@@ -42,25 +99,17 @@ const getDefaultUsage = (): TokenUsage => ({
     lastReset: new Date().getTime(),
 });
 
-/**
- * Gets the token usage for the currently active API key.
- * Handles monthly resets for all stored keys.
- */
-export const getTokenUsage = (): TokenUsage => {
-    const activeApiKey = getApiKey();
+export const getAllTokenUsages = (): TokenUsageMap => {
     const storedMapStr = localStorage.getItem(TOKEN_USAGE_MAP_KEY);
     const currentDate = new Date();
     let usageMap: TokenUsageMap = storedMapStr ? JSON.parse(storedMapStr) : {};
     let needsSave = false;
 
-    // Check all keys in the map for monthly reset
     for (const key in usageMap) {
         if (Object.prototype.hasOwnProperty.call(usageMap, key)) {
             const usage = usageMap[key];
             const lastResetDate = new Date(usage.lastReset);
-
             if (lastResetDate.getFullYear() !== currentDate.getFullYear() || lastResetDate.getMonth() !== currentDate.getMonth()) {
-                console.log(`Resetting token count for key ending in ...${key.slice(-4)}`);
                 usageMap[key] = getDefaultUsage();
                 needsSave = true;
             }
@@ -70,24 +119,23 @@ export const getTokenUsage = (): TokenUsage => {
     if (needsSave) {
         localStorage.setItem(TOKEN_USAGE_MAP_KEY, JSON.stringify(usageMap));
     }
+    return usageMap;
+}
+
+export const getTokenUsage = (): TokenUsage => {
+    const activeApiKey = getApiKey();
+    const usageMap = getAllTokenUsages();
 
     if (!activeApiKey) {
         return getDefaultUsage();
     }
     
-    // Return usage for the active key, or default if it's a new key.
     return usageMap[activeApiKey] || getDefaultUsage();
 };
 
-/**
- * Saves the token usage for a specific API key.
- * @param apiKey The API key for which to save the usage.
- * @param usage The new token usage data.
- */
 export const saveTokenUsage = (apiKey: string, usage: TokenUsage): void => {
     if (!apiKey) return;
-    const storedMapStr = localStorage.getItem(TOKEN_USAGE_MAP_KEY);
-    let usageMap: TokenUsageMap = storedMapStr ? JSON.parse(storedMapStr) : {};
+    let usageMap = getAllTokenUsages();
     usageMap[apiKey] = usage;
     localStorage.setItem(TOKEN_USAGE_MAP_KEY, JSON.stringify(usageMap));
 };

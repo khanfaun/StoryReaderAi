@@ -1,208 +1,284 @@
 
 import React, { useState, useEffect } from 'react';
 import { isAiStudio } from '../services/apiKeyService';
-import { CloseIcon, SpinnerIcon, EyeIcon, EyeSlashIcon, WrenchScrewdriverIcon } from './icons';
+import { CloseIcon, SpinnerIcon, EyeIcon, EyeSlashIcon, WrenchScrewdriverIcon, TrashIcon, PlusIcon, CheckIcon } from './icons';
+import * as apiKeyService from '../services/apiKeyService';
 import type { TokenUsage } from '../services/apiKeyService';
+import type { ApiKeyInfo } from '../types';
 import { injectDemoData } from '../services/demoData';
+import ConfirmationModal from './ConfirmationModal';
 
 interface ApiKeyModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onValidateAndSave: (key: string) => Promise<true | string>;
-  onDelete: () => void;
-  currentKey: string | null;
+  onValidateKey: (key: string) => Promise<true | string>;
+  onDataChange: () => void;
   tokenUsage: TokenUsage;
-  onDataChange?: () => void;
 }
 
-const ApiKeyModal: React.FC<ApiKeyModalProps> = ({ isOpen, onClose, onValidateAndSave, onDelete, currentKey, tokenUsage, onDataChange }) => {
-  const [apiKey, setApiKey] = useState('');
-  const [isEditing, setIsEditing] = useState(!currentKey);
-  const [isValidating, setIsValidating] = useState(false);
-  const [validationError, setValidationError] = useState<string | null>(null);
-  const [isKeyVisible, setIsKeyVisible] = useState(false);
-  const [isSavedKeyVisible, setIsSavedKeyVisible] = useState(false);
+type ValidationStatus = 'idle' | 'validating' | 'valid' | 'invalid';
+
+const statusIcons: Record<ValidationStatus, React.ReactNode> = {
+    idle: null,
+    validating: <SpinnerIcon className="w-5 h-5 text-yellow-500 animate-spin" />,
+    valid: <CheckIcon className="w-5 h-5 text-green-500" />,
+    invalid: <CloseIcon className="w-5 h-5 text-rose-500" />,
+}
+
+const ApiKeyModal: React.FC<ApiKeyModalProps> = ({ isOpen, onClose, onValidateKey, onDataChange, tokenUsage }) => {
+  const [keys, setKeys] = useState<ApiKeyInfo[]>([]);
+  const [activeKeyId, setActiveKeyId] = useState<string | null>(null);
+  
+  const [newKeyInputs, setNewKeyInputs] = useState<Array<{ id: number; value: string }>>([{ id: Date.now(), value: '' }]);
+  const [validationResults, setValidationResults] = useState<Record<number, { status: ValidationStatus; message?: string }>>({});
+  
+  const [isBatchValidating, setIsBatchValidating] = useState(false);
+  const [keyToDelete, setKeyToDelete] = useState<ApiKeyInfo | null>(null);
   const [isLoadingDemo, setIsLoadingDemo] = useState(false);
 
-  const TOKEN_FREE_TIER_BENCHMARK = 1000000; // Mốc tham khảo, không phải giới hạn cứng
+  const TOKEN_FREE_TIER_BENCHMARK = 1000000;
   const tokenUsagePercentage = Math.min((tokenUsage.totalTokens / TOKEN_FREE_TIER_BENCHMARK) * 100, 100);
+  
+  const inAiStudio = isAiStudio();
+
+  const refreshKeys = () => {
+    setKeys(apiKeyService.getApiKeys());
+    setActiveKeyId(apiKeyService.getActiveApiKeyId());
+  };
 
   useEffect(() => {
     if (isOpen) {
-        setIsEditing(!currentKey);
-        setApiKey('');
-        setValidationError(null);
-        setIsKeyVisible(false);
-        setIsSavedKeyVisible(false);
+      refreshKeys();
+      setNewKeyInputs([{ id: Date.now(), value: '' }]);
+      setValidationResults({});
+      setIsBatchValidating(false);
     }
-  }, [isOpen, currentKey]);
+  }, [isOpen]);
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setValidationError(null);
-    setIsValidating(true);
-    
-    const result = await onValidateAndSave(apiKey.trim());
-    
-    if (result !== true) {
-        setValidationError(result);
-    }
-    // On success, the parent component closes the modal, so no further action is needed here.
-    setIsValidating(false);
+  const handleSetActive = (id: string) => {
+    apiKeyService.setActiveApiKeyId(id);
+    setActiveKeyId(id);
+    onDataChange();
+  };
+  
+  const handleNewKeyChange = (id: number, value: string) => {
+      setNewKeyInputs(prev => prev.map(input => input.id === id ? { ...input, value } : input));
+      // Reset validation status on change
+      if (validationResults[id]) {
+          setValidationResults(prev => ({ ...prev, [id]: { status: 'idle' } }));
+      }
   };
 
-  const handleDelete = () => {
-    onDelete();
-    setIsEditing(true);
+  const handleAddKeyInput = () => {
+      setNewKeyInputs(prev => [...prev, { id: Date.now(), value: '' }]);
+  };
+
+  const handleRemoveKeyInput = (id: number) => {
+      setNewKeyInputs(prev => prev.filter(input => input.id !== id));
+      const newResults = { ...validationResults };
+      delete newResults[id];
+      setValidationResults(newResults);
+  };
+  
+  const handleBatchValidateAndSave = async () => {
+      const keysToValidate = newKeyInputs.filter(input => input.value.trim());
+      if (keysToValidate.length === 0) return;
+
+      setIsBatchValidating(true);
+      
+      const newResults: typeof validationResults = {};
+      keysToValidate.forEach(k => { newResults[k.id] = { status: 'validating' } });
+      setValidationResults(prev => ({...prev, ...newResults}));
+
+      let hasAddedKeys = false;
+      const remainingInputs = [...newKeyInputs];
+
+      for (const input of keysToValidate) {
+          const result = await onValidateKey(input.value.trim());
+          if (result === true) {
+              const newKey = apiKeyService.addApiKey(input.value.trim());
+              // Auto-activate if it's the very first key
+              if (keys.length === 0 && !hasAddedKeys) {
+                handleSetActive(newKey.id);
+              }
+              newResults[input.id] = { status: 'valid' };
+              // Remove successful input from the list
+              const index = remainingInputs.findIndex(i => i.id === input.id);
+              if (index > -1) remainingInputs.splice(index, 1);
+              hasAddedKeys = true;
+          } else {
+              newResults[input.id] = { status: 'invalid', message: result };
+          }
+          setValidationResults(prev => ({...prev, ...newResults}));
+      }
+      
+      setIsBatchValidating(false);
+      
+      if (hasAddedKeys) {
+          refreshKeys();
+          onDataChange();
+      }
+      
+      // If all inputs were processed, add a new empty one, otherwise keep the failed ones
+      setNewKeyInputs(remainingInputs.length === 0 ? [{ id: Date.now(), value: '' }] : remainingInputs);
+  };
+
+
+  const handleConfirmDelete = () => {
+    if (keyToDelete) {
+        apiKeyService.deleteApiKey(keyToDelete.id);
+        setKeyToDelete(null);
+        refreshKeys();
+        onDataChange();
+    }
   };
   
   const handleLoadDemo = async () => {
       setIsLoadingDemo(true);
       try {
           await injectDemoData();
-          if (onDataChange) onDataChange();
+          onDataChange();
           alert("Đã thêm dữ liệu demo thành công!");
           onClose();
       } catch (e) {
-          console.error(e);
           alert("Lỗi khi thêm dữ liệu demo: " + (e instanceof Error ? e.message : String(e)));
       } finally {
           setIsLoadingDemo(false);
       }
   };
-  
-  const inAiStudio = isAiStudio();
 
   if (!isOpen) return null;
 
   return (
-    <div className="sync-modal-overlay" onClick={onClose} role="dialog" aria-modal="true" aria-labelledby="api-key-modal-title">
-      <div className="sync-modal" onClick={e => e.stopPropagation()}>
-        <header className="sync-modal__header">
-          <h2 id="api-key-modal-title" className="sync-modal__title">Quản lý API Key</h2>
-          <button onClick={onClose} className="sync-modal__close-btn" aria-label="Đóng">
-            <CloseIcon className="sync-modal__close-icon" />
-          </button>
-        </header>
-        
-        <div className="p-6 overflow-y-auto max-h-[80vh]">
-          {/* INTRO TEXT (Only show if no key is set) */}
-          {!currentKey && (
-             <div className="sync-modal__description !p-0 !pb-4">
-                <p>Để sử dụng các tính năng AI (phân tích nhân vật, trò chuyện, đọc voice), bạn cần cung cấp Google AI API Key.</p>
-                {!inAiStudio && (
-                    <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noopener noreferrer" className="text-[var(--theme-accent-primary)] hover:underline font-semibold block mt-2">
-                        Nhận API Key của bạn tại đây
-                    </a>
-                )}
-                {inAiStudio && (
-                    <div className="text-center p-3 mt-3 bg-emerald-900/50 border border-emerald-700 rounded-lg text-sm text-emerald-300">
-                        Môi trường AI Studio: API Key sẽ được tự động cấu hình.
-                    </div>
-                )}
-             </div>
-          )}
-
-          {/* INPUT FORM OR KEY DISPLAY */}
-          {isEditing || !currentKey ? (
-            <form onSubmit={handleSubmit} className="sync-modal-form !p-0">
-              <div>
-                <label htmlFor="apiKey" className="sync-modal-form__label">Nhập API Key mới</label>
-                <div className="relative">
-                    <input
-                      type={isKeyVisible ? 'text' : 'password'}
-                      id="apiKey"
-                      value={apiKey}
-                      onChange={e => setApiKey(e.target.value)}
-                      className="sync-modal-form__input pr-10"
-                      placeholder={inAiStudio ? "Nhập giá trị bất kỳ..." : "Dán API Key vào đây"}
-                      required
-                      disabled={isValidating}
-                    />
-                    <button
-                        type="button"
-                        onClick={() => setIsKeyVisible(!isKeyVisible)}
-                        className="absolute inset-y-0 right-0 flex items-center px-3 text-[var(--theme-text-secondary)] hover:text-[var(--theme-text-primary)]"
-                        aria-label={isKeyVisible ? 'Ẩn API key' : 'Hiện API key'}
-                    >
-                        {isKeyVisible ? <EyeSlashIcon className="w-5 h-5" /> : <EyeIcon className="w-5 h-5" />}
-                    </button>
-                </div>
-              </div>
-              {validationError && (
-                  <p className="text-sm text-rose-400 mt-2">{validationError}</p>
-              )}
-              <div className="sync-modal-form__actions flex-wrap pt-2">
-                {!currentKey && !inAiStudio && (
-                    <button type="button" onClick={onClose} className="sync-modal-form__button bg-transparent border border-[var(--theme-border)] text-[var(--theme-text-secondary)] hover:text-[var(--theme-text-primary)] hover:bg-[var(--theme-bg-base)] mr-auto" disabled={isValidating}>
-                        Bỏ qua
-                    </button>
-                )}
-                {currentKey && <button type="button" onClick={() => setIsEditing(false)} className="sync-modal-form__button sync-modal-form__button--secondary" disabled={isValidating}>Hủy</button>}
-                <button type="submit" className="sync-modal-form__button sync-modal-form__button--primary" disabled={isValidating}>
-                  {isValidating ? <SpinnerIcon className="sync-modal-form__spinner" /> : 'Lưu & Xác thực'}
-                </button>
-              </div>
-            </form>
-          ) : (
-            <div className="bg-[var(--theme-bg-base)] p-3 rounded-lg border border-[var(--theme-border)] flex items-center justify-between">
-                <div>
-                    <p className="text-xs text-[var(--theme-text-secondary)] mb-1">API Key hiện tại</p>
-                    <div className="font-mono text-sm text-[var(--theme-text-primary)] flex items-center gap-2">
-                        <span>{isSavedKeyVisible ? currentKey : `••••••••••••••••••••${currentKey?.slice(-4)}`}</span>
-                        <button type="button" onClick={() => setIsSavedKeyVisible(!isSavedKeyVisible)} className="text-[var(--theme-text-secondary)] hover:text-[var(--theme-text-primary)]">
-                            {isSavedKeyVisible ? <EyeSlashIcon className="w-4 h-4" /> : <EyeIcon className="w-4 h-4" />}
-                        </button>
-                    </div>
-                </div>
-                <div className="flex gap-2">
-                    <button onClick={() => setIsEditing(true)} className="p-2 text-[var(--theme-accent-primary)] hover:bg-[var(--theme-bg-surface)] rounded-md transition-colors font-medium text-sm">Sửa</button>
-                    <button onClick={handleDelete} className="p-2 text-rose-500 hover:bg-[var(--theme-bg-surface)] rounded-md transition-colors font-medium text-sm">Xóa</button>
-                </div>
-            </div>
-          )}
-
-          {/* DIVIDER */}
-          <hr className="my-6 border-[var(--theme-border)]" />
-
-          {/* STATS & NOTES (Always Visible) */}
-          <div className="space-y-6">
-            <div>
-                <p className="sync-modal-form__label">Sử dụng tính năng Phân tích AI (Token) tháng này</p>
-                <div className="w-full bg-[var(--theme-bg-base)] rounded-full h-4 border border-[var(--theme-border)] overflow-hidden">
-                    <div 
-                    className="bg-[var(--theme-accent-primary)] h-full rounded-full transition-all duration-500"
-                    style={{ width: `${tokenUsagePercentage}%` }}
-                    ></div>
-                </div>
-                <div className="flex justify-between text-xs text-[var(--theme-text-secondary)] mt-1">
-                    <span>{tokenUsage.totalTokens.toLocaleString()} / {TOKEN_FREE_TIER_BENCHMARK.toLocaleString()} tokens (ước tính)</span>
-                    <span>{tokenUsagePercentage.toFixed(2)}%</span>
-                </div>
-                <div className="mt-4 p-3 bg-[var(--theme-bg-base)]/50 rounded-md border border-[var(--theme-border)]">
-                    <p className="text-xs text-[var(--theme-text-secondary)] italic leading-relaxed">
-                        <strong>Lưu ý:</strong> Gói miễn phí của Gemini chủ yếu giới hạn theo Số Yêu Cầu Mỗi Phút (RPM). Bộ đếm này là công cụ tham khảo giúp bạn hình dung mức độ sử dụng trong tháng.
-                    </p>
-                </div>
-            </div>
-          </div>
+    <>
+      <div className="sync-modal-overlay" onClick={onClose} role="dialog" aria-modal="true" aria-labelledby="api-key-modal-title">
+        <div className="sync-modal" onClick={e => e.stopPropagation()}>
+          <header className="sync-modal__header">
+            <h2 id="api-key-modal-title" className="sync-modal__title">Quản lý API Key</h2>
+            <button onClick={onClose} className="sync-modal__close-btn" aria-label="Đóng">
+              <CloseIcon className="sync-modal__close-icon" />
+            </button>
+          </header>
           
-          {/* DEMO DATA BUTTON - Only visible in AI Studio/Dev environment */}
-          {inAiStudio && (
-            <div className="mt-6 pt-4 border-t border-[var(--theme-border)]">
-                <button 
-                    onClick={handleLoadDemo}
-                    disabled={isLoadingDemo}
-                    className="w-full flex items-center justify-center gap-2 py-2 px-4 bg-slate-700/30 hover:bg-slate-700/50 text-[var(--theme-text-secondary)] hover:text-[var(--theme-text-primary)] rounded-md transition-colors text-xs border border-[var(--theme-border)] border-dashed hover:border-solid"
-                >
-                    {isLoadingDemo ? <SpinnerIcon className="w-3 h-3 animate-spin" /> : <WrenchScrewdriverIcon className="w-3 h-3" />}
-                    <span>Nạp dữ liệu Demo (Dành cho Dev)</span>
-                </button>
+          <div className="p-6 overflow-y-auto max-h-[80vh]">
+            <div className="sync-modal__description !p-0 !pb-4">
+              <p>Chọn một key để kích hoạt. Bạn có thể thêm nhiều key cùng lúc và hệ thống sẽ tự động xác thực chúng.</p>
+              {!inAiStudio && (
+                <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noopener noreferrer" className="text-[var(--theme-accent-primary)] hover:underline font-semibold block mt-2">
+                    Nhận API Key của bạn tại đây
+                </a>
+              )}
             </div>
-          )}
+
+            {/* Key List */}
+            <div className="space-y-3">
+              {keys.length === 0 && (
+                <p className="text-center text-sm text-[var(--theme-text-secondary)] py-4">Chưa có API key nào được lưu.</p>
+              )}
+              {keys.map(keyInfo => (
+                <div key={keyInfo.id} className="bg-[var(--theme-bg-base)] p-3 rounded-lg border border-[var(--theme-border)] flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-3 flex-grow overflow-hidden">
+                    <input
+                      type="radio"
+                      name="activeKey"
+                      id={`key-${keyInfo.id}`}
+                      checked={activeKeyId === keyInfo.id}
+                      onChange={() => handleSetActive(keyInfo.id)}
+                      className="w-4 h-4 text-[var(--theme-accent-primary)] bg-gray-700 border-gray-600 focus:ring-[var(--theme-accent-primary)] focus:ring-2"
+                    />
+                    <label htmlFor={`key-${keyInfo.id}`} className="flex-grow cursor-pointer overflow-hidden">
+                      <p className="font-mono text-sm text-[var(--theme-text-primary)]">Key ••••••••{keyInfo.key.slice(-4)}</p>
+                    </label>
+                  </div>
+                  <div className="flex-shrink-0 flex items-center gap-1">
+                    <button onClick={() => setKeyToDelete(keyInfo)} className="p-2 text-slate-400 hover:text-rose-500 rounded-md transition-colors" title="Xóa Key">
+                      <TrashIcon className="w-4 h-4" />
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+            
+            {/* Batch Add Form */}
+            <div className="sync-modal-form !p-0 mt-6 pt-4 border-t border-[var(--theme-border)]">
+              <h3 className="text-lg font-semibold mb-3">Thêm API Key mới</h3>
+              <div className="space-y-3">
+                  {newKeyInputs.map((input, index) => {
+                      const result = validationResults[input.id];
+                      return (
+                          <div key={input.id}>
+                              <div className="flex items-center gap-2">
+                                  <div className="relative flex-grow">
+                                      <input
+                                          type="password"
+                                          placeholder="Dán API key của bạn vào đây"
+                                          value={input.value}
+                                          onChange={(e) => handleNewKeyChange(input.id, e.target.value)}
+                                          className="sync-modal-form__input pr-12"
+                                          disabled={isBatchValidating}
+                                      />
+                                      <div className="absolute inset-y-0 right-0 flex items-center pr-3">
+                                          {result && statusIcons[result.status]}
+                                      </div>
+                                  </div>
+                                  {newKeyInputs.length > 1 && (
+                                      <button type="button" onClick={() => handleRemoveKeyInput(input.id)} className="p-2 text-slate-400 hover:text-rose-500 rounded-md transition-colors" disabled={isBatchValidating}>
+                                          <TrashIcon className="w-5 h-5"/>
+                                      </button>
+                                  )}
+                              </div>
+                              {result?.status === 'invalid' && <p className="text-xs text-rose-400 mt-1 ml-1">{result.message}</p>}
+                          </div>
+                      );
+                  })}
+              </div>
+              
+              <button onClick={handleAddKeyInput} disabled={isBatchValidating} className="mt-3 flex items-center gap-2 text-sm text-[var(--theme-accent-primary)] hover:underline font-semibold disabled:opacity-50">
+                  <PlusIcon className="w-4 h-4" />
+                  Thêm Key khác
+              </button>
+              
+              <div className="sync-modal-form__actions justify-center pt-4">
+                  <button type="button" onClick={handleBatchValidateAndSave} className="sync-modal-form__button sync-modal-form__button--primary w-full sm:w-auto" disabled={isBatchValidating}>
+                      {isBatchValidating ? <SpinnerIcon className="sync-modal-form__spinner" /> : 'Lưu & Xác thực các Key mới'}
+                  </button>
+              </div>
+            </div>
+
+            <hr className="my-6 border-[var(--theme-border)]" />
+            
+            {/* Usage Stats */}
+            <div>
+              <p className="sync-modal-form__label">Sử dụng AI tháng này (của key đang active)</p>
+              <div className="w-full bg-[var(--theme-bg-base)] rounded-full h-4 border border-[var(--theme-border)] overflow-hidden">
+                <div className="bg-[var(--theme-accent-primary)] h-full rounded-full transition-all duration-500" style={{ width: `${tokenUsagePercentage}%` }}></div>
+              </div>
+              <div className="flex justify-between text-xs text-[var(--theme-text-secondary)] mt-1">
+                <span>{tokenUsage.totalTokens.toLocaleString()} / {TOKEN_FREE_TIER_BENCHMARK.toLocaleString()} tokens (ước tính)</span>
+                <span>{tokenUsagePercentage.toFixed(2)}%</span>
+              </div>
+            </div>
+
+            {inAiStudio && (
+              <div className="mt-6 pt-4 border-t border-[var(--theme-border)]">
+                  <button onClick={handleLoadDemo} disabled={isLoadingDemo} className="w-full flex items-center justify-center gap-2 py-2 px-4 bg-slate-700/30 hover:bg-slate-700/50 text-[var(--theme-text-secondary)] hover:text-[var(--theme-text-primary)] rounded-md transition-colors text-xs border border-[var(--theme-border)] border-dashed hover:border-solid">
+                      {isLoadingDemo ? <SpinnerIcon className="w-3 h-3 animate-spin" /> : <WrenchScrewdriverIcon className="w-3 h-3" />}
+                      <span>Nạp dữ liệu Demo (Dành cho Dev)</span>
+                  </button>
+              </div>
+            )}
+          </div>
         </div>
       </div>
-    </div>
+      <ConfirmationModal
+        isOpen={!!keyToDelete}
+        onClose={() => setKeyToDelete(null)}
+        onConfirm={handleConfirmDelete}
+        title="Xác nhận xóa API Key"
+      >
+        <p>Bạn có chắc muốn xóa vĩnh viễn key <strong className="text-[var(--theme-text-primary)] font-mono">••••••••{keyToDelete?.key.slice(-4)}</strong>?</p>
+      </ConfirmationModal>
+    </>
   );
 };
 
