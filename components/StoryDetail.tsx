@@ -1,7 +1,7 @@
 
 import React, { useState } from 'react';
 import type { Story, Chapter } from '../types';
-import { EditIcon, TrashIcon, PlusIcon, CheckIcon, CloseIcon } from './icons';
+import { EditIcon, TrashIcon, PlusIcon, CheckIcon, CloseIcon, DownloadIcon } from './icons';
 import ConfirmationModal from './ConfirmationModal';
 import StoryEditModal from './StoryEditModal';
 import ChapterEditModal from './ChapterEditModal';
@@ -18,6 +18,7 @@ interface StoryDetailProps {
   onCreateChapter?: (story: Story, title: string, content: string) => Promise<void>;
   onFilterAuthor?: (author: string) => void;
   onFilterTag?: (tag: string) => void;
+  onDownloadStory?: (story: Story) => void; // Prop mới
 }
 
 const StoryDetail: React.FC<StoryDetailProps> = ({ 
@@ -31,7 +32,8 @@ const StoryDetail: React.FC<StoryDetailProps> = ({
     onDeleteChapterContent,
     onCreateChapter,
     onFilterAuthor,
-    onFilterTag
+    onFilterTag,
+    onDownloadStory
 }) => {
   // Pagination state
   const [currentPage, setCurrentPage] = useState(1);
@@ -155,7 +157,7 @@ const StoryDetail: React.FC<StoryDetailProps> = ({
 
   return (
     <div className="bg-[var(--theme-bg-surface)] rounded-lg shadow-xl p-4 sm:p-6 animate-fade-in border border-[var(--theme-border)]">
-      <div className="flex justify-between items-center mb-6">
+      <div className="flex justify-between items-center mb-6 flex-wrap gap-2">
         <button
             onClick={onBack}
             className="flex items-center gap-1 bg-[var(--theme-accent-primary)] hover:brightness-90 text-white font-bold p-2 sm:py-2 sm:px-4 rounded-lg transition-colors duration-300"
@@ -166,7 +168,17 @@ const StoryDetail: React.FC<StoryDetailProps> = ({
         </button>
         
         {onUpdateStory && (
-            <div className="flex gap-2">
+            <div className="flex gap-2 flex-wrap">
+                {onDownloadStory && story.source !== 'Local' && story.source !== 'Ebook' && (
+                    <button
+                        onClick={() => onDownloadStory(story)}
+                        className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-500 text-white font-bold p-2 sm:py-2 sm:px-4 rounded-lg transition-colors duration-300"
+                        title="Cào/Tải toàn bộ chương truyện về máy để đọc offline"
+                    >
+                        <DownloadIcon className="w-5 h-5" />
+                        <span className="hidden sm:inline">Tải Offline</span>
+                    </button>
+                )}
                 <button
                     onClick={() => setIsEditModalOpen(true)}
                     className="flex items-center gap-2 bg-slate-600 hover:bg-slate-500 text-white font-bold p-2 sm:py-2 sm:px-4 rounded-lg transition-colors duration-300"

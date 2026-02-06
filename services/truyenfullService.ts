@@ -1,4 +1,3 @@
-
 import type { Story, Chapter, PartialStory } from '../types';
 
 // =================================================================
@@ -6,88 +5,142 @@ import type { Story, Chapter, PartialStory } from '../types';
 // =================================================================
 
 // Xác định các proxy với các trình tạo URL cụ thể
-// Ưu tiên AllOrigins vì nó xử lý redirect và anti-bot tốt hơn cho static content
 const CORS_PROXIES = [
     {
-        name: 'AllOrigins',
-        buildUrl: (url: string) => `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`
-    },
-    {
         name: 'CORSProxy.io',
-        buildUrl: (url: string) => `https://corsproxy.io/?${url}`
+        buildUrl: (url: string) => `https://corsproxy.io/?${url}`, 
+        isJson: false
     },
     {
-        name: 'ThingProxy',
-        buildUrl: (url: string) => `https://thingproxy.freeboard.io/fetch/${url}`
+        name: 'AllOrigins (Raw)',
+        buildUrl: (url: string) => `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`,
+        isJson: false
     },
     {
-        name: 'CORS.EU.ORG',
-        buildUrl: (url: string) => `https://cors.eu.org/${url}`
+        name: 'AllOrigins (JSON)',
+        buildUrl: (url: string) => `https://api.allorigins.win/get?url=${encodeURIComponent(url)}`,
+        isJson: true
+    },
+    {
+        name: 'CodeTabs',
+        buildUrl: (url: string) => `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(url)}`,
+        isJson: false
     }
 ];
 
-const FETCH_TIMEOUT = 20000; // Tăng timeout lên 20s
+// Timeout cho mỗi request lẻ
+const SINGLE_PROXY_TIMEOUT = 12000; 
 
-async function fetchAndParse(url: string): Promise<Document> {
-  let lastError: Error | null = null;
-
-  for (const proxy of CORS_PROXIES) {
+// Hàm fetch đơn lẻ qua 1 proxy
+async function fetchViaProxy(proxy: typeof CORS_PROXIES[0], url: string): Promise<Document> {
     const proxyUrl = proxy.buildUrl(url);
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), FETCH_TIMEOUT);
+    const timeoutId = setTimeout(() => controller.abort(), SINGLE_PROXY_TIMEOUT);
 
     try {
-      console.log(`Trying proxy: ${proxy.name} for ${url}`);
-      const response = await fetch(proxyUrl, {
-        signal: controller.signal,
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8',
-          'Accept-Language': 'vi-VN,vi;q=0.9,en-US;q=0.8,en;q=0.7'
+        const response = await fetch(proxyUrl, {
+            signal: controller.signal,
+            headers: {} 
+        });
+        
+        clearTimeout(timeoutId);
+        
+        if (!response.ok) {
+            throw new Error(`Status ${response.status}`);
         }
-      });
-      clearTimeout(timeoutId);
-      
-      if (!response.ok) throw new Error(`Proxy ${proxy.name} returned status: ${response.status}`);
-      
-      const htmlText = await response.text();
-      const parser = new DOMParser();
-      const doc = parser.parseFromString(htmlText, 'text/html');
-      
-      // KIỂM TRA LỖI CLOUDFLARE / CAPTCHA / BLOCK
-      const docTextContent = doc.body.textContent?.toLowerCase() || "";
-      const docTitle = doc.title.toLowerCase();
-      
-      // Các từ khóa cho thấy trang bị chặn hoặc lỗi proxy
-      const errorKeywords = [
-          'just a moment...', 
-          'attention required', 
-          'security check', 
-          'access denied', 
-          '403 forbidden', 
-          'cloudflare', 
-          'verify you are human',
-          'enable javascript'
-      ];
+        
+        let htmlText = '';
 
-      // Kiểm tra nếu nội dung quá ngắn (< 500 ký tự) VÀ chứa từ khóa lỗi
-      if (docTextContent.length < 1000 && errorKeywords.some(keyword => docTitle.includes(keyword) || docTextContent.includes(keyword))) {
-          throw new Error(`Proxy ${proxy.name} bị chặn bởi Cloudflare/Anti-bot.`);
-      }
-      
-      // Kiểm tra nếu HTML rỗng hoặc không hợp lệ
-      if (!doc.body || doc.body.children.length === 0) {
-           throw new Error(`Proxy ${proxy.name} trả về HTML rỗng.`);
-      }
+        if (proxy.isJson) {
+            const data = await response.json();
+            if (data && data.contents) {
+                htmlText = data.contents;
+            } else {
+                throw new Error(`Invalid JSON`);
+            }
+        } else {
+            htmlText = await response.text();
+        }
+        
+        if (!htmlText || htmlText.length < 50) {
+            throw new Error(`Content too short`);
+        }
 
-      return doc;
+        const parser = new DOMParser();
+        const doc = parser.parseFromString(htmlText, 'text/html');
+        
+        // KIỂM TRA LỖI CLOUDFLARE / CAPTCHA / BLOCK
+        const docTextContent = doc.body.textContent?.toLowerCase() || "";
+        const docTitle = doc.title.toLowerCase();
+        
+        const errorKeywords = [
+            'just a moment...', 
+            'attention required', 
+            'security check', 
+            'access denied', 
+            '403 forbidden', 
+            'cloudflare', 
+            'verify you are human',
+            'enable javascript',
+            'challenge-platform'
+        ];
+
+        if (docTextContent.length < 2000 && errorKeywords.some(keyword => docTitle.includes(keyword) || docTextContent.includes(keyword))) {
+            throw new Error(`Blocked by Cloudflare`);
+        }
+        
+        if (doc.body && doc.body.children.length > 0) {
+             return doc;
+        } else {
+             throw new Error(`Parse Failed`);
+        }
+
     } catch (error) {
-      clearTimeout(timeoutId);
-      console.warn(`Thất bại khi fetch từ proxy: ${proxy.name}. Lỗi:`, (error as Error).message);
-      lastError = error as Error;
+        clearTimeout(timeoutId);
+        throw error; // Ném lỗi để Promise.any bỏ qua promise này
     }
+}
+
+// Polyfill for Promise.any to avoid TS errors if target lib < ES2021
+function promiseAny<T>(promises: Promise<T>[]): Promise<T> {
+    return new Promise((resolve, reject) => {
+        let errors: any[] = [];
+        let rejectedCount = 0;
+        if (promises.length === 0) {
+             reject(new Error("No promises passed"));
+             return;
+        }
+        promises.forEach((promise, index) => {
+            Promise.resolve(promise)
+                .then(resolve)
+                .catch(error => {
+                    errors[index] = error;
+                    rejectedCount++;
+                    if (rejectedCount === promises.length) {
+                        reject({ errors, message: "All promises rejected" });
+                    }
+                });
+        });
+    });
+}
+
+async function fetchAndParse(url: string): Promise<Document> {
+  // Chiến thuật: "Đua" (Race/Any)
+  // Gửi request tới TẤT CẢ proxy cùng lúc. Cái nào xong trước và thành công thì lấy.
+  // Điều này khắc phục việc phải chờ proxy chết (timeout) mới thử cái tiếp theo.
+  
+  const promises = CORS_PROXIES.map(proxy => fetchViaProxy(proxy, url));
+
+  try {
+      // Promise.any trả về promise đầu tiên thành công (fulfilled)
+      // Sử dụng polyfill promiseAny thay vì Promise.any trực tiếp
+      const result = await promiseAny(promises);
+      return result;
+  } catch (aggregateError: any) {
+      // Nếu TẤT CẢ đều thất bại
+      console.error("All proxies failed:", aggregateError.errors);
+      throw new Error(`CONNECTION_FAILED: Không thể tải dữ liệu từ ${url}. Tất cả các kênh kết nối đều thất bại.`);
   }
-  throw new Error(`CONNECTION_FAILED: Không thể tải dữ liệu từ ${url} qua bất kỳ proxy nào. Nguồn truyện có thể đang chặn truy cập hoặc bảo trì. Vui lòng thử lại sau hoặc dùng tính năng 'Nhập thủ công'.`);
 }
 
 export function parseHtml(htmlString: string): Document {
@@ -111,84 +164,78 @@ function normalizeString(str: string): string {
 
 function extractChapterContent(doc: Document, source: string): string {
     let contentEl: Element | null = null;
-    let removeSelectors: string[] = [];
+    // Danh sách selector cần xóa (quảng cáo, script rác)
+    let removeSelectors: string[] = ['script', 'style', 'iframe', 'div[class*="ads"]', 'center', '.ads-responsive'];
 
     switch (source) {
         case 'TruyenFull.vn':
         case 'TruyenFull.vision':
-            // TruyenFull.vision đôi khi dùng cấu trúc hơi khác, thử nhiều selector
             contentEl = doc.querySelector('#chapter-c') || doc.querySelector('.chapter-c') || doc.querySelector('.chapter-content');
-            removeSelectors = ['.ads-chapter', '.ads', 'script', '.meta-chap', '#chapter-nav', 'div[class*="ads"]', 'a[href*="truyenfull"]', '.ads-mobile', '.ads-responsive'];
+            removeSelectors.push('.ads-chapter', '.ads', '.meta-chap', '#chapter-nav', 'a[href*="truyenfull"]', '.ads-mobile');
             break;
         case 'TangThuVien.net':
             contentEl = doc.querySelector('.box-chap-content, .chapter-c, .chapter-content, .content-body');
-            removeSelectors = [
-                'div[class*="google-auto-placed"]', 
-                'script', 
-                'a', 
-                'div[class*="ads"]', 
-                'iframe', 
-                '.ads-content',
-                '.box-config',
-                '.truyen-control',
-                '.chapter-nav',
-                '#chapter-nav-top',
-                '#chapter-nav-bot',
-                '.btn-chapter-nav',
-            ];
+            removeSelectors.push('div[class*="google-auto-placed"]', 'a', '.ads-content', '.box-config', '.truyen-control', '.chapter-nav', '#chapter-nav-top', '#chapter-nav-bot', '.btn-chapter-nav');
             break;
         case 'TruyenHDT.com':
             contentEl = doc.querySelector('#chapter-content');
-            removeSelectors = ['.ads-in-content', 'script', 'style', 'a'];
+            removeSelectors.push('.ads-in-content', 'a');
             break;
         case 'KhoDocSach.com':
             contentEl = doc.querySelector('#chapter-content');
-            removeSelectors = ['script', 'style', '.text-center', 'a'];
+            removeSelectors.push('.text-center', 'a');
             break;
         case 'TruyenYY.mobi':
             contentEl = doc.querySelector('#chapter-content');
-            removeSelectors = ['script', 'style', '.ads-holder', 'a'];
+            removeSelectors.push('.ads-holder', 'a');
             break;
         default:
              contentEl = doc.querySelector('#chapter-c, .box-chap-content, #chapter-content, .chapter-c, .content-body');
-             removeSelectors = ['script', 'style', 'iframe', '.ads', 'div[class*="ads"]'];
     }
 
     if (!contentEl) {
-        // Fallback: Nếu không tìm thấy element chuẩn, thử tìm div lớn nhất chứa text
+        // Fallback: Tìm div chứa nhiều text nhất nếu không khớp selector chuẩn
         const divs = Array.from(doc.querySelectorAll('div'));
         let maxLen = 0;
         let bestDiv = null;
         divs.forEach(div => {
+            // Lọc bỏ các div container quá lớn
+            if (div.children.length > 20) return;
+            
             const len = div.textContent?.length || 0;
-            if (len > maxLen && len > 500) { // Nội dung chương thường dài
-                // Loại bỏ các div cha quá lớn (như body wrapper)
-                if (div.children.length < 20) {
-                    maxLen = len;
-                    bestDiv = div;
-                }
+            if (len > maxLen && len > 500) { 
+                maxLen = len;
+                bestDiv = div;
             }
         });
         if (bestDiv) {
             contentEl = bestDiv;
         } else {
-            throw new Error(`Không tìm thấy nội dung chương cho nguồn ${source}.`);
+            // Nếu vẫn không tìm thấy, trả về thông báo lỗi nhẹ nhàng thay vì throw Error
+            return "Không thể tự động trích xuất nội dung. Có thể cấu trúc trang web đã thay đổi hoặc bị chặn. Hãy thử tính năng 'Nhập thủ công'.";
         }
     }
 
-    // Clean up
+    // Clean up DOM rác
     removeSelectors.forEach(selector => {
         contentEl?.querySelectorAll(selector).forEach(el => el.remove());
     });
     
+    // Loại bỏ style cứng và class để tránh xung đột giao diện
     contentEl.querySelectorAll('*').forEach(el => {
         el.removeAttribute('style');
         el.removeAttribute('class');
     });
 
-    contentEl.innerHTML = contentEl.innerHTML.replace(/<br\s*\/?>/gi, '\n');
+    // Xử lý xuống dòng
+    contentEl.innerHTML = contentEl.innerHTML
+        .replace(/<br\s*\/?>/gi, '\n')
+        .replace(/<p>/gi, '\n')
+        .replace(/<\/p>/gi, '\n');
+
     let text = (contentEl.textContent ?? '').trim();
     
+    // Lọc rác đặc thù của TTV
     if (source === 'TangThuVien.net') {
          const garbageLines = [
             'Tuỳ chỉnh', 'Theme', 'Font chữ', 'Palatino', 'Times', 'Arial', 'Georgia', 
@@ -203,7 +250,8 @@ function extractChapterContent(doc: Document, source: string): string {
          }).join('\n');
     }
 
-    text = text.replace(/\n\s*\n/g, '\n\n');
+    // Chuẩn hóa khoảng trắng
+    text = text.replace(/\n\s*\n/g, '\n\n').replace(/[ \t]+/g, ' ');
     
     return text || "Nội dung chương trống.";
 }
@@ -218,13 +266,12 @@ function extractStoryDetails(doc: Document, source: string, url: string): Partia
     switch (source) {
         case 'TruyenFull.vn':
         case 'TruyenFull.vision':
-            // Hỗ trợ cả 2 domain với cấu trúc tương tự
             title = txt('h3.title') || txt('.col-truyen-main .title');
             author = txt('div.info a[itemprop="author"]') || txt('.info .author');
             imageUrl = attr('.book img', 'src') || attr('.books img', 'src');
             description = txt('.desc-text') || txt('.desc-text-full') || 'Không có mô tả.';
             
-            // Xử lý chương: TruyenFull thường phân trang
+            // Lấy chương từ trang đầu tiên
             doc.querySelectorAll('#list-chapter .list-chapter li a, .list-chapter li a').forEach(el => {
                 if(el.textContent && el.getAttribute('href')) chapters.push({ title: el.textContent.trim(), url: el.getAttribute('href')! });
             });
@@ -320,66 +367,100 @@ async function genericSearch(query: string, searchUrlBuilder: (q: string) => str
     return stories;
 }
 
-// Scrapers
-const scrapers = {
-  [TRUYENFULL_SOURCE]: {
-    search: (q: string) => genericSearch(q, q => `https://truyenfull.vn/tim-kiem/?tukhoa=${encodeURIComponent(q)}`, '.list-truyen .row', { title: 'h3.truyen-title a', author: '.author', img: '[data-image]', link: 'h3.truyen-title a' }, TRUYENFULL_SOURCE),
-    getDetails: async (url: string) => {
-        const baseUrl = url.replace(/\/trang-\d+\/?(#.*)?$/, '').replace(/#.*$/, '').replace(/\/+$/, '') + '/';
-        const doc = await fetchAndParse(baseUrl);
-        const baseDetails = extractStoryDetails(doc, TRUYENFULL_SOURCE, url);
-        
-        let lastPage = 1;
-        const paginationLinks = doc.querySelectorAll('.pagination li a');
-        paginationLinks.forEach(link => {
-            const href = link.getAttribute('href') || '';
-            const match = href.match(/trang-(\d+)/);
-            if (match) {
-                const pageNum = parseInt(match[1], 10);
-                if (pageNum > lastPage) lastPage = pageNum;
-            }
-        });
+// Logic lấy chi tiết truyện dùng chung cho TruyenFull (Modified for Background Fetch)
+const truyenFullGetDetails = async (url: string, source: string, onPartialUpdate?: (story: PartialStory & { chapters: Chapter[] }) => void) => {
+    // 1. Lấy thông tin trang đầu tiên (Critical Path)
+    // Clean URL: bỏ phân trang, bỏ hash
+    const baseUrl = url.replace(/\/trang-\d+\/?(#.*)?$/, '').replace(/#.*$/, '').replace(/\/+$/, '') + '/';
+    const doc = await fetchAndParse(baseUrl);
+    const baseDetails = extractStoryDetails(doc, source, url);
+    
+    // 2. Xác định tổng số trang
+    let lastPage = 1;
+    const paginationLinks = doc.querySelectorAll('.pagination li a');
+    paginationLinks.forEach(link => {
+        const href = link.getAttribute('href') || '';
+        const match = href.match(/trang-(\d+)/);
+        if (match) {
+            const pageNum = parseInt(match[1], 10);
+            if (pageNum > lastPage) lastPage = pageNum;
+        }
+    });
 
-        if (lastPage > 1) {
+    // 3. Nếu có nhiều trang, khởi động tiến trình tải ngầm
+    if (lastPage > 1) {
+         // Detached Async Process: Không await ở đây để trả về kết quả trang 1 ngay lập tức
+         (async () => {
              const pages = [];
              for (let i = 2; i <= lastPage; i++) pages.push(i);
-             const BATCH_SIZE = 5;
+             
+             // Tăng batch size lên để tải nhanh hơn
+             const BATCH_SIZE = 8; 
+             
              for (let i = 0; i < pages.length; i += BATCH_SIZE) {
                  const batch = pages.slice(i, i + BATCH_SIZE);
-                 const batchPromises = batch.map(pageNum => 
-                     fetchAndParse(`${baseUrl}trang-${pageNum}/`)
-                         .then(d => ({ pageNum, doc: d }))
-                         .catch(e => {
-                             console.warn(`Failed to fetch page ${pageNum}`, e);
-                             return null;
-                         })
-                 );
                  
-                 const results = await Promise.all(batchPromises);
-                 results.sort((a, b) => (a?.pageNum || 0) - (b?.pageNum || 0));
+                 // Sử dụng Promise.allSettled để request song song, không chết chùm
+                 const batchResults = await Promise.allSettled(batch.map(async (pageNum) => {
+                     try {
+                         const pageDoc = await fetchAndParse(`${baseUrl}trang-${pageNum}/`);
+                         return { pageNum, doc: pageDoc };
+                     } catch (e) {
+                         console.warn(`Background fetch failed page ${pageNum} of ${baseUrl}`, e);
+                         return null; // Trả về null nếu lỗi
+                     }
+                 }));
+                 
+                 // Lọc lấy kết quả thành công và sắp xếp
+                 const validResults = batchResults
+                    .filter((r): r is PromiseFulfilledResult<{ pageNum: number; doc: Document } | null> => r.status === 'fulfilled' && r.value !== null)
+                    .map(r => r.value)
+                    .sort((a, b) => (a?.pageNum || 0) - (b?.pageNum || 0));
 
-                 results.forEach(res => {
+                 // Parse chương từ các trang đã tải và thêm vào baseDetails
+                 let hasNewChapters = false;
+                 validResults.forEach(res => {
                      if(res && res.doc) {
-                        res.doc.querySelectorAll('#list-chapter .list-chapter li a').forEach(el => {
-                            if(el.textContent && el.getAttribute('href')) baseDetails.chapters.push({ title: el.textContent.trim(), url: el.getAttribute('href')! });
+                        res.doc.querySelectorAll('#list-chapter .list-chapter li a, .list-chapter li a').forEach(el => {
+                            if(el.textContent && el.getAttribute('href')) {
+                                baseDetails.chapters.push({ 
+                                    title: el.textContent.trim(), 
+                                    url: el.getAttribute('href')! 
+                                });
+                                hasNewChapters = true;
+                            }
                         });
                      }
                  });
+                 
+                 // Gửi tín hiệu cập nhật về App nếu có chương mới
+                 if (hasNewChapters && onPartialUpdate) {
+                     onPartialUpdate(baseDetails);
+                 }
+                 
+                 // Nghỉ nhẹ 1 chút để tránh spam quá mức
                  if (i + BATCH_SIZE < pages.length) {
-                     await new Promise(r => setTimeout(r, 500)); 
+                     await new Promise(r => setTimeout(r, 200)); 
                  }
              }
-        }
-        return baseDetails;
-    },
+         })();
+    }
+    
+    // Trả về ngay dữ liệu của trang 1 để hiển thị
+    return baseDetails;
+}
+
+// Scrapers configuration
+const scrapers = {
+  [TRUYENFULL_SOURCE]: {
+    search: (q: string) => genericSearch(q, q => `https://truyenfull.vn/tim-kiem/?tukhoa=${encodeURIComponent(q)}`, '.list-truyen .row', { title: 'h3.truyen-title a', author: '.author', img: '[data-image]', link: 'h3.truyen-title a' }, TRUYENFULL_SOURCE),
+    getDetails: (url: string, onPartialUpdate?: (s: any) => void) => truyenFullGetDetails(url, TRUYENFULL_SOURCE, onPartialUpdate),
     getChapter: async (url: string) => extractChapterContent(await fetchAndParse(url), TRUYENFULL_SOURCE)
   },
   [TRUYENFULLVISION_SOURCE]: {
+      // TruyenFull.vision có cấu trúc tương tự .vn nhưng khác domain
       search: (q: string) => genericSearch(q, q => `https://truyenfull.vision/tim-kiem/?tukhoa=${encodeURIComponent(q)}`, '.list-truyen .row', { title: 'h3.truyen-title a', author: '.author', img: '[data-image]', link: 'h3.truyen-title a' }, TRUYENFULLVISION_SOURCE),
-      getDetails: async (url: string) => {
-          // Reuse logic but allow for domain specifics if they diverge later
-          return scrapers[TRUYENFULL_SOURCE].getDetails(url); 
-      },
+      getDetails: (url: string, onPartialUpdate?: (s: any) => void) => truyenFullGetDetails(url, TRUYENFULLVISION_SOURCE, onPartialUpdate),
       getChapter: async (url: string) => extractChapterContent(await fetchAndParse(url), TRUYENFULLVISION_SOURCE)
   },
   [TANGTHUVIEN_SOURCE]: {
@@ -388,6 +469,7 @@ const scrapers = {
           const doc = await fetchAndParse(url);
           const baseDetails = extractStoryDetails(doc, TANGTHUVIEN_SOURCE, url);
           
+          // TTV dùng API ẩn để load chương, cần lấy bookId
           let bookId = doc.querySelector('input[name="story_id"]')?.getAttribute('value');
           if (!bookId) {
               bookId = url.match(/\/(?:doc-truyen|story)\/(\d+)/)?.[1];
@@ -395,6 +477,7 @@ const scrapers = {
 
           if(bookId) {
                try {
+                   // Hack: lấy limit cực lớn để lấy toàn bộ chương 1 lần
                    const chapterApiUrl = `https://truyen.tangthuvien.net/doc-truyen/page/${bookId}?page=0&limit=10000&web=1`;
                    const chapDoc = await fetchAndParse(chapterApiUrl);
                    
@@ -436,15 +519,16 @@ const scrapers = {
                const BATCH_SIZE = 8;
                for(let i=0; i<pages.length; i+=BATCH_SIZE) {
                    const batch = pages.slice(i, i+BATCH_SIZE);
-                   const batchPromises = batch.map(pageNum => 
+                   const batchResults = await Promise.allSettled(batch.map(pageNum => 
                         fetchAndParse(`${url}?page=${pageNum}`)
-                            .then(d => ({pageNum, doc: d}))
-                            .catch(()=>null)
-                   );
-                   const results = await Promise.all(batchPromises);
-                   results.sort((a, b) => (a?.pageNum || 0) - (b?.pageNum || 0));
+                   ));
+                   
+                   const validResults = batchResults
+                    .filter((r): r is PromiseFulfilledResult<Document> => r.status === 'fulfilled')
+                    .map((r, index) => ({ doc: r.value, pageNum: batch[index] }))
+                    .sort((a, b) => a.pageNum - b.pageNum);
 
-                   results.forEach(res => {
+                   validResults.forEach(res => {
                        if(res && res.doc) {
                            res.doc.querySelectorAll('#chapters .chapter-list a').forEach(el => {
                                 if(el.textContent && el.getAttribute('href')) baseDetails.chapters.push({ title: el.textContent.trim(), url: el.getAttribute('href')! });
@@ -474,13 +558,9 @@ export async function searchStory(query: string): Promise<Story[]> {
 
   // Check if query is a supported URL
   if (trimmedQuery.startsWith('http')) {
-      try {
-          const story = await getStoryFromUrl(trimmedQuery);
-          return [story];
-      } catch (e) {
-          // If direct fetching fails, fallback to search
-          console.warn("Direct fetch failed, falling back to search", e);
-      }
+      // Nếu là URL, ưu tiên tải trực tiếp. Nếu lỗi thì ném lỗi ra luôn để UI hiển thị, không fallback sang tìm kiếm từ khóa.
+      const story = await getStoryFromUrl(trimmedQuery);
+      return [story];
   }
 
   const searchPromises = Object.values(scrapers).map(scraper =>
@@ -506,15 +586,20 @@ export async function searchStory(query: string): Promise<Story[]> {
   return filteredStories.length > 0 ? filteredStories : allStoriesRaw;
 }
 
-export async function getStoryDetails(story: Story): Promise<Story> {
+export async function getStoryDetails(story: Story, onPartialUpdate?: (story: Story) => void): Promise<Story> {
   const scraper = scrapers[story.source as keyof typeof scrapers];
   if (!scraper) throw new Error(`Nguồn không được hỗ trợ: ${story.source}`);
   
-  const details = await scraper.getDetails(story.url);
+  // Pass the callback to the scraper
+  const details = await scraper.getDetails(story.url, (partialDetails: any) => {
+      if (onPartialUpdate) {
+          onPartialUpdate({ ...story, ...partialDetails });
+      }
+  });
   return { ...story, ...details };
 }
 
-export async function getStoryFromUrl(url: string): Promise<Story> {
+export async function getStoryFromUrl(url: string, onPartialUpdate?: (story: Story) => void): Promise<Story> {
   let source = '';
   if (url.includes('truyenfull.vn')) source = TRUYENFULL_SOURCE;
   else if (url.includes('truyenfull.vision')) source = TRUYENFULLVISION_SOURCE;
@@ -523,11 +608,41 @@ export async function getStoryFromUrl(url: string): Promise<Story> {
   else if (url.includes('khodocsach.com')) source = KHODOCSACH_SOURCE;
   else if (url.includes('truyenyy.mobi')) source = TRUYENYY_SOURCE;
 
-  if (!source) throw new Error(`URL không được hỗ trợ.`);
+  if (!source) throw new Error(`URL không được hỗ trợ. Hiện chỉ hỗ trợ: TruyenFull, TangThuVien, TruyenHDT, KhoDocSach, TruyenYY.`);
 
-  const scraper = scrapers[source as keyof typeof scrapers];
-  const details = await scraper.getDetails(url);
-  return { ...details, url, source };
+  const performFetch = async (targetUrl: string, targetSource: string) => {
+      const scraper = scrapers[targetSource as keyof typeof scrapers];
+      const details = await scraper.getDetails(targetUrl, (partialDetails: any) => {
+          if (onPartialUpdate) {
+              onPartialUpdate({ ...partialDetails, url: targetUrl, source: targetSource });
+          }
+      });
+      return { ...details, url: targetUrl, source: targetSource };
+  };
+
+  try {
+      return await performFetch(url, source);
+  } catch (error) {
+      // Cơ chế Fallback: Nếu TruyenFull.vision lỗi, thử TruyenFull.vn và ngược lại
+      if (url.includes('truyenfull.vision')) {
+          const fallbackUrl = url.replace('truyenfull.vision', 'truyenfull.vn');
+          console.log(`[Fallback] Thử lại với domain truyenfull.vn: ${fallbackUrl}`);
+          try {
+              return await performFetch(fallbackUrl, TRUYENFULL_SOURCE);
+          } catch (e) {
+              console.warn("Fallback cũng thất bại.");
+          }
+      } else if (url.includes('truyenfull.vn')) {
+          const fallbackUrl = url.replace('truyenfull.vn', 'truyenfull.vision');
+          console.log(`[Fallback] Thử lại với domain truyenfull.vision: ${fallbackUrl}`);
+          try {
+              return await performFetch(fallbackUrl, TRUYENFULLVISION_SOURCE);
+          } catch (e) {
+              console.warn("Fallback cũng thất bại.");
+          }
+      }
+      throw error;
+  }
 }
 
 export async function getChapterContent(chapter: Chapter, source: string): Promise<string> {

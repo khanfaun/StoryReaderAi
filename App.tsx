@@ -1,3 +1,4 @@
+
 import React, { useState, useCallback, useEffect, useRef, useMemo } from 'react';
 import type { Story, Chapter, CharacterStats, ReadingSettings, ReadingHistoryItem, ChatMessage, PartialStory, ApiKeyInfo } from './types';
 import { searchStory, getChapterContent, getStoryDetails, getStoryFromUrl, parseHtml, parseChapterContentFromDoc, parseStoryDetailsFromDoc } from './services/truyenfullService';
@@ -29,6 +30,7 @@ import UpdateModal from './components/UpdateModal';
 import HelpModal from './components/HelpModal';
 import ManualImportModal from './components/ManualImportModal';
 import StoryEditModal from './components/StoryEditModal';
+import DownloadModal from './components/DownloadModal'; // New Import
 import { PlusIcon, CloseIcon, CheckIcon, UploadIcon } from './components/icons';
 
 
@@ -55,6 +57,16 @@ interface TtsState {
   textChunks: string[];
   currentChunkIndex: number;
   error: string | null;
+}
+
+interface DownloadState {
+    isOpen: boolean;
+    total: number;
+    downloaded: number;
+    isDownloading: boolean;
+    logs: string[];
+    currentAction: string;
+    storyUrl: string | null;
 }
 
 
@@ -168,6 +180,12 @@ const App: React.FC = () => {
   const [filterTags, setFilterTags] = useState<string[]>([]);
   const [isTagDropdownOpen, setIsTagDropdownOpen] = useState(false);
   const tagDropdownRef = useRef<HTMLDivElement>(null);
+
+  // Download State
+  const [downloadState, setDownloadState] = useState<DownloadState>({
+      isOpen: false, total: 0, downloaded: 0, isDownloading: false, logs: [], currentAction: '', storyUrl: null
+  });
+  const abortControllerRef = useRef<AbortController | null>(null);
 
   // Reference to track the current operation ID. 
   const operationIdRef = useRef<number>(0);
@@ -380,7 +398,7 @@ const App: React.FC = () => {
     setIsAnalyzing(true);
     try {
       const currentStats = getStoryState(storyToLoad.url) ?? {};
-      const { data: chapterStats, usage } = await analyzeChapterForCharacterStats(currentApiKey, content, currentStats);
+      const { data: chapterStats, usage } = await analyzeChapterForCharacterStats(content, currentStats);
       
       if (currentOpId !== operationIdRef.current) return; 
 
@@ -618,10 +636,40 @@ const App: React.FC = () => {
       setError(null);
       try {
           let fullStory = selectedStory;
+          
           if ((!selectedStory.chapters || selectedStory.chapters.length === 0) && selectedStory.source !== 'Local' && selectedStory.source !== 'Ebook') {
-              fullStory = await getStoryDetails(selectedStory);
+              // Sử dụng callback để nhận dữ liệu cập nhật từ background fetch
+              fullStory = await getStoryDetails(selectedStory, async (updatedStory) => {
+                  // Khi có bản cập nhật (thêm chương mới), update state và lưu DB
+                  setStory(prev => {
+                      // Chỉ update nếu đang xem đúng truyện này
+                      if (prev && prev.url === updatedStory.url) {
+                          return { ...prev, ...updatedStory };
+                      }
+                      return prev;
+                  });
+                  
+                  await dbService.saveStory(updatedStory);
+                  setLocalStories(prev => {
+                      if (prev.some(s => s.url === updatedStory.url)) {
+                          return prev.map(s => s.url === updatedStory.url ? updatedStory : s);
+                      }
+                      return prev;
+                  });
+              });
           }
           
+          // --- AUTO-SAVE LOGIC ---
+          // Lưu ngay vào DB để F5 không bị mất metadata và danh sách chương (dù mới chỉ có trang 1)
+          await dbService.saveStory(fullStory);
+          setLocalStories(prev => {
+              if (prev.some(s => s.url === fullStory.url)) {
+                  return prev.map(s => s.url === fullStory.url ? fullStory : s);
+              }
+              return [fullStory, ...prev];
+          });
+          // --- END AUTO-SAVE LOGIC ---
+
           if (story?.url !== fullStory.url) {
                setSelectedChapterIndex(null);
                setChapterContent(null);
@@ -647,6 +695,140 @@ const App: React.FC = () => {
       }
   }, [story]);
 
+  // -- LOGIC DOWNLOAD TRUYỆN ---
+  const handleDownloadStory = async (storyToDownload: Story) => {
+      if (!storyToDownload || !storyToDownload.chapters || storyToDownload.chapters.length === 0) {
+          alert('Truyện này không có chương để tải.');
+          return;
+      }
+
+      setDownloadState({
+          isOpen: true,
+          total: storyToDownload.chapters.length,
+          downloaded: 0,
+          isDownloading: true,
+          logs: ['Bắt đầu khởi tạo tiến trình tải...'],
+          currentAction: 'Đang chuẩn bị...',
+          storyUrl: storyToDownload.url
+      });
+
+      abortControllerRef.current = new AbortController();
+      const signal = abortControllerRef.current.signal;
+
+      try {
+          // Lưu thông tin truyện trước để đảm bảo có trong DB
+          await dbService.saveStory(storyToDownload);
+          setLocalStories(prev => {
+              if (prev.find(s => s.url === storyToDownload.url)) return prev;
+              return [storyToDownload, ...prev];
+          });
+
+          // Lấy danh sách chương
+          const chapters = storyToDownload.chapters;
+          const BATCH_SIZE = 5; // Tải 5 chương cùng lúc
+          const DELAY_BETWEEN_BATCHES = 1500; // Nghỉ 1.5s giữa các batch để tránh bị ban IP
+
+          let successCount = 0;
+
+          // Chia thành các batch
+          for (let i = 0; i < chapters.length; i += BATCH_SIZE) {
+              if (signal.aborted) {
+                  setDownloadState(prev => ({ 
+                      ...prev, 
+                      isDownloading: false, 
+                      currentAction: 'Đã dừng bởi người dùng.',
+                      logs: [...prev.logs, 'Tiến trình đã bị dừng.']
+                  }));
+                  return;
+              }
+
+              const batch = chapters.slice(i, i + BATCH_SIZE);
+              setDownloadState(prev => ({ 
+                  ...prev, 
+                  currentAction: `Đang tải batch ${Math.floor(i/BATCH_SIZE) + 1}... (${i + 1} - ${Math.min(i + BATCH_SIZE, chapters.length)})`
+              }));
+
+              // Xử lý song song trong batch
+              const batchResults = await Promise.allSettled(batch.map(async (chapter) => {
+                  // Kiểm tra cache trước
+                  const cached = await getCachedChapter(storyToDownload.url, chapter.url);
+                  if (cached && cached.content) {
+                      return { chapter, status: 'skipped', title: chapter.title };
+                  }
+
+                  // Nếu chưa có, tải mới
+                  try {
+                      const content = await getChapterContent(chapter, storyToDownload.source);
+                      await setCachedChapter(storyToDownload.url, chapter.url, { content, stats: null });
+                      return { chapter, status: 'success', title: chapter.title };
+                  } catch (e) {
+                      return { chapter, status: 'error', title: chapter.title, error: (e as Error).message };
+                  }
+              }));
+
+              // Cập nhật trạng thái sau mỗi batch
+              const newLogs: string[] = [];
+              batchResults.forEach(res => {
+                  if (res.status === 'fulfilled') {
+                      if (res.value.status === 'success') {
+                          successCount++;
+                          // newLogs.push(`Đã tải: ${res.value.title}`); // Verbose log
+                      } else if (res.value.status === 'skipped') {
+                          successCount++; // Đã có coi như thành công
+                          // newLogs.push(`Đã có sẵn: ${res.value.title}`);
+                      } else {
+                          newLogs.push(`Lỗi tải ${res.value.title}: ${res.value.error}`);
+                      }
+                  } else {
+                      newLogs.push(`Lỗi không xác định trong batch.`);
+                  }
+              });
+
+              setDownloadState(prev => ({
+                  ...prev,
+                  downloaded: successCount,
+                  logs: [...prev.logs, ...newLogs]
+              }));
+
+              // Delay nhẹ
+              if (i + BATCH_SIZE < chapters.length) {
+                  await new Promise(r => setTimeout(r, DELAY_BETWEEN_BATCHES));
+              }
+          }
+
+          setDownloadState(prev => ({
+              ...prev,
+              isDownloading: false,
+              currentAction: 'Hoàn tất!',
+              logs: [...prev.logs, `Đã tải xong ${successCount}/${chapters.length} chương.`]
+          }));
+
+      } catch (e) {
+          setDownloadState(prev => ({
+              ...prev,
+              isDownloading: false,
+              currentAction: 'Đã xảy ra lỗi nghiêm trọng.',
+              logs: [...prev.logs, `Lỗi: ${(e as Error).message}`]
+          }));
+      }
+  };
+
+  const handleStopDownload = () => {
+      if (abortControllerRef.current) {
+          abortControllerRef.current.abort();
+      }
+  };
+
+  const handleCloseDownloadModal = () => {
+      if (downloadState.isDownloading) {
+          const confirmStop = window.confirm("Tiến trình đang chạy. Bạn có chắc chắn muốn dừng và đóng?");
+          if (!confirmStop) return;
+          handleStopDownload();
+      }
+      setDownloadState(prev => ({ ...prev, isOpen: false }));
+  };
+
+
   const handleRewriteChapter = useCallback(async () => {
       const currentApiKey = apiKeyService.getApiKey();
       if (!currentApiKey) {
@@ -658,7 +840,7 @@ const App: React.FC = () => {
       }
       setIsRewriting(true);
       try {
-          const { text, usage } = await rewriteChapterContent(currentApiKey, chapterContent);
+          const { text, usage } = await rewriteChapterContent(chapterContent);
           handleTokenUsageUpdate({ totalTokens: usage.totalTokens });
           await handleUpdateChapterContent(text);
       } catch (err) {
@@ -1027,7 +1209,7 @@ const App: React.FC = () => {
       const currentOpId = ++operationIdRef.current;
 
       try {
-          const { data, usage } = await analyzeChapterForPrimaryCharacter(currentApiKey, chapterContent, cumulativeStats);
+          const { data, usage } = await analyzeChapterForPrimaryCharacter(chapterContent, cumulativeStats);
           
           if (currentOpId !== operationIdRef.current) return;
 
@@ -1059,7 +1241,7 @@ const App: React.FC = () => {
       const currentOpId = ++operationIdRef.current;
 
       try {
-          const { data, usage } = await analyzeChapterForWorldInfo(currentApiKey, chapterContent, cumulativeStats);
+          const { data, usage } = await analyzeChapterForWorldInfo(chapterContent, cumulativeStats);
           
           if (currentOpId !== operationIdRef.current) return;
 
@@ -1095,11 +1277,11 @@ const App: React.FC = () => {
           let usageTokenCount = 0;
 
           if (chapterContent && story) {
-              const result = await chatWithChapterContent(currentApiKey, message, chapterContent, story.title);
+              const result = await chatWithChapterContent(message, chapterContent, story.title);
               responseText = result.text;
               usageTokenCount = result.usage.totalTokens;
           } else if (ebookInstance && story?.chapters) {
-              const result = await chatWithEbook(currentApiKey, message, ebookInstance.zip, story.chapters);
+              const result = await chatWithEbook(message, ebookInstance.zip, story.chapters);
               responseText = result.text;
               usageTokenCount = result.usage.totalTokens;
           } else {
@@ -1262,6 +1444,7 @@ const App: React.FC = () => {
         onCreateChapter={handleCreateChapter}
         onFilterAuthor={setFilterAuthor}
         onFilterTag={(tag) => { setFilterTags([tag]); setSortOption('newest'); }}
+        onDownloadStory={handleDownloadStory}
       />
     );
     if (searchResults) return <SearchResultsList results={searchResults} onSelectStory={handleSelectStory} />;
@@ -1387,7 +1570,7 @@ const App: React.FC = () => {
     ? "w-full px-4 sm:px-8 py-8 sm:py-12 flex-grow"
     : "max-w-screen-2xl mx-auto px-4 py-8 sm:py-12 flex-grow";
   
-  const appContentClass = isApiKeyModalOpen || isUpdateModalOpen || isHelpModalOpen || manualImportState.isOpen || isCreateStoryModalOpen ? 'blur-sm pointer-events-none' : '';
+  const appContentClass = isApiKeyModalOpen || isUpdateModalOpen || isHelpModalOpen || manualImportState.isOpen || isCreateStoryModalOpen || downloadState.isOpen ? 'blur-sm pointer-events-none' : '';
 
   return (
     <div className="flex flex-col min-h-screen bg-[var(--theme-bg-base)] text-[var(--theme-text-primary)] font-sans transition-colors duration-300">
@@ -1495,6 +1678,18 @@ const App: React.FC = () => {
         </p>
         <p className="mt-2 text-sm text-rose-400">Hành động này không thể hoàn tác.</p>
       </ConfirmationModal>
+      
+      {/* Download Modal - Always mounted but controlled by isOpen */}
+      <DownloadModal
+          isOpen={downloadState.isOpen}
+          onClose={handleCloseDownloadModal}
+          totalChapters={downloadState.total}
+          downloadedCount={downloadState.downloaded}
+          isDownloading={downloadState.isDownloading}
+          currentAction={downloadState.currentAction}
+          logs={downloadState.logs}
+          onStop={handleStopDownload}
+      />
     </div>
   );
 };
