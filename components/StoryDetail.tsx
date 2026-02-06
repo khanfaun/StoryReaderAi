@@ -171,7 +171,9 @@ const StoryDetail: React.FC<StoryDetailProps> = ({
         
         {onUpdateStory && (
             <div className="flex gap-2 flex-wrap">
-                {onDownloadStory && story.source !== 'Local' && story.source !== 'Ebook' && (
+                {/* 
+                   Tính năng tải offline đã bị ẩn theo yêu cầu
+                   {onDownloadStory && story.source !== 'Local' && story.source !== 'Ebook' && (
                     <button
                         onClick={() => onDownloadStory(story)}
                         className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-500 text-white font-bold p-2 sm:py-2 sm:px-4 rounded-lg transition-colors duration-300"
@@ -180,7 +182,8 @@ const StoryDetail: React.FC<StoryDetailProps> = ({
                         <DownloadIcon className="w-5 h-5" />
                         <span className="hidden sm:inline">Tải Offline</span>
                     </button>
-                )}
+                )} 
+                */}
                 <button
                     onClick={() => setIsEditModalOpen(true)}
                     className="flex items-center gap-2 bg-slate-600 hover:bg-slate-500 text-white font-bold p-2 sm:py-2 sm:px-4 rounded-lg transition-colors duration-300"
@@ -440,3 +443,4 @@ const StoryDetail: React.FC<StoryDetailProps> = ({
 };
 
 export default StoryDetail;
+    
