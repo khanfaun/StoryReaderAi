@@ -1,4 +1,3 @@
-
 import React, { useState, useCallback, useEffect, useRef, useMemo } from 'react';
 import type { Story, Chapter, CharacterStats, ReadingSettings, ReadingHistoryItem, ChatMessage, PartialStory, ApiKeyInfo } from './types';
 import { searchStory, getChapterContent, getStoryDetails, getStoryFromUrl, parseHtml, parseChapterContentFromDoc, parseStoryDetailsFromDoc } from './services/truyenfullService';
@@ -244,16 +243,16 @@ const App: React.FC = () => {
     }
   }, [settings, setSettings]); // Add settings deps to allow auto-update
 
-  const saveStoryState = useCallback((storyUrl: string, state: CharacterStats) => {
+  const persistStoryState = useCallback((storyUrl: string, state: CharacterStats) => {
     saveStoryStateLocal(storyUrl, state);
   }, []);
   
   const handleStatsChange = useCallback((newStats: CharacterStats) => {
       setCumulativeStats(newStats);
       if (story) {
-        saveStoryState(story.url, newStats);
+        persistStoryState(story.url, newStats);
       }
-  }, [story, saveStoryState]);
+  }, [story, persistStoryState]);
   
   const reloadDataFromStorage = useCallback(async () => {
     setIsDataLoading(true);
@@ -388,7 +387,7 @@ const App: React.FC = () => {
       handleTokenUsageUpdate({ totalTokens: usage.totalTokens });
       const newState = mergeChapterStats(currentStats, chapterStats ?? {});
       setCumulativeStats(newState);
-      saveStoryState(storyToLoad.url, newState);
+      persistStoryState(storyToLoad.url, newState);
       await setCachedChapter(storyToLoad.url, chapterUrl, { content, stats: chapterStats });
     } catch (analysisError) {
       if (currentOpId !== operationIdRef.current) return;
@@ -396,7 +395,7 @@ const App: React.FC = () => {
     } finally {
       if (currentOpId === operationIdRef.current) setIsAnalyzing(false);
     }
-  }, [handleApiError, handleTokenUsageUpdate, saveStoryState]);
+  }, [handleApiError, handleTokenUsageUpdate, persistStoryState]);
 
   const fetchChapter = useCallback(async (storyToLoad: Story, chapterIndex: number) => {
     if (!storyToLoad || !storyToLoad.chapters || chapterIndex < 0 || chapterIndex >= storyToLoad.chapters.length) return;
@@ -425,7 +424,7 @@ const App: React.FC = () => {
             const currentStats = getStoryState(storyToLoad.url) ?? {};
             const newState = mergeChapterStats(currentStats, cachedData.stats);
             setCumulativeStats(newState);
-            saveStoryState(storyToLoad.url, newState);
+            persistStoryState(storyToLoad.url, newState);
         } else {
             processAndAnalyzeContent(storyToLoad, chapter.url, cachedData.content);
         }
@@ -473,7 +472,7 @@ const App: React.FC = () => {
     } finally {
         setIsChapterLoading(false);
     }
-  }, [readChapters, saveStoryState, ebookInstance, processAndAnalyzeContent, cleanupTts]);
+  }, [readChapters, persistStoryState, ebookInstance, processAndAnalyzeContent, cleanupTts]);
 
   const handleUpdateChapterContent = async (newContent: string) => {
         if (!story || selectedChapterIndex === null || !story.chapters) return;
@@ -1038,7 +1037,7 @@ const App: React.FC = () => {
               const currentStats = getStoryState(story.url) ?? {};
               const newState = mergeChapterStats(currentStats, data as CharacterStats);
               setCumulativeStats(newState);
-              saveStoryState(story.url, newState);
+              persistStoryState(story.url, newState);
           }
       } catch (err) {
           if (currentOpId !== operationIdRef.current) return;
@@ -1046,7 +1045,7 @@ const App: React.FC = () => {
       } finally {
           if (currentOpId === operationIdRef.current) setIsAnalyzing(false);
       }
-  }, [chapterContent, story, cumulativeStats, handleTokenUsageUpdate, saveStoryState, handleApiError]);
+  }, [chapterContent, story, cumulativeStats, handleTokenUsageUpdate, persistStoryState, handleApiError]);
 
   const handleReanalyzeWorld = useCallback(async () => {
       const currentApiKey = apiKeyService.getApiKey();
@@ -1070,7 +1069,7 @@ const App: React.FC = () => {
               const currentStats = getStoryState(story.url) ?? {};
               const newState = mergeChapterStats(currentStats, data as CharacterStats);
               setCumulativeStats(newState);
-              saveStoryState(story.url, newState);
+              persistStoryState(story.url, newState);
           }
       } catch (err) {
           if (currentOpId !== operationIdRef.current) return;
@@ -1078,7 +1077,7 @@ const App: React.FC = () => {
       } finally {
           if (currentOpId === operationIdRef.current) setIsAnalyzing(false);
       }
-  }, [chapterContent, story, cumulativeStats, handleTokenUsageUpdate, saveStoryState, handleApiError]);
+  }, [chapterContent, story, cumulativeStats, handleTokenUsageUpdate, persistStoryState, handleApiError]);
 
   const handleSendMessage = async (message: string) => {
       const currentApiKey = apiKeyService.getApiKey();
