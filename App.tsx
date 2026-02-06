@@ -119,6 +119,9 @@ const App: React.FC = () => {
   const [isChapterLoading, setIsChapterLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
   
+  // State theo dõi các truyện đang được tải ngầm
+  const [backgroundLoadingStories, setBackgroundLoadingStories] = useState<Set<string>>(new Set());
+  
   const [cumulativeStats, setCumulativeStats] = useState<CharacterStats | null>(null);
   const [isAnalyzing, setIsAnalyzing] = useState<boolean>(false);
   const [isRewriting, setIsRewriting] = useState<boolean>(false);
@@ -636,27 +639,41 @@ const App: React.FC = () => {
       setError(null);
       try {
           let fullStory = selectedStory;
+          const needsFetching = (!selectedStory.chapters || selectedStory.chapters.length === 0) && selectedStory.source !== 'Local' && selectedStory.source !== 'Ebook';
           
-          if ((!selectedStory.chapters || selectedStory.chapters.length === 0) && selectedStory.source !== 'Local' && selectedStory.source !== 'Ebook') {
+          if (needsFetching) {
+              // Đánh dấu là đang tải ngầm
+              setBackgroundLoadingStories(prev => new Set(prev).add(selectedStory.url));
+              
               // Sử dụng callback để nhận dữ liệu cập nhật từ background fetch
-              fullStory = await getStoryDetails(selectedStory, async (updatedStory) => {
-                  // Khi có bản cập nhật (thêm chương mới), update state và lưu DB
-                  setStory(prev => {
-                      // Chỉ update nếu đang xem đúng truyện này
-                      if (prev && prev.url === updatedStory.url) {
-                          return { ...prev, ...updatedStory };
-                      }
-                      return prev;
-                  });
-                  
-                  await dbService.saveStory(updatedStory);
-                  setLocalStories(prev => {
-                      if (prev.some(s => s.url === updatedStory.url)) {
-                          return prev.map(s => s.url === updatedStory.url ? updatedStory : s);
-                      }
-                      return prev;
-                  });
-              });
+              fullStory = await getStoryDetails(selectedStory, 
+                  async (updatedStory) => {
+                      // Khi có bản cập nhật (thêm chương mới), update state và lưu DB
+                      setStory(prev => {
+                          // Chỉ update nếu đang xem đúng truyện này
+                          if (prev && prev.url === updatedStory.url) {
+                              return { ...prev, ...updatedStory };
+                          }
+                          return prev;
+                      });
+                      
+                      await dbService.saveStory(updatedStory);
+                      setLocalStories(prev => {
+                          if (prev.some(s => s.url === updatedStory.url)) {
+                              return prev.map(s => s.url === updatedStory.url ? updatedStory : s);
+                          }
+                          return prev;
+                      });
+                  },
+                  () => {
+                      // Callback khi tải xong hoàn toàn
+                      setBackgroundLoadingStories(prev => {
+                          const next = new Set(prev);
+                          next.delete(selectedStory.url);
+                          return next;
+                      });
+                  }
+              );
           }
           
           // --- AUTO-SAVE LOGIC ---
@@ -690,6 +707,12 @@ const App: React.FC = () => {
 
       } catch (e) {
           setError(`Lỗi tải thông tin truyện: ${(e as Error).message}`);
+          // Đảm bảo tắt loading nếu lỗi
+          setBackgroundLoadingStories(prev => {
+              const next = new Set(prev);
+              next.delete(selectedStory.url);
+              return next;
+          });
       } finally {
           setIsDataLoading(false);
       }
@@ -1445,6 +1468,7 @@ const App: React.FC = () => {
         onFilterAuthor={setFilterAuthor}
         onFilterTag={(tag) => { setFilterTags([tag]); setSortOption('newest'); }}
         onDownloadStory={handleDownloadStory}
+        isBackgroundLoading={backgroundLoadingStories.has(story.url)}
       />
     );
     if (searchResults) return <SearchResultsList results={searchResults} onSelectStory={handleSelectStory} />;
@@ -1551,6 +1575,7 @@ const App: React.FC = () => {
                         onFilterAuthor={setFilterAuthor}
                         onFilterSource={setFilterSource}
                         onFilterTag={(tag) => setFilterTags([tag])}
+                        backgroundLoadingStories={backgroundLoadingStories}
                     />
                 </section>
             )}

@@ -1,6 +1,7 @@
 
 import React from 'react';
 import type { Story } from '../types';
+import { SpinnerIcon } from './icons';
 
 interface SearchResultItemProps {
   story: Story;
@@ -8,9 +9,10 @@ interface SearchResultItemProps {
   onFilterAuthor?: (author: string) => void;
   onFilterSource?: (source: string) => void;
   onFilterTag?: (tag: string) => void;
+  isBackgroundLoading?: boolean;
 }
 
-const SearchResultItem: React.FC<SearchResultItemProps> = ({ story, onSelectStory, onFilterAuthor, onFilterSource, onFilterTag }) => {
+const SearchResultItem: React.FC<SearchResultItemProps> = ({ story, onSelectStory, onFilterAuthor, onFilterSource, onFilterTag, isBackgroundLoading }) => {
   let sourceColor: string;
   let label: string;
 
@@ -88,9 +90,12 @@ const SearchResultItem: React.FC<SearchResultItemProps> = ({ story, onSelectStor
   // Display max 1 tag to keep card clean in compact view
   const visibleTags = story.tags ? story.tags.slice(0, 1) : [];
 
+  // Conditional classes for background loading state
+  const containerClass = `group relative bg-[var(--theme-bg-surface)] rounded-md shadow-sm overflow-hidden flex flex-col cursor-pointer transition-transform transform hover:-translate-y-1 hover:shadow-md h-full border ${isBackgroundLoading ? 'border-blue-500 shadow-[0_0_10px_rgba(59,130,246,0.3)] ring-1 ring-blue-500' : 'border-[var(--theme-border)]'}`;
+
   return (
     <div 
-      className="group relative bg-[var(--theme-bg-surface)] rounded-md shadow-sm overflow-hidden flex flex-col cursor-pointer transition-transform transform hover:-translate-y-1 hover:shadow-md h-full border border-[var(--theme-border)]"
+      className={containerClass}
       onClick={() => onSelectStory(story)}
       role="button"
       tabIndex={0}
@@ -122,6 +127,15 @@ const SearchResultItem: React.FC<SearchResultItemProps> = ({ story, onSelectStor
                 {label}
             </button>
         </div>
+        
+        {/* Background Loading Spinner - More Prominent */}
+        {isBackgroundLoading && (
+            <div className="absolute inset-0 bg-black/40 z-10 flex items-center justify-center backdrop-blur-[1px]">
+                <div className="bg-black/70 rounded-full p-2 shadow-lg border border-white/20 animate-bounce">
+                    <SpinnerIcon className="w-5 h-5 text-blue-400 animate-spin" />
+                </div>
+            </div>
+        )}
         
         {/* Hover Overlay */}
         <div className="absolute inset-0 bg-black/0 group-hover:bg-black/10 transition-colors duration-300" />
@@ -166,9 +180,10 @@ interface SearchResultsListProps {
   onFilterAuthor?: (author: string) => void;
   onFilterSource?: (source: string) => void;
   onFilterTag?: (tag: string) => void;
+  backgroundLoadingStories?: Set<string>;
 }
 
-const SearchResultsList: React.FC<SearchResultsListProps> = ({ results, onSelectStory, onFilterAuthor, onFilterSource, onFilterTag }) => {
+const SearchResultsList: React.FC<SearchResultsListProps> = ({ results, onSelectStory, onFilterAuthor, onFilterSource, onFilterTag, backgroundLoadingStories }) => {
   return (
     <div className="animate-fade-in">
       {/* Increased grid columns for more compact view */}
@@ -181,6 +196,7 @@ const SearchResultsList: React.FC<SearchResultsListProps> = ({ results, onSelect
             onFilterAuthor={onFilterAuthor}
             onFilterSource={onFilterSource}
             onFilterTag={onFilterTag}
+            isBackgroundLoading={backgroundLoadingStories?.has(story.url)}
           />
         ))}
       </div>

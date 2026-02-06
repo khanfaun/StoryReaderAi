@@ -1,7 +1,7 @@
 
 import React, { useState } from 'react';
 import type { Story, Chapter } from '../types';
-import { EditIcon, TrashIcon, PlusIcon, CheckIcon, CloseIcon, DownloadIcon } from './icons';
+import { EditIcon, TrashIcon, PlusIcon, CheckIcon, CloseIcon, DownloadIcon, SpinnerIcon } from './icons';
 import ConfirmationModal from './ConfirmationModal';
 import StoryEditModal from './StoryEditModal';
 import ChapterEditModal from './ChapterEditModal';
@@ -18,7 +18,8 @@ interface StoryDetailProps {
   onCreateChapter?: (story: Story, title: string, content: string) => Promise<void>;
   onFilterAuthor?: (author: string) => void;
   onFilterTag?: (tag: string) => void;
-  onDownloadStory?: (story: Story) => void; // Prop mới
+  onDownloadStory?: (story: Story) => void;
+  isBackgroundLoading?: boolean; // Prop mới
 }
 
 const StoryDetail: React.FC<StoryDetailProps> = ({ 
@@ -33,7 +34,8 @@ const StoryDetail: React.FC<StoryDetailProps> = ({
     onCreateChapter,
     onFilterAuthor,
     onFilterTag,
-    onDownloadStory
+    onDownloadStory,
+    isBackgroundLoading = false
 }) => {
   // Pagination state
   const [currentPage, setCurrentPage] = useState(1);
@@ -245,13 +247,32 @@ const StoryDetail: React.FC<StoryDetailProps> = ({
 
       <div className="mt-8 animate-fade-in">
           <div className="flex justify-between items-center border-b-2 border-[var(--theme-border)] pb-2 mb-4">
-              <h3 className="text-xl sm:text-2xl font-semibold text-[var(--theme-text-primary)]">Danh sách chương ({totalChapters})</h3>
-              {onCreateChapter && (
-                  <button onClick={handleAddChapterClick} className="flex items-center gap-1 text-sm bg-[var(--theme-accent-primary)] text-white px-3 py-1 rounded hover:brightness-110 transition-colors">
-                      <PlusIcon className="w-4 h-4" /> <span className="hidden sm:inline">Thêm chương</span>
-                  </button>
-              )}
+              <div className="flex items-center gap-4">
+                  <h3 className="text-xl sm:text-2xl font-semibold text-[var(--theme-text-primary)]">Danh sách chương ({totalChapters})</h3>
+                  {onCreateChapter && (
+                      <button onClick={handleAddChapterClick} className="flex items-center gap-1 text-sm bg-[var(--theme-accent-primary)] text-white px-3 py-1 rounded hover:brightness-110 transition-colors">
+                          <PlusIcon className="w-4 h-4" /> <span className="hidden sm:inline">Thêm chương</span>
+                      </button>
+                  )}
+              </div>
           </div>
+
+          {/* BACKGROUND LOADING INDICATOR BAR - FULL WIDTH */}
+          {isBackgroundLoading && (
+              <div className="mb-4 p-3 bg-blue-900/30 border border-blue-500/50 rounded-lg flex items-center justify-between animate-pulse shadow-[0_0_10px_rgba(59,130,246,0.3)]">
+                  <div className="flex items-center gap-3">
+                      <div className="relative">
+                          <SpinnerIcon className="w-5 h-5 text-blue-400 animate-spin" />
+                          <div className="absolute inset-0 bg-blue-400/30 rounded-full blur-sm animate-pulse"></div>
+                      </div>
+                      <div className="flex flex-col">
+                          <span className="text-sm font-semibold text-blue-200">Đang đồng bộ danh sách chương...</span>
+                          <span className="text-xs text-blue-400">Đã tìm thấy {totalChapters} chương</span>
+                      </div>
+                  </div>
+                  <span className="text-xs px-2 py-1 bg-blue-800/50 rounded text-blue-300 border border-blue-700/50 font-mono hidden sm:inline-block">Đang chạy ngầm</span>
+              </div>
+          )}
           
           {/* Chapter list */}
           <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
