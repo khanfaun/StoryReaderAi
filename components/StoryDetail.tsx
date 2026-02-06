@@ -1,10 +1,11 @@
 
 import React, { useState } from 'react';
 import type { Story, Chapter } from '../types';
-import { EditIcon, TrashIcon, PlusIcon, CheckIcon, CloseIcon, DownloadIcon, SpinnerIcon } from './icons';
+import { EditIcon, TrashIcon, PlusIcon, CheckIcon, CloseIcon, SpinnerIcon, DownloadIcon } from './icons';
 import ConfirmationModal from './ConfirmationModal';
 import StoryEditModal from './StoryEditModal';
 import ChapterEditModal from './ChapterEditModal';
+import DownloadModal, { DownloadConfig } from './DownloadModal';
 
 interface StoryDetailProps {
   story: Story;
@@ -18,8 +19,8 @@ interface StoryDetailProps {
   onCreateChapter?: (story: Story, title: string, content: string) => Promise<void>;
   onFilterAuthor?: (author: string) => void;
   onFilterTag?: (tag: string) => void;
-  onDownloadStory?: (story: Story) => void;
-  isBackgroundLoading?: boolean; // Prop mới
+  isBackgroundLoading?: boolean;
+  onStartDownload?: (config: DownloadConfig) => void;
 }
 
 const StoryDetail: React.FC<StoryDetailProps> = ({ 
@@ -34,8 +35,8 @@ const StoryDetail: React.FC<StoryDetailProps> = ({
     onCreateChapter,
     onFilterAuthor,
     onFilterTag,
-    onDownloadStory,
-    isBackgroundLoading = false
+    isBackgroundLoading = false,
+    onStartDownload
 }) => {
   // Pagination state
   const [currentPage, setCurrentPage] = useState(1);
@@ -45,6 +46,9 @@ const StoryDetail: React.FC<StoryDetailProps> = ({
   const [isAddChapterModalOpen, setIsAddChapterModalOpen] = useState(false);
   const [confirmDeleteStory, setConfirmDeleteStory] = useState(false);
   
+  // Download states
+  const [isDownloadModalOpen, setIsDownloadModalOpen] = useState(false);
+
   // State riêng để xóa chương bằng Modal
   const [chapterToDelete, setChapterToDelete] = useState<{ index: number, chapter: Chapter } | null>(null);
   
@@ -156,6 +160,18 @@ const StoryDetail: React.FC<StoryDetailProps> = ({
           onBack(); // Go back to library
       }
   };
+  
+  // --- DOWNLOAD HANDLERS ---
+  const handleDownloadClick = () => {
+      setIsDownloadModalOpen(true);
+  };
+
+  const handleStartDownloadInternal = (config: DownloadConfig) => {
+      if (onStartDownload) {
+          onStartDownload(config);
+      }
+      setIsDownloadModalOpen(false);
+  }
 
   return (
     <div className="bg-[var(--theme-bg-surface)] rounded-lg shadow-xl p-4 sm:p-6 animate-fade-in border border-[var(--theme-border)]">
@@ -171,19 +187,14 @@ const StoryDetail: React.FC<StoryDetailProps> = ({
         
         {onUpdateStory && (
             <div className="flex gap-2 flex-wrap">
-                {/* 
-                   Tính năng tải offline đã bị ẩn theo yêu cầu
-                   {onDownloadStory && story.source !== 'Local' && story.source !== 'Ebook' && (
-                    <button
-                        onClick={() => onDownloadStory(story)}
-                        className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-500 text-white font-bold p-2 sm:py-2 sm:px-4 rounded-lg transition-colors duration-300"
-                        title="Cào/Tải toàn bộ chương truyện về máy để đọc offline"
-                    >
-                        <DownloadIcon className="w-5 h-5" />
-                        <span className="hidden sm:inline">Tải Offline</span>
-                    </button>
-                )} 
-                */}
+                <button
+                    onClick={handleDownloadClick}
+                    className="flex items-center gap-2 bg-teal-600 hover:bg-teal-500 text-white font-bold p-2 sm:py-2 sm:px-4 rounded-lg transition-colors duration-300"
+                    title="Tải truyện hoặc lưu Offline"
+                >
+                    <DownloadIcon className="w-5 h-5" />
+                    <span className="hidden sm:inline">Tải truyện</span>
+                </button>
                 <button
                     onClick={() => setIsEditModalOpen(true)}
                     className="flex items-center gap-2 bg-slate-600 hover:bg-slate-500 text-white font-bold p-2 sm:py-2 sm:px-4 rounded-lg transition-colors duration-300"
@@ -438,9 +449,15 @@ const StoryDetail: React.FC<StoryDetailProps> = ({
         onSave={handleConfirmAddChapter}
         nextChapterIndex={(story.chapters?.length || 0) + 1}
       />
+      
+      <DownloadModal
+        isOpen={isDownloadModalOpen}
+        onClose={() => setIsDownloadModalOpen(false)}
+        story={story}
+        onStartDownload={handleStartDownloadInternal}
+      />
     </div>
   );
 };
 
 export default StoryDetail;
-    
