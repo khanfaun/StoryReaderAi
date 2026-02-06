@@ -986,8 +986,8 @@ const App: React.FC = () => {
       if (existingStory && existingStory.chapters && existingStory.chapters.length > 0) {
            handleSelectStoryInternal(existingStory);
            // Try to continue download if incomplete (Optional optimization)
-           if (existingStory.chapters.length > 3) {
-               runBackgroundContentFetcher(existingStory, 3);
+           if (existingStory.chapters.length > 10) {
+               runBackgroundContentFetcher(existingStory, 10);
            }
            return;
       }
@@ -1006,12 +1006,12 @@ const App: React.FC = () => {
           await dbService.saveStory(fullStory);
           setLocalStories(prev => [fullStory, ...prev.filter(s => s.url !== fullStory.url)]);
           
-          // 3c. Preload first 3 chapters
+          // 3c. Preload first 10 chapters
           if (fullStory.chapters && fullStory.chapters.length > 0) {
-              const preloadCount = Math.min(fullStory.chapters.length, 3);
+              const preloadCount = Math.min(fullStory.chapters.length, 10);
               const toLoad = fullStory.chapters.slice(0, preloadCount);
               
-              // Fetch first 3 parallelly
+              // Fetch first 10 parallelly
               await Promise.all(toLoad.map(async (c) => {
                    if (loadingAbortRef.current) return;
                    try {
@@ -1032,8 +1032,8 @@ const App: React.FC = () => {
               handleSelectStoryInternal(fullStory); 
               
               // 3e. Start Background Download for the rest
-              if (fullStory.chapters.length > 3) {
-                  runBackgroundContentFetcher(fullStory, 3);
+              if (fullStory.chapters.length > 10) {
+                  runBackgroundContentFetcher(fullStory, 10);
               }
           } else {
               // Fallback if no chapters found

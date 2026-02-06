@@ -210,7 +210,7 @@ const StoryDetail: React.FC<StoryDetailProps> = ({
                       ⚡ Chế độ Đọc Nhanh & Đồng bộ Ngầm
                   </h3>
                   <p className="text-xs sm:text-sm text-indigo-100/80 leading-relaxed">
-                      Hệ thống đã tải sẵn 3 chương đầu để bạn đọc ngay lập tức. Toàn bộ các chương còn lại đang được <strong className="text-indigo-300">tự động tải ngầm</strong> và lưu trữ an toàn vào trình duyệt (Offline). Bạn có thể xuất file Ebook về máy cá nhân bất cứ lúc nào thông qua nút "Tải truyện".
+                      Hệ thống đã tải sẵn 10 chương đầu để bạn đọc ngay lập tức. Toàn bộ các chương còn lại đang được <strong className="text-indigo-300">tự động tải ngầm</strong> và lưu trữ an toàn vào trình duyệt (Offline). Bạn có thể xuất file Ebook về máy cá nhân bất cứ lúc nào thông qua nút "Tải truyện".
                   </p>
               </div>
               <button 
