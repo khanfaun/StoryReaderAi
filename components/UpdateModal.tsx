@@ -1,6 +1,6 @@
 
 import React from 'react';
-import { CloseIcon, RefreshIcon, SparklesIcon, EditIcon, PlayIcon, PlusIcon } from './icons';
+import { CloseIcon, RefreshIcon, SparklesIcon, EditIcon, PlayIcon, PlusIcon, DownloadIcon } from './icons';
 
 interface UpdateModalProps {
   isOpen: boolean;
@@ -13,6 +13,11 @@ const UpdateModal: React.FC<UpdateModalProps> = ({ isOpen, onClose }) => {
   }
 
   const features = [
+    {
+      icon: <DownloadIcon className="w-8 h-8 text-indigo-400" />,
+      title: "Tự động Tải & Lưu Offline",
+      description: "Khi mở truyện, hệ thống sẽ tự động tải ngầm toàn bộ các chương về trình duyệt. Bạn có thể đọc mượt mà, không cần mạng và không phải chờ tải lại."
+    },
     {
       icon: <RefreshIcon className="w-8 h-8 text-green-400" />,
       title: "Cải thiện thuật toán tìm truyện",
@@ -32,6 +37,11 @@ const UpdateModal: React.FC<UpdateModalProps> = ({ isOpen, onClose }) => {
       icon: <PlayIcon className="w-8 h-8 text-rose-400" />,
       title: "Cập nhật Giọng đọc Trình duyệt",
       description: "Tối ưu hóa trải nghiệm nghe truyện. Hệ thống sẽ tự động ưu tiên giọng đọc Tiếng Việt chất lượng cao trên thiết bị của bạn, hạn chế sử dụng giọng mặc định tiếng Anh."
+    },
+    {
+      icon: <DownloadIcon className="w-8 h-8 text-yellow-400" />,
+      title: "Tải Truyện Offline (EPUB)",
+      description: "Tải toàn bộ hoặc một phần truyện về máy dưới dạng EPUB (để đọc trên Kindle/Google Books) hoặc HTML. Hỗ trợ chia nhỏ file nếu truyện quá dài."
     },
     {
       icon: <PlusIcon className="w-8 h-8 text-teal-400" />,

@@ -1,14 +1,16 @@
 
 import React, { useState, useRef } from 'react';
-import type { CharacterStats } from '../types';
+import type { CharacterStats, Story } from '../types';
 import LoadingSpinner from './LoadingSpinner';
 import InfoItemDisplay from './InfoItemDisplay';
 import EntityEditModal, { EntityType } from './EntityEditModal';
 import ConfirmationModal from './ConfirmationModal';
-import { PlusIcon, EditIcon } from './icons';
+import { PlusIcon, EditIcon, DownloadIcon, UploadIcon } from './icons';
+import { getStoryState, saveStoryState, exportStoryData, importStoryData } from '../services/storyStateService';
 
 interface CharacterPrimaryPanelProps {
   stats: CharacterStats | null;
+  story?: Story | null; // Added story prop
   isAnalyzing: boolean;
   onStatsChange: (newStats: CharacterStats) => void;
   onDataLoaded: () => void;
@@ -18,7 +20,7 @@ interface CharacterPrimaryPanelProps {
 
 type Tab = 'status' | 'realmSystem' | 'inventory' | 'skills' | 'equipment' | 'data';
 
-const CharacterPrimaryPanel: React.FC<CharacterPrimaryPanelProps> = ({ stats, isAnalyzing, onStatsChange, onDataLoaded, onReanalyze, onStopAnalysis }) => {
+const CharacterPrimaryPanel: React.FC<CharacterPrimaryPanelProps> = ({ stats, story, isAnalyzing, onStatsChange, onDataLoaded, onReanalyze, onStopAnalysis }) => {
   const [activeTab, setActiveTab] = useState<Tab>('status');
   const [modalState, setModalState] = useState<{ isOpen: boolean; type: EntityType | null; data: any | null }>({ isOpen: false, type: null, data: null });
   const [deleteConfirmation, setDeleteConfirmation] = useState<{ type: EntityType; entity: any; } | null>(null);
@@ -94,91 +96,16 @@ const CharacterPrimaryPanel: React.FC<CharacterPrimaryPanelProps> = ({ stats, is
       setDeleteConfirmation(null);
   };
   
-  const handleSaveData = () => {
-    try {
-      const saveData: any = {
-        version: 1,
-        timestamp: new Date().toISOString(),
-        data: {
-          readingHistory: null,
-          readingSettings: null,
-          storyStates: {},
-        },
-      };
-
-      const keys = Object.keys(localStorage);
-      
-      const historyKey = 'novel_reader_history';
-      const historyData = localStorage.getItem(historyKey);
-      if (historyData) saveData.data.readingHistory = JSON.parse(historyData);
-
-      const settingsKey = 'truyenReaderSettings';
-      const settingsData = localStorage.getItem(settingsKey);
-      if (settingsData) saveData.data.readingSettings = JSON.parse(settingsData);
-
-      keys.filter(k => k.startsWith('storyState_')).forEach(key => {
-        const storyUrl = key.replace('storyState_', '');
-        if (!saveData.data.storyStates[storyUrl]) saveData.data.storyStates[storyUrl] = {};
-        const stateData = localStorage.getItem(key);
-        if(stateData) saveData.data.storyStates[storyUrl].stats = JSON.parse(stateData);
-      });
-
-      keys.filter(k => k.startsWith('readChapters_')).forEach(key => {
-        const storyUrl = key.replace('readChapters_', '');
-        if (!saveData.data.storyStates[storyUrl]) saveData.data.storyStates[storyUrl] = {};
-        const readData = localStorage.getItem(key);
-        if(readData) saveData.data.storyStates[storyUrl].readChapters = JSON.parse(readData);
-      });
-      
-      const jsonString = JSON.stringify(saveData, null, 2);
-      const blob = new Blob([jsonString], { type: 'application/json' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-      a.download = `TrinhDocTruyen_Save_${timestamp}.json`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
-      alert('Đã lưu dữ liệu thành công!');
-    } catch (error) {
-      console.error("Lỗi khi lưu dữ liệu:", error);
-      alert('Đã xảy ra lỗi khi lưu dữ liệu.');
-    }
+  const handleSaveData = async () => {
+    if (!story) return;
+    await exportStoryData(story);
   };
 
-  const handleLoadData = (event: React.ChangeEvent<HTMLInputElement>) => {
+  const handleLoadData = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      try {
-        const text = e.target?.result;
-        if (typeof text !== 'string') throw new Error('File content is not text.');
-        const loadedData = JSON.parse(text);
-        if (!loadedData.version || !loadedData.data) throw new Error('File không hợp lệ hoặc bị hỏng.');
-
-        const { readingHistory, readingSettings, storyStates } = loadedData.data;
-        if (readingHistory) localStorage.setItem('novel_reader_history', JSON.stringify(readingHistory));
-        if (readingSettings) localStorage.setItem('truyenReaderSettings', JSON.stringify(readingSettings));
-        if (storyStates) {
-          Object.keys(storyStates).forEach(storyUrl => {
-            const storyData = storyStates[storyUrl];
-            if (storyData.stats) localStorage.setItem(`storyState_${storyUrl}`, JSON.stringify(storyData.stats));
-            if (storyData.readChapters) localStorage.setItem(`readChapters_${storyUrl}`, JSON.stringify(storyData.readChapters));
-          });
-        }
-        onDataLoaded();
-        alert('Đã tải dữ liệu thành công! Ứng dụng sẽ được làm mới.');
-      } catch (error: any) {
-        console.error("Lỗi khi tải dữ liệu:", error);
-        alert(`Đã xảy ra lỗi khi tải dữ liệu: ${error.message}`);
-      } finally {
-        if (event.target) event.target.value = '';
-      }
-    };
-    reader.readAsText(file);
+    if (!file || !story) return;
+    await importStoryData(file, story, onDataLoaded);
+    if (event.target) event.target.value = '';
   };
 
 
@@ -275,18 +202,39 @@ const CharacterPrimaryPanel: React.FC<CharacterPrimaryPanelProps> = ({ stats, is
       case 'data':
         return (
             <div>
-                <h3 className="text-xl font-bold text-[var(--theme-accent-primary)] mb-4">Quản lý Dữ liệu</h3>
+                <h3 className="text-xl font-bold text-[var(--theme-accent-primary)] mb-4">Quản lý Dữ liệu AI</h3>
                 <div className="space-y-6">
-                    <div>
-                        <h4 className="font-semibold text-[var(--theme-text-primary)]">Lưu Dữ liệu</h4>
-                        <p className="text-sm text-[var(--theme-text-secondary)] mb-2">Lưu toàn bộ lịch sử đọc và tiến trình nhân vật vào một file JSON. Giữ file này an toàn để khôi phục sau này.</p>
-                        <button onClick={handleSaveData} className="px-4 py-2 rounded-md bg-[var(--theme-accent-primary)] hover:brightness-90 text-white font-semibold transition-colors">Lưu vào File</button>
+                    <div className="p-4 border border-[var(--theme-border)] rounded-lg bg-[var(--theme-bg-base)]">
+                        <h4 className="text-sm font-bold text-[var(--theme-text-primary)] mb-2">1. Xuất Dữ Liệu (Truyện Này)</h4>
+                        <p className="text-xs text-[var(--theme-text-secondary)] mb-3">Lưu trữ file .json chứa toàn bộ thông tin AI của truyện này.</p>
+                        <button 
+                            onClick={handleSaveData}
+                            className="flex items-center gap-2 px-4 py-2 bg-slate-700 hover:bg-slate-600 text-white rounded-md text-sm font-semibold transition-colors w-full justify-center"
+                        >
+                            <DownloadIcon className="w-4 h-4" />
+                            Tải file JSON
+                        </button>
                     </div>
-                    <div>
-                        <h4 className="font-semibold text-[var(--theme-text-primary)]">Tải Dữ liệu</h4>
-                        <p className="text-sm text-[var(--theme-text-secondary)] mb-2">Tải lại dữ liệu từ một file JSON đã lưu. Thao tác này sẽ ghi đè lên tất cả dữ liệu hiện tại và quay về màn hình chính.</p>
-                        <button onClick={() => loadInputRef.current?.click()} className="px-4 py-2 rounded-md bg-slate-600 hover:bg-slate-500 text-white font-semibold transition-colors">Tải từ File</button>
-                        <input type="file" ref={loadInputRef} onChange={handleLoadData} accept=".json" className="hidden" />
+
+                    <div className="p-4 border border-[var(--theme-border)] rounded-lg bg-[var(--theme-bg-base)]">
+                        <h4 className="text-sm font-bold text-[var(--theme-text-primary)] mb-2">2. Nhập Dữ Liệu (Truyện Này)</h4>
+                        <p className="text-xs text-[var(--theme-text-secondary)] mb-3">Khôi phục dữ liệu phân tích từ file .json đã lưu.</p>
+                        <div className="flex gap-2">
+                            <button 
+                                onClick={() => loadInputRef.current?.click()}
+                                className="flex items-center gap-2 px-4 py-2 bg-[var(--theme-accent-primary)] hover:brightness-110 text-white rounded-md text-sm font-semibold transition-colors w-full justify-center"
+                            >
+                                <UploadIcon className="w-4 h-4" />
+                                Chọn file và Nhập
+                            </button>
+                            <input 
+                                type="file" 
+                                ref={loadInputRef} 
+                                onChange={handleLoadData} 
+                                accept=".json" 
+                                className="hidden" 
+                            />
+                        </div>
                     </div>
                 </div>
             </div>

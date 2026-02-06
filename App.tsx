@@ -68,6 +68,13 @@ interface DownloadStatus {
     isError?: boolean;
 }
 
+// Update Background Download Type
+interface BackgroundDownloadState {
+    current: number;
+    total: number;
+    status: 'running' | 'paused';
+}
+
 const UPDATE_MODAL_VERSION = 'update_modal_seen_v2'; 
 
 // Hàm chia đoạn thông minh: Tách theo câu để tua chính xác hơn
@@ -103,9 +110,18 @@ const App: React.FC = () => {
   const [isChapterLoading, setIsChapterLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
   
-  // State theo dõi các truyện đang được tải ngầm
+  // State theo dõi các truyện đang được tải ngầm (Metadata list)
   const [backgroundLoadingStories, setBackgroundLoadingStories] = useState<Set<string>>(new Set());
   
+  // State theo dõi tiến trình tải nội dung ngầm (Content Download)
+  const [backgroundDownloads, setBackgroundDownloads] = useState<Record<string, BackgroundDownloadState>>({});
+  
+  // Ref controls for background downloads (to handle pause/abort logic in async loops)
+  const backgroundDownloadControls = useRef<Record<string, { paused: boolean; aborted: boolean }>>({});
+
+  // State lưu danh sách URL các chương ĐÃ ĐƯỢC CACHE (offline) của truyện đang xem
+  const [cachedChapters, setCachedChapters] = useState<Set<string>>(new Set());
+
   const [cumulativeStats, setCumulativeStats] = useState<CharacterStats | null>(null);
   const [isAnalyzing, setIsAnalyzing] = useState<boolean>(false);
   const [isRewriting, setIsRewriting] = useState<boolean>(false);
@@ -146,11 +162,12 @@ const App: React.FC = () => {
   const [isDownloadModalOpen, setIsDownloadModalOpen] = useState(false);
   const [pendingStory, setPendingStory] = useState<Story | null>(null); // Story waiting to be decided (download or read)
 
-  // Background Download State
+  // Background Download State (For File Export)
   const [downloadStatus, setDownloadStatus] = useState<DownloadStatus>({
       isProcessing: false, current: 0, total: 0, message: ''
   });
   const downloadAbortRef = useRef(false);
+  const loadingAbortRef = useRef(false); // Ref for cancelling story initialization
 
   const [sortOption, setSortOption] = useState<SortOption>('newest');
   const [filterSource, setFilterSource] = useState<string | null>(null);
@@ -219,6 +236,126 @@ const App: React.FC = () => {
       }
   };
 
+  // --- BACKGROUND DOWNLOAD LOGIC ---
+  const runBackgroundContentFetcher = async (storyToFetch: Story, startIndex: number) => {
+      if (!storyToFetch.chapters || startIndex >= storyToFetch.chapters.length) return;
+
+      // Initialize control flags
+      backgroundDownloadControls.current[storyToFetch.url] = { paused: false, aborted: false };
+
+      // Mark as downloading
+      setBackgroundDownloads(prev => ({
+          ...prev,
+          [storyToFetch.url]: { current: startIndex, total: storyToFetch.chapters!.length, status: 'running' }
+      }));
+
+      const chapters = storyToFetch.chapters;
+      const BATCH_SIZE = 3; 
+      
+      for (let i = startIndex; i < chapters.length; i += BATCH_SIZE) {
+          // Check Control Flags (Abort check)
+          const controls = backgroundDownloadControls.current[storyToFetch.url];
+          if (!controls || controls.aborted) break;
+
+          // Pause Handling Loop
+          while (backgroundDownloadControls.current[storyToFetch.url]?.paused) {
+              if (backgroundDownloadControls.current[storyToFetch.url]?.aborted) break;
+              await new Promise(r => setTimeout(r, 500)); // Wait 500ms check loop
+          }
+          
+          if (!controls || controls.aborted) break;
+
+          const batch = chapters.slice(i, i + BATCH_SIZE);
+          await Promise.all(batch.map(async (chap) => {
+              try {
+                  // Check cache first
+                  const cached = await getCachedChapter(storyToFetch.url, chap.url);
+                  if (!cached) {
+                      const content = await getChapterContent(chap, storyToFetch.source);
+                      await setCachedChapter(storyToFetch.url, chap.url, { content, stats: null });
+                  }
+              } catch (e) {
+                  console.warn(`Background fetch failed for ${chap.title}`, e);
+              }
+          }));
+
+          // Update progress
+          setBackgroundDownloads(prev => ({
+              ...prev,
+              [storyToFetch.url]: { 
+                  current: Math.min(i + BATCH_SIZE, chapters.length), 
+                  total: chapters.length, 
+                  status: prev[storyToFetch.url]?.status || 'running' 
+              }
+          }));
+          
+          // Update cached chapters list for UI (Green ticks)
+          setCachedChapters(prev => {
+              const next = new Set(prev);
+              batch.forEach(c => next.add(c.url));
+              return next;
+          });
+          
+          // Anti-ban delay
+          await new Promise(r => setTimeout(r, 1000));
+      }
+
+      // Cleanup when done or aborted
+      setBackgroundDownloads(prev => {
+          const next = { ...prev };
+          delete next[storyToFetch.url];
+          return next;
+      });
+      delete backgroundDownloadControls.current[storyToFetch.url];
+  };
+
+  const handlePauseBackgroundDownload = (storyUrl: string) => {
+      if (backgroundDownloadControls.current[storyUrl]) {
+          backgroundDownloadControls.current[storyUrl].paused = true;
+          // Optimistically update status to 'paused'
+          setBackgroundDownloads(prev => ({
+              ...prev,
+              [storyUrl]: { ...prev[storyUrl], status: 'paused' }
+          }));
+      }
+  };
+
+  const handleResumeBackgroundDownload = (storyUrl: string) => {
+      if (backgroundDownloadControls.current[storyUrl]) {
+          backgroundDownloadControls.current[storyUrl].paused = false;
+          // Optimistically update status to 'running'
+          setBackgroundDownloads(prev => ({
+              ...prev,
+              [storyUrl]: { ...prev[storyUrl], status: 'running' }
+          }));
+      }
+  };
+
+  const handleStopBackgroundDownload = (storyUrl: string) => {
+      // 1. Signal loop to stop
+      if (backgroundDownloadControls.current[storyUrl]) {
+          backgroundDownloadControls.current[storyUrl].aborted = true;
+          // Ensure we unpause so it can break the loop
+          backgroundDownloadControls.current[storyUrl].paused = false;
+      }
+      // 2. Remove from UI immediately (optimistic update)
+      setBackgroundDownloads(prev => {
+          const next = { ...prev };
+          delete next[storyUrl];
+          return next;
+      });
+  };
+
+  const handleStartBackgroundDownload = async (storyToStart: Story) => {
+      // Find starting index (first uncached chapter)
+      if (!storyToStart.chapters) return;
+      
+      // Prevent double start
+      if (backgroundDownloads[storyToStart.url]) return;
+
+      runBackgroundContentFetcher(storyToStart, 0);
+  };
+
   // --- DOWNLOAD LOGIC START ---
   const handleStartDownload = async (config: DownloadConfig) => {
       setIsDownloadModalOpen(false); // Close immediately
@@ -234,7 +371,7 @@ const App: React.FC = () => {
           return;
       }
 
-      const { ranges, target, preset, format, mergeCustom } = config;
+      const { ranges, preset, format, mergeCustom } = config;
       const totalChapters = storyToDownload.chapters.length;
 
       setDownloadStatus({ isProcessing: true, current: 0, total: 0, message: 'Đang khởi tạo...' });
@@ -245,12 +382,9 @@ const App: React.FC = () => {
           let hasFiles = false;
           
           let isSingleFile = false;
-          if (target === 'library') isSingleFile = true;
-          else {
-              if (preset === 'all') isSingleFile = true;
-              else if (preset === '50' || preset === '100') isSingleFile = false;
-              else isSingleFile = mergeCustom;
-          }
+          if (preset === 'all') isSingleFile = true;
+          else if (preset === '50' || preset === '100') isSingleFile = false;
+          else isSingleFile = mergeCustom;
 
           if (isSingleFile) {
               const allIndices = new Set<number>();
@@ -278,39 +412,7 @@ const App: React.FC = () => {
               );
               
               if (!downloadAbortRef.current) {
-                  if (target === 'download') {
-                      triggerFileDownload(blob, `${storyToDownload.title} - Full.${format === 'html' ? 'html' : 'epub'}`);
-                  } else {
-                      setDownloadStatus(prev => ({ ...prev, message: "Đang lưu vào trình duyệt..." }));
-                      const timestamp = Date.now();
-                      const archiveId = `ebook:archive-${timestamp}`;
-                      const fileName = `${storyToDownload.title} (Lưu trữ).epub`;
-                      
-                      await dbService.saveEbook(archiveId, new File([blob], fileName));
-                      const archiveStory: Story = {
-                          ...storyToDownload,
-                          source: 'Ebook',
-                          url: archiveId,
-                          title: `${storyToDownload.title} (Offline)`,
-                          createdAt: timestamp,
-                          chapters: chaptersToDownload,
-                          imageUrl: storyToDownload.imageUrl,
-                          author: storyToDownload.author
-                      };
-                      await dbService.saveStory(archiveStory);
-                      setLocalStories(prev => [archiveStory, ...prev]);
-                      
-                      // Auto-delete the original online fetched story to prevent duplicates
-                      if (storyToDownload.source !== 'Ebook' && storyToDownload.source !== 'Local') {
-                          // We use the ID (url) of the ONLINE story
-                          try {
-                              await dbService.deleteEbookAndStory(storyToDownload.url);
-                              setLocalStories(prev => prev.filter(s => s.url !== storyToDownload.url));
-                          } catch (e) {
-                              console.warn("Could not auto-delete original story", e);
-                          }
-                      }
-                  }
+                  triggerFileDownload(blob, `${storyToDownload.title} - Full.${format === 'html' ? 'html' : 'epub'}`);
               }
 
           } else {
@@ -376,15 +478,21 @@ const App: React.FC = () => {
       setDownloadStatus(prev => ({ ...prev, message: 'Đang hủy...', isProcessing: false })); // Hide UI immediately
   };
   
-  // Handler for "Đọc nhanh không tải" (Cancel on Modal)
+  // Handler for "Đọc nhanh không tải" (Cancel on Modal) - Now deprecated but kept for compatibility
   const handleReadWithoutDownload = async () => {
       setIsDownloadModalOpen(false);
-      if (pendingStory) {
-          // If we chose "Read Quick", we NOW proceed to fetch the details/chapters
-          await handleSelectStoryInternal(pendingStory, true); 
-          setPendingStory(null);
+      setPendingStory(null);
+  };
+  
+  // Callback when data is imported via DownloadModal
+  const handleImportDataSuccess = () => {
+      const currentStory = pendingStory || story;
+      if (currentStory) {
+          const newState = getStoryState(currentStory.url);
+          setCumulativeStats(newState ?? {});
       }
   };
+  
   // --- DOWNLOAD LOGIC END ---
 
   const persistStoryState = useCallback((storyUrl: string, state: CharacterStats) => {
@@ -510,9 +618,12 @@ const App: React.FC = () => {
     const currentOpId = ++operationIdRef.current;
     
     setChapterContent(content);
+    // Explicitly stop loading since we have content now
+    setIsChapterLoading(false);
     
     try {
         await setCachedChapter(storyToLoad.url, chapterUrl, { content, stats: null });
+        setCachedChapters(prev => new Set(prev).add(chapterUrl));
     } catch (e) {
         console.error("Failed to initial cache chapter", e);
     }
@@ -522,30 +633,43 @@ const App: React.FC = () => {
 
     setIsAnalyzing(true);
     try {
-      const currentStats = getStoryState(storyToLoad.url) ?? {};
-      const { data: chapterStats, usage } = await analyzeChapterForCharacterStats(content, currentStats);
+      // Use cumulativeStats as the base state (representing knowledge up to the current reading point)
+      // This ensures analysis is relevant to the current chapter's context
+      const baseStats = cumulativeStats || {};
+      const { data: deltaStats, usage } = await analyzeChapterForCharacterStats(content, baseStats);
       
       if (currentOpId !== operationIdRef.current) return; 
 
       handleTokenUsageUpdate({ totalTokens: usage.totalTokens });
-      const newState = mergeChapterStats(currentStats, chapterStats ?? {});
-      setCumulativeStats(newState);
-      persistStoryState(storyToLoad.url, newState);
-      await setCachedChapter(storyToLoad.url, chapterUrl, { content, stats: chapterStats });
+      
+      // Merge delta stats into base stats to create the full state AT THIS CHAPTER
+      const fullChapterState = mergeChapterStats(baseStats, deltaStats ?? {});
+      
+      setCumulativeStats(fullChapterState);
+      persistStoryState(storyToLoad.url, fullChapterState);
+      
+      // IMPORTANT: Save the FULL accumulated state to this chapter's cache.
+      // This allows "Time Travel" - loading this chapter later will restore the exact state at this point.
+      await setCachedChapter(storyToLoad.url, chapterUrl, { content, stats: fullChapterState });
     } catch (analysisError) {
       if (currentOpId !== operationIdRef.current) return;
       handleApiError(analysisError);
     } finally {
       if (currentOpId === operationIdRef.current) setIsAnalyzing(false);
     }
-  }, [handleApiError, handleTokenUsageUpdate, persistStoryState]);
+  }, [handleApiError, handleTokenUsageUpdate, persistStoryState, cumulativeStats]);
 
   const fetchChapter = useCallback(async (storyToLoad: Story, chapterIndex: number) => {
     if (!storyToLoad || !storyToLoad.chapters || chapterIndex < 0 || chapterIndex >= storyToLoad.chapters.length) return;
     
     cleanupTts();
     const chapter = storyToLoad.chapters[chapterIndex];
+    
+    // Set navigation state IMMEDIATELY to prevent flashing "Story Detail" view
     setSelectedChapterIndex(chapterIndex);
+    setIsChapterLoading(true);
+    setChapterContent(null);
+    setError(null);
     
     const newHistory = updateReadingHistory(storyToLoad, chapter);
     setReadingHistory(newHistory);
@@ -554,27 +678,27 @@ const App: React.FC = () => {
     newReadChapters.add(chapter.url);
     localStorage.setItem(`readChapters_${storyToLoad.url}`, JSON.stringify(Array.from(newReadChapters)));
     
-    setError(null);
-    setChapterContent(null);
-    setIsChapterLoading(true);
-
-    const cachedData = await getCachedChapter(storyToLoad.url, chapter.url);
-    if (cachedData) {
-        setChapterContent(cachedData.content);
-        setIsChapterLoading(false); 
-        
-        if (cachedData.stats) {
-            const currentStats = getStoryState(storyToLoad.url) ?? {};
-            const newState = mergeChapterStats(currentStats, cachedData.stats);
-            setCumulativeStats(newState);
-            persistStoryState(storyToLoad.url, newState);
-        } else {
-            processAndAnalyzeContent(storyToLoad, chapter.url, cachedData.content);
-        }
-        return;
-    }
-    
     try {
+        const cachedData = await getCachedChapter(storyToLoad.url, chapter.url);
+        
+        if (cachedData && cachedData.content) {
+            setChapterContent(cachedData.content);
+            
+            // FIX Issue 2: If stats exist, use them and SKIP analysis (Prevent auto-reanalysis)
+            // Prioritize existing cache stats to avoid redundant API calls.
+            if (cachedData.stats) {
+                setCumulativeStats(cachedData.stats);
+                setIsChapterLoading(false); 
+                return; // Return early to skip processAndAnalyzeContent
+            }
+            
+            // If content exists but no stats, we analyze.
+            // processAndAnalyzeContent will handle setting isChapterLoading(false) internally via setChapterContent flow
+            await processAndAnalyzeContent(storyToLoad, chapter.url, cachedData.content);
+            return;
+        }
+        
+        // Fetch new content
         let content = "";
         if (storyToLoad.source === 'Ebook' && ebookInstance) {
             const { zip } = ebookInstance;
@@ -596,7 +720,7 @@ const App: React.FC = () => {
              content = await getChapterContent(chapter, storyToLoad.source);
         }
         
-        processAndAnalyzeContent(storyToLoad, chapter.url, content);
+        await processAndAnalyzeContent(storyToLoad, chapter.url, content);
         
     } catch (err) {
         const error = err as Error;
@@ -612,10 +736,9 @@ const App: React.FC = () => {
             });
         }
         setError(`Lỗi tải chương: ${error.message}.`);
-    } finally {
-        setIsChapterLoading(false);
+        setIsChapterLoading(false); // Stop loading if error
     }
-  }, [readChapters, persistStoryState, ebookInstance, processAndAnalyzeContent, cleanupTts]);
+  }, [readChapters, persistStoryState, ebookInstance, processAndAnalyzeContent, cleanupTts, cumulativeStats]);
 
   // ... (Removed unrelated helpers for brevity) ...
 
@@ -628,6 +751,7 @@ const App: React.FC = () => {
                 content: newContent, 
                 stats: cumulativeStats
             });
+            setCachedChapters(prev => new Set(prev).add(chapter.url));
         } catch (e) {
             setError("Không thể lưu nội dung chỉnh sửa vào bộ nhớ.");
         }
@@ -757,8 +881,13 @@ const App: React.FC = () => {
 
   const handleSelectStoryInternal = async (selectedStory: Story, forceFetch: boolean = false) => {
       setIsDataLoading(true);
+      loadingAbortRef.current = false; // Reset abort flag
       setError(null);
       try {
+          // Load Cached Chapters List immediately for UI
+          const cachedUrls = await dbService.getCachedChapterUrls(selectedStory.url);
+          setCachedChapters(new Set(cachedUrls));
+
           let fullStory = selectedStory;
           
           // Only fetch details if chapters are missing OR forceFetch is true (for "Read Quick")
@@ -766,9 +895,12 @@ const App: React.FC = () => {
                                 && selectedStory.source !== 'Local' && selectedStory.source !== 'Ebook';
           
           if (needsFetching) {
+              if (loadingAbortRef.current) throw new Error("Đã hủy quá trình tải.");
               setBackgroundLoadingStories(prev => new Set(prev).add(selectedStory.url));
+              
               fullStory = await getStoryDetails(selectedStory, 
                   async (updatedStory) => {
+                      if (loadingAbortRef.current) return;
                       setStory(prev => {
                           if (prev && prev.url === updatedStory.url) {
                               return { ...prev, ...updatedStory };
@@ -793,6 +925,8 @@ const App: React.FC = () => {
               );
           }
           
+          if (loadingAbortRef.current) throw new Error("Đã hủy quá trình tải.");
+
           await dbService.saveStory(fullStory);
           setLocalStories(prev => {
               if (prev.some(s => s.url === fullStory.url)) {
@@ -801,7 +935,12 @@ const App: React.FC = () => {
               return [fullStory, ...prev];
           });
 
-          if (story?.url !== fullStory.url) {
+          // FIX Issue 1: Fix navigation glitch (jump to detail then back)
+          // Normalize URLs to ensure we don't accidentally reset reading state if the URL string differs slightly (e.g. trailing slash)
+          const normalize = (u: string) => u.replace(/\/+$/, '').toLowerCase();
+          const isSameStory = story && normalize(story.url) === normalize(fullStory.url);
+
+          if (!isSameStory) {
                setSelectedChapterIndex(null);
                setChapterContent(null);
                setIsPanelVisible(false);
@@ -817,10 +956,14 @@ const App: React.FC = () => {
           if (savedRead) setReadChapters(new Set(JSON.parse(savedRead)));
           else setReadChapters(new Set());
           
-          window.scrollTo(0, 0);
+          if (!isSameStory) {
+            window.scrollTo(0, 0);
+          }
 
       } catch (e) {
-          setError(`Lỗi tải thông tin truyện: ${(e as Error).message}`);
+          if (!loadingAbortRef.current) {
+            setError(`Lỗi tải thông tin truyện: ${(e as Error).message}`);
+          }
           setBackgroundLoadingStories(prev => {
               const next = new Set(prev);
               next.delete(selectedStory.url);
@@ -831,16 +974,86 @@ const App: React.FC = () => {
       }
   };
 
-  const handleSelectStory = useCallback((selectedStory: Story) => {
-      // 1. If Offline story (Ebook/Local) OR has chapters already -> Open directly
-      if (selectedStory.source === 'Ebook' || selectedStory.source === 'Local' || (selectedStory.chapters && selectedStory.chapters.length > 0)) {
+  const handleSelectStory = useCallback(async (selectedStory: Story) => {
+      // 1. If Offline story (Ebook/Local) -> Open immediately
+      if (selectedStory.source === 'Ebook' || selectedStory.source === 'Local') {
           handleSelectStoryInternal(selectedStory);
-      } else {
-          // 2. If Online story and just fetched (no chapters yet) -> Show Download Modal
-          setPendingStory(selectedStory);
-          setIsDownloadModalOpen(true);
+          return;
+      }
+
+      // 2. Check if Online story is already in DB with chapters
+      const existingStory = await dbService.getStory(selectedStory.url);
+      if (existingStory && existingStory.chapters && existingStory.chapters.length > 0) {
+           handleSelectStoryInternal(existingStory);
+           // Try to continue download if incomplete (Optional optimization)
+           if (existingStory.chapters.length > 3) {
+               runBackgroundContentFetcher(existingStory, 3);
+           }
+           return;
+      }
+
+      // 3. New "Instant Play" Flow for Online Story
+      setIsDataLoading(true); // Show global spinner
+      loadingAbortRef.current = false;
+      try {
+          if (loadingAbortRef.current) return;
+          // 3a. Fetch Metadata & Chapter List
+          let fullStory = await getStoryDetails(selectedStory, undefined, () => {});
+          
+          if (loadingAbortRef.current) return;
+
+          // 3b. Save Metadata
+          await dbService.saveStory(fullStory);
+          setLocalStories(prev => [fullStory, ...prev.filter(s => s.url !== fullStory.url)]);
+          
+          // 3c. Preload first 3 chapters
+          if (fullStory.chapters && fullStory.chapters.length > 0) {
+              const preloadCount = Math.min(fullStory.chapters.length, 3);
+              const toLoad = fullStory.chapters.slice(0, preloadCount);
+              
+              // Fetch first 3 parallelly
+              await Promise.all(toLoad.map(async (c) => {
+                   if (loadingAbortRef.current) return;
+                   try {
+                      // Check cache first to be safe
+                      const cached = await getCachedChapter(fullStory.url, c.url);
+                      if (!cached) {
+                          const content = await getChapterContent(c, fullStory.source);
+                          await setCachedChapter(fullStory.url, c.url, { content, stats: null });
+                      }
+                   } catch(e) { 
+                       console.warn(`Failed to preload chapter ${c.title}`, e);
+                   }
+              }));
+              
+              if (loadingAbortRef.current) return;
+
+              // 3d. Enter App (Set Story)
+              handleSelectStoryInternal(fullStory); 
+              
+              // 3e. Start Background Download for the rest
+              if (fullStory.chapters.length > 3) {
+                  runBackgroundContentFetcher(fullStory, 3);
+              }
+          } else {
+              // Fallback if no chapters found
+              handleSelectStoryInternal(fullStory);
+          }
+
+      } catch (e) {
+          if (!loadingAbortRef.current) {
+            setError(`Lỗi khởi tạo truyện: ${(e as Error).message}`);
+          }
+      } finally {
+          setIsDataLoading(false);
       }
   }, []);
+
+  const handleCancelLoading = () => {
+      loadingAbortRef.current = true;
+      setIsDataLoading(false);
+      setError("Đã hủy tải truyện.");
+  };
 
   // ... (Other handlers unchanged) ...
 
@@ -1084,43 +1297,45 @@ const App: React.FC = () => {
     }
   };
 
-  const handleReanalyzePrimary = useCallback(async () => {
+  // UNIFIED ANALYSIS HANDLER
+  const handleFullReanalysis = useCallback(async () => {
       const currentApiKey = apiKeyService.getApiKey();
       if (!currentApiKey) { setIsApiKeyModalOpen(true); return; }
       if (!chapterContent || !story) return;
-      setIsAnalyzing(true);
-      const currentOpId = ++operationIdRef.current;
-      try {
-          const { data, usage } = await analyzeChapterForPrimaryCharacter(chapterContent, cumulativeStats);
-          if (currentOpId !== operationIdRef.current) return;
-          handleTokenUsageUpdate({ totalTokens: usage.totalTokens });
-          if (data) {
-              const currentStats = getStoryState(story.url) ?? {};
-              const newState = mergeChapterStats(currentStats, data as CharacterStats);
-              setCumulativeStats(newState);
-              persistStoryState(story.url, newState);
-          }
-      } catch (err) { if (currentOpId !== operationIdRef.current) return; handleApiError(err); } finally { if (currentOpId === operationIdRef.current) setIsAnalyzing(false); }
-  }, [chapterContent, story, cumulativeStats, handleTokenUsageUpdate, persistStoryState, handleApiError]);
 
-  const handleReanalyzeWorld = useCallback(async () => {
-      const currentApiKey = apiKeyService.getApiKey();
-      if (!currentApiKey) { setIsApiKeyModalOpen(true); return; }
-      if (!chapterContent || !story) return;
       setIsAnalyzing(true);
       const currentOpId = ++operationIdRef.current;
+
       try {
-          const { data, usage } = await analyzeChapterForWorldInfo(chapterContent, cumulativeStats);
+          // Use cumulativeStats (state up to this chapter) as base
+          const baseStats = cumulativeStats || {};
+          const { data: deltaStats, usage } = await analyzeChapterForCharacterStats(chapterContent, baseStats);
+
           if (currentOpId !== operationIdRef.current) return;
+
           handleTokenUsageUpdate({ totalTokens: usage.totalTokens });
-          if (data) {
+
+          if (deltaStats) {
               const currentStats = getStoryState(story.url) ?? {};
-              const newState = mergeChapterStats(currentStats, data as CharacterStats);
-              setCumulativeStats(newState);
-              persistStoryState(story.url, newState);
+              // Merge to get full state at this chapter
+              const fullChapterState = mergeChapterStats(baseStats, deltaStats);
+              
+              setCumulativeStats(fullChapterState);
+              persistStoryState(story.url, fullChapterState);
+              
+              // Save snapshot
+              if (selectedChapterIndex !== null && story.chapters) {
+                  const chapterUrl = story.chapters[selectedChapterIndex].url;
+                  await setCachedChapter(story.url, chapterUrl, { content: chapterContent, stats: fullChapterState });
+              }
           }
-      } catch (err) { if (currentOpId !== operationIdRef.current) return; handleApiError(err); } finally { if (currentOpId === operationIdRef.current) setIsAnalyzing(false); }
-  }, [chapterContent, story, cumulativeStats, handleTokenUsageUpdate, persistStoryState, handleApiError]);
+      } catch (err) {
+          if (currentOpId !== operationIdRef.current) return;
+          handleApiError(err);
+      } finally {
+          if (currentOpId === operationIdRef.current) setIsAnalyzing(false);
+      }
+  }, [chapterContent, story, cumulativeStats, handleTokenUsageUpdate, persistStoryState, handleApiError, selectedChapterIndex]);
 
   const filteredLibraryStories = useMemo(() => {
       let filtered = [...localStories];
@@ -1211,7 +1426,24 @@ const App: React.FC = () => {
 
   // Main Render Logic
   const renderMainContent = () => {
-    if (isLoading || isDataLoading) return <LoadingSpinner />;
+    if (isLoading || isDataLoading) {
+        return (
+            <LoadingSpinner>
+                <div className="text-center mt-4 space-y-2">
+                    <h3 className="text-xl font-bold text-[var(--theme-accent-primary)]">Đang khởi tạo truyện...</h3>
+                    <p className="text-sm text-[var(--theme-text-secondary)]">Vui lòng đợi trong giây lát</p>
+                    {isDataLoading && (
+                      <button 
+                        onClick={handleCancelLoading}
+                        className="mt-3 px-4 py-1 text-xs font-semibold text-rose-300 border border-rose-500/50 rounded-md hover:bg-rose-900/30 transition-colors"
+                      >
+                        Dừng / Hủy bỏ
+                      </button>
+                    )}
+                </div>
+            </LoadingSpinner>
+        );
+    }
     if (error && !story && !searchResults && !isChapterLoading) {
       return ( <div className="text-center p-4 bg-rose-900/50 border border-rose-700 rounded-lg"><p className="text-rose-300 font-semibold">Đã xảy ra lỗi</p><p className="text-rose-400 mt-2">{error}</p></div> );
     }
@@ -1248,6 +1480,15 @@ const App: React.FC = () => {
         onFilterAuthor={setFilterAuthor} onFilterTag={(tag) => { setFilterTags([tag]); setSortOption('newest'); }}
         isBackgroundLoading={backgroundLoadingStories.has(story.url)}
         onStartDownload={handleStartDownload}
+        // Pass background download progress if exists
+        downloadProgress={backgroundDownloads[story.url]}
+        // Pass cached chapters set
+        cachedChapters={cachedChapters}
+        // Pass control handlers
+        onPauseDownload={() => handlePauseBackgroundDownload(story.url)}
+        onResumeDownload={() => handleResumeBackgroundDownload(story.url)}
+        onStopDownload={() => handleStopBackgroundDownload(story.url)}
+        onStartBackgroundDownload={() => handleStartBackgroundDownload(story)}
       />
     );
     if (searchResults) return <SearchResultsList results={searchResults} onSelectStory={handleSelectStory} />;
@@ -1349,7 +1590,7 @@ const App: React.FC = () => {
           </div>
       )}
 
-      <div className={appContentClass}>
+      <div className={`flex flex-col flex-grow ${appContentClass}`}>
         <Header onOpenApiKeySettings={() => setIsApiKeyModalOpen(true)} onOpenUpdateModal={() => setIsUpdateModalOpen(true)} onGoHome={handleBackToMain} />
         <main className={mainContainerClass}>
             <div className="mb-8 flex flex-col sm:flex-row gap-4 items-stretch sm:items-center">
@@ -1365,14 +1606,58 @@ const App: React.FC = () => {
             {isReading ? (
             <div className="grid grid-cols-1 lg:grid-cols-[24rem_minmax(0,1fr)_24rem] xl:grid-cols-[28rem_minmax(0,1fr)_28rem] lg:gap-8">
                 <aside className="hidden lg:block sticky top-8 self-start">
-                <CharacterPrimaryPanel stats={cumulativeStats} isAnalyzing={isAnalyzing} onStatsChange={handleStatsChange} onDataLoaded={reloadDataFromStorage} onReanalyze={handleReanalyzePrimary} onStopAnalysis={handleStopAnalysis} />
+                <CharacterPrimaryPanel 
+                    stats={cumulativeStats} 
+                    story={story} 
+                    isAnalyzing={isAnalyzing} 
+                    onStatsChange={handleStatsChange} 
+                    onDataLoaded={reloadDataFromStorage} 
+                    onReanalyze={handleFullReanalysis} 
+                    onStopAnalysis={handleStopAnalysis} 
+                />
                 </aside>
                 <div className="min-w-0">{renderMainContent()}</div>
                 <aside className="hidden lg:block sticky top-8 self-start">
-                <CharacterPanel stats={cumulativeStats} isAnalyzing={isAnalyzing} isOpen={true} onClose={() => {}} isSidebar={true} onStatsChange={handleStatsChange} onDataLoaded={reloadDataFromStorage} onReanalyze={handleReanalyzeWorld} onStopAnalysis={handleStopAnalysis} />
+                <CharacterPanel 
+                    stats={cumulativeStats} 
+                    story={story}
+                    isAnalyzing={isAnalyzing} 
+                    isOpen={true} 
+                    onClose={() => {}} 
+                    isSidebar={true} 
+                    onStatsChange={handleStatsChange} 
+                    onDataLoaded={reloadDataFromStorage} 
+                    onReanalyze={handleFullReanalysis} 
+                    onStopAnalysis={handleStopAnalysis} 
+                />
                 </aside>
             </div>
-            ) : ( <div>{renderMainContent()}</div> )}
+            ) : ( 
+              <div>
+                {/* STORY DETAIL with Background Progress */}
+                {story && (
+                  <StoryDetail 
+                    story={story} 
+                    onSelectChapter={handleSelectChapter} readChapters={readChapters} lastReadChapterIndex={selectedChapterIndex} 
+                    onBack={handleBackToMain} onUpdateStory={handleUpdateStory} onDeleteStory={handleDeleteStory}
+                    onDeleteChapterContent={dbService.deleteChapterData} onCreateChapter={handleCreateChapter}
+                    onFilterAuthor={setFilterAuthor} onFilterTag={(tag) => { setFilterTags([tag]); setSortOption('newest'); }}
+                    isBackgroundLoading={backgroundLoadingStories.has(story.url)}
+                    onStartDownload={handleStartDownload}
+                    // Pass background download progress if exists
+                    downloadProgress={backgroundDownloads[story.url]}
+                    // Pass cached chapters set
+                    cachedChapters={cachedChapters}
+                    // Pass control handlers
+                    onPauseDownload={() => handlePauseBackgroundDownload(story.url)}
+                    onResumeDownload={() => handleResumeBackgroundDownload(story.url)}
+                    onStopDownload={() => handleStopBackgroundDownload(story.url)}
+                    onStartBackgroundDownload={() => handleStartBackgroundDownload(story)}
+                  />
+                )}
+                {!story && renderMainContent()}
+              </div> 
+            )}
         </main>
         {!isReading && <Footer />}
       </div>
@@ -1382,7 +1667,18 @@ const App: React.FC = () => {
             {isReading && (
                 <>
                     <PanelToggleButton onClick={() => setIsPanelVisible(!isPanelVisible)} isPanelOpen={isPanelVisible} isBottomNavVisible={isBottomNavForReadingVisible} />
-                    <CharacterPanel isOpen={isPanelVisible} onClose={() => setIsPanelVisible(false)} stats={cumulativeStats} isAnalyzing={isAnalyzing} isSidebar={false} onStatsChange={handleStatsChange} onDataLoaded={reloadDataFromStorage} onReanalyze={handleReanalyzeWorld} onStopAnalysis={handleStopAnalysis} />
+                    <CharacterPanel 
+                        isOpen={isPanelVisible} 
+                        onClose={() => setIsPanelVisible(false)} 
+                        stats={cumulativeStats} 
+                        story={story}
+                        isAnalyzing={isAnalyzing} 
+                        isSidebar={false} 
+                        onStatsChange={handleStatsChange} 
+                        onDataLoaded={reloadDataFromStorage} 
+                        onReanalyze={handleFullReanalysis} 
+                        onStopAnalysis={handleStopAnalysis} 
+                    />
                 </>
             )}
         </div>
@@ -1400,7 +1696,7 @@ const App: React.FC = () => {
       <ApiKeyModal isOpen={isApiKeyModalOpen} onClose={() => setIsApiKeyModalOpen(false)} onValidateKey={handleValidateKey} onDataChange={reloadDataFromStorage} tokenUsage={tokenUsage} />
       <ManualImportModal isOpen={manualImportState.isOpen} onClose={() => setManualImportState(prev => ({ ...prev, isOpen: false }))} urlToImport={manualImportState.url} message={manualImportState.message} onFileSelected={handleManualImportFile} />
       <StoryEditModal isOpen={isCreateStoryModalOpen} onClose={() => setIsCreateStoryModalOpen(false)} onSave={handleCreateStory} onParseEbook={parseEbookFile} />
-      <DownloadModal isOpen={isDownloadModalOpen} onClose={handleReadWithoutDownload} story={pendingStory || story} onStartDownload={handleStartDownload} />
+      <DownloadModal isOpen={isDownloadModalOpen} onClose={handleReadWithoutDownload} story={pendingStory || story} onStartDownload={handleStartDownload} onDataImported={handleImportDataSuccess} />
       <ConfirmationModal isOpen={deleteConfirmation.isOpen} onClose={() => setDeleteConfirmation({ isOpen: false })} onConfirm={confirmDeleteEbook} title="Xác nhận xóa">
         <p>Bạn có chắc chắn muốn xóa truyện <strong className="text-[var(--theme-text-primary)]">{deleteConfirmation.item?.title}</strong> {' '}vĩnh viễn không?</p>
         <p className="mt-2 text-sm text-rose-400">Hành động này không thể hoàn tác.</p>

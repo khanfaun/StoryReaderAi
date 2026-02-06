@@ -1,7 +1,7 @@
 
 import React, { useState } from 'react';
 import type { Story, Chapter } from '../types';
-import { EditIcon, TrashIcon, PlusIcon, CheckIcon, CloseIcon, SpinnerIcon, DownloadIcon } from './icons';
+import { EditIcon, TrashIcon, PlusIcon, CheckIcon, CloseIcon, SpinnerIcon, DownloadIcon, InfoIcon, PauseIcon, PlayIcon, StopIcon } from './icons';
 import ConfirmationModal from './ConfirmationModal';
 import StoryEditModal from './StoryEditModal';
 import ChapterEditModal from './ChapterEditModal';
@@ -21,6 +21,16 @@ interface StoryDetailProps {
   onFilterTag?: (tag: string) => void;
   isBackgroundLoading?: boolean;
   onStartDownload?: (config: DownloadConfig) => void;
+  downloadProgress?: { current: number; total: number; status: 'running' | 'paused' };
+  
+  // New Control Props
+  onPauseDownload?: () => void;
+  onResumeDownload?: () => void;
+  onStopDownload?: () => void;
+  onStartBackgroundDownload?: () => void;
+  
+  // Cached chapters list for checkmark
+  cachedChapters?: Set<string>;
 }
 
 const StoryDetail: React.FC<StoryDetailProps> = ({ 
@@ -36,7 +46,13 @@ const StoryDetail: React.FC<StoryDetailProps> = ({
     onFilterAuthor,
     onFilterTag,
     isBackgroundLoading = false,
-    onStartDownload
+    onStartDownload,
+    downloadProgress,
+    onPauseDownload,
+    onResumeDownload,
+    onStopDownload,
+    onStartBackgroundDownload,
+    cachedChapters
 }) => {
   // Pagination state
   const [currentPage, setCurrentPage] = useState(1);
@@ -48,6 +64,9 @@ const StoryDetail: React.FC<StoryDetailProps> = ({
   
   // Download states
   const [isDownloadModalOpen, setIsDownloadModalOpen] = useState(false);
+
+  // Info Alert State
+  const [showInfoAlert, setShowInfoAlert] = useState(true);
 
   // State riêng để xóa chương bằng Modal
   const [chapterToDelete, setChapterToDelete] = useState<{ index: number, chapter: Chapter } | null>(null);
@@ -173,8 +192,37 @@ const StoryDetail: React.FC<StoryDetailProps> = ({
       setIsDownloadModalOpen(false);
   }
 
+  // Calculate percentage for progress bar
+  const downloadPercentage = downloadProgress ? (downloadProgress.current / downloadProgress.total) * 100 : 0;
+  const isPaused = downloadProgress?.status === 'paused';
+
   return (
     <div className="bg-[var(--theme-bg-surface)] rounded-lg shadow-xl p-4 sm:p-6 animate-fade-in border border-[var(--theme-border)]">
+      
+      {/* PERSISTENT INFO ALERT */}
+      {showInfoAlert && (story.source !== 'Local' && story.source !== 'Ebook') && (
+          <div className="mb-6 bg-indigo-900/20 border border-indigo-500/30 rounded-lg p-4 flex items-start gap-3 relative animate-fade-in shadow-inner">
+              <div className="flex-shrink-0 mt-0.5 text-indigo-400">
+                  <InfoIcon className="w-5 h-5" />
+              </div>
+              <div className="flex-grow pr-6">
+                  <h3 className="text-sm font-bold text-indigo-200 mb-1 flex items-center gap-2">
+                      ⚡ Chế độ Đọc Nhanh & Đồng bộ Ngầm
+                  </h3>
+                  <p className="text-xs sm:text-sm text-indigo-100/80 leading-relaxed">
+                      Hệ thống đã tải sẵn 3 chương đầu để bạn đọc ngay lập tức. Toàn bộ các chương còn lại đang được <strong className="text-indigo-300">tự động tải ngầm</strong> và lưu trữ an toàn vào trình duyệt (Offline). Bạn có thể xuất file Ebook về máy cá nhân bất cứ lúc nào thông qua nút "Tải truyện".
+                  </p>
+              </div>
+              <button 
+                  onClick={() => setShowInfoAlert(false)} 
+                  className="absolute top-2 right-2 text-indigo-400/50 hover:text-indigo-300 p-1 hover:bg-indigo-800/30 rounded-full transition-colors"
+                  title="Đóng thông báo"
+              >
+                  <CloseIcon className="w-4 h-4" />
+              </button>
+          </div>
+      )}
+
       <div className="flex justify-between items-center mb-6 flex-wrap gap-2">
         <button
             onClick={onBack}
@@ -228,7 +276,7 @@ const StoryDetail: React.FC<StoryDetailProps> = ({
           </div>
           <div className="flex-grow">
               <h2 className="text-2xl sm:text-3xl font-bold text-[var(--theme-text-primary)] mb-2 text-center md:text-left">{story.title}</h2>
-              <div className="flex flex-wrap items-center justify-center md:justify-start gap-2 mb-3">
+              <div className="flex flex-wrap items-center justify-center md:justify-start gap-2 mb-3 text-sm">
                   <span className="text-[var(--theme-text-secondary)]">Tác giả:</span>
                   <button 
                     onClick={handleAuthorClick}
@@ -238,7 +286,21 @@ const StoryDetail: React.FC<StoryDetailProps> = ({
                       {story.author}
                   </button>
                   <span className="text-[var(--theme-text-secondary)] mx-2">|</span>
-                  <span className="text-[var(--theme-text-secondary)]">Nguồn: {story.source === 'Local' ? 'Tự thêm' : story.source}</span>
+                  <span className="text-[var(--theme-text-secondary)]">Nguồn: </span>
+                  {story.source === 'Local' || story.source === 'Ebook' ? (
+                      <span className="text-[var(--theme-text-secondary)] font-medium">{story.source === 'Local' ? 'Tự thêm' : 'Ebook'}</span>
+                  ) : (
+                      <a 
+                        href={story.url} 
+                        target="_blank" 
+                        rel="noopener noreferrer"
+                        className="text-[var(--theme-accent-primary)] hover:underline font-medium flex items-center gap-1"
+                        title="Mở trang gốc truyện"
+                      >
+                          {story.source}
+                          <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" /></svg>
+                      </a>
+                  )}
               </div>
               
               {story.tags && story.tags.length > 0 && (
@@ -271,7 +333,7 @@ const StoryDetail: React.FC<StoryDetailProps> = ({
               </div>
           </div>
 
-          {/* BACKGROUND LOADING INDICATOR BAR - FULL WIDTH */}
+          {/* BACKGROUND LOADING INDICATOR BAR (METADATA) */}
           {isBackgroundLoading && (
               <div className="mb-4 p-3 bg-blue-900/30 border border-blue-500/50 rounded-lg flex items-center justify-between animate-pulse shadow-[0_0_10px_rgba(59,130,246,0.3)]">
                   <div className="flex items-center gap-3">
@@ -286,6 +348,65 @@ const StoryDetail: React.FC<StoryDetailProps> = ({
                   </div>
                   <span className="text-xs px-2 py-1 bg-blue-800/50 rounded text-blue-300 border border-blue-700/50 font-mono hidden sm:inline-block">Đang chạy ngầm</span>
               </div>
+          )}
+
+          {/* BACKGROUND DOWNLOAD PROGRESS (CONTENT) */}
+          {downloadProgress ? (
+              <div className={`mb-6 p-4 rounded-lg shadow-lg animate-fade-in border ${isPaused ? 'bg-amber-900/20 border-amber-500/30' : 'bg-emerald-900/20 border-emerald-500/30'}`}>
+                  <div className="flex justify-between items-center mb-2">
+                      <div className="flex items-center gap-2">
+                          {isPaused ? <PauseIcon className="w-4 h-4 text-amber-400" /> : <SpinnerIcon className="w-4 h-4 text-emerald-400 animate-spin" />}
+                          <span className={`text-sm font-bold ${isPaused ? 'text-amber-200' : 'text-emerald-200'}`}>
+                              {isPaused ? 'Đang tạm dừng tải truyện' : 'Đang tự động tải truyện...'}
+                          </span>
+                      </div>
+                      <div className="flex items-center gap-3">
+                          <span className={`text-xs font-mono ${isPaused ? 'text-amber-400' : 'text-emerald-400'}`}>
+                              {downloadProgress.current} / {downloadProgress.total} chương
+                          </span>
+                          
+                          {/* CONTROL BUTTONS */}
+                          <div className="flex items-center gap-1 border-l border-white/10 pl-3">
+                              {isPaused ? (
+                                  <button onClick={onResumeDownload} className="p-1 hover:bg-emerald-500/20 rounded text-emerald-400" title="Tiếp tục tải">
+                                      <PlayIcon className="w-5 h-5" />
+                                  </button>
+                              ) : (
+                                  <button onClick={onPauseDownload} className="p-1 hover:bg-amber-500/20 rounded text-amber-400" title="Tạm dừng">
+                                      <PauseIcon className="w-5 h-5" />
+                                  </button>
+                              )}
+                              <button onClick={onStopDownload} className="p-1 hover:bg-rose-500/20 rounded text-rose-400" title="Hủy tải xuống">
+                                  <StopIcon className="w-5 h-5" />
+                              </button>
+                          </div>
+                      </div>
+                  </div>
+                  <div className={`w-full bg-[var(--theme-bg-base)] rounded-full h-2 overflow-hidden border ${isPaused ? 'border-amber-900/50' : 'border-emerald-900/50'}`}>
+                      <div 
+                          className={`h-full transition-all duration-300 relative ${isPaused ? 'bg-amber-500' : 'bg-emerald-500'}`} 
+                          style={{ width: `${downloadPercentage}%` }}
+                      >
+                          {!isPaused && <div className="absolute inset-0 bg-white/20 animate-pulse"></div>}
+                      </div>
+                  </div>
+                  <p className={`text-[10px] mt-1 text-center ${isPaused ? 'text-amber-400/70' : 'text-emerald-400/70'}`}>
+                      {isPaused ? "Nhấn nút Play để tiếp tục tải." : "Bạn có thể đọc bình thường trong khi hệ thống đang tải."}
+                  </p>
+              </div>
+          ) : (
+              // SHOW START BUTTON IF NOT FULLY DOWNLOADED
+              (story.chapters && story.chapters.length > 0 && downloadPercentage < 100 && story.source !== 'Local' && story.source !== 'Ebook' && !isBackgroundLoading) && (
+                  <div className="mb-6 flex justify-center">
+                      <button 
+                        onClick={onStartBackgroundDownload}
+                        className="flex items-center gap-2 px-4 py-2 bg-emerald-900/40 hover:bg-emerald-900/60 border border-emerald-500/30 rounded-lg text-emerald-300 text-sm transition-colors"
+                      >
+                          <DownloadIcon className="w-4 h-4" />
+                          Tiếp tục tải các chương còn lại ({totalChapters} chương)
+                      </button>
+                  </div>
+              )
           )}
           
           {/* Chapter list */}
@@ -326,8 +447,9 @@ const StoryDetail: React.FC<StoryDetailProps> = ({
               const isRead = readChapters.has(chapter.url);
               const lastReadChapterUrl = story.chapters?.[lastReadChapterIndex ?? -1]?.url;
               const isLastRead = lastReadChapterUrl === chapter.url;
+              const isCached = cachedChapters?.has(chapter.url) ?? false;
 
-              let buttonClass = 'text-left p-3 flex-grow text-sm truncate rounded-l-md transition-colors duration-200';
+              let buttonClass = 'text-left p-3 flex-grow text-sm truncate rounded-l-md transition-colors duration-200 relative';
               let containerClass = 'flex items-center rounded-md group hover:shadow-md transition-all duration-200 ';
 
               if (isLastRead) {
@@ -349,6 +471,12 @@ const StoryDetail: React.FC<StoryDetailProps> = ({
                       title={chapter.title}
                   >
                       {chapter.title}
+                      {/* Cached Tick Indicator */}
+                      {isCached && (
+                          <span className="absolute top-1/2 -translate-y-1/2 right-2 text-emerald-500" title="Đã tải (Offline)">
+                              <CheckIcon className="w-3.5 h-3.5" />
+                          </span>
+                      )}
                   </button>
                   
                   {/* Action Buttons - Always visible on hover */}
@@ -455,6 +583,7 @@ const StoryDetail: React.FC<StoryDetailProps> = ({
         onClose={() => setIsDownloadModalOpen(false)}
         story={story}
         onStartDownload={handleStartDownloadInternal}
+        isBackgroundDownloading={!!downloadProgress}
       />
     </div>
   );

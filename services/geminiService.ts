@@ -132,7 +132,7 @@ const infoItemArraySchema = {
   items: {
     type: Type.OBJECT,
     properties: {
-      ten: { type: Type.STRING, description: "Tên của mục." },
+      ten: { type: Type.STRING, description: "Tên của mục. Ngắn gọn, chính xác." },
       moTa: { type: Type.STRING, description: "Mô tả ngắn gọn về công dụng, nguồn gốc hoặc đặc điểm." },
       status: { type: Type.STRING, description: "Trạng thái: 'active' nếu còn, 'used' nếu dùng hết, 'lost' nếu mất." },
     },
@@ -171,15 +171,15 @@ const primaryCharacterSchemaProperties = {
     },
     balo: {
         ...infoItemArraySchema,
-        description: "Danh sách các vật phẩm, đan dược, pháp bảo được đề cập trong chương này.",
+        description: "Danh sách các vật phẩm, đan dược, pháp bảo.",
     },
     congPhap: {
         ...infoItemArraySchema,
-        description: "Danh sách các công pháp, kỹ năng, thần thông được đề cập trong chương này.",
+        description: "Danh sách các công pháp, kỹ năng, thần thông.",
     },
     trangBi: {
         ...infoItemArraySchema,
-        description: "Danh sách các trang bị nhân vật đang mặc trên người được đề cập trong chương này.",
+        description: "Danh sách các trang bị nhân vật đang mặc trên người.",
     },
 };
 
@@ -213,7 +213,7 @@ const worldInfoSchemaProperties = {
     },
     theLuc: {
       type: Type.ARRAY,
-      description: "Danh sách các môn phái, gia tộc, hoặc thế lực được đề cập trong chương.",
+      description: "Danh sách các môn phái, gia tộc, hoặc thế lực.",
       items: {
         type: Type.OBJECT,
         properties: {
@@ -226,7 +226,7 @@ const worldInfoSchemaProperties = {
     },
     diaDiem: {
       type: Type.ARRAY,
-      description: "Danh sách các địa danh, thành thị, bí cảnh xuất hiện trong chương này.",
+      description: "Danh sách các địa danh, thành thị, bí cảnh.",
       items: {
         type: Type.OBJECT,
         properties: {
@@ -241,7 +241,7 @@ const worldInfoSchemaProperties = {
     },
     viTriHienTai: {
         type: Type.STRING,
-        description: "Tên của địa điểm cụ thể và chi tiết nhất nơi nhân vật chính đang ở. Giá trị này PHẢI khớp với một trong các tên trong danh sách 'diaDiem'.",
+        description: "Tên của địa điểm cụ thể và chi tiết nhất nơi nhân vật chính đang ở.",
     }
 };
 
@@ -250,52 +250,48 @@ const worldInfoSchema = { type: Type.OBJECT, properties: worldInfoSchemaProperti
 const characterStatsSchema = { type: Type.OBJECT, properties: { ...primaryCharacterSchemaProperties, ...worldInfoSchemaProperties }};
 
 
-const BASE_PROMPT = `Bạn là một trợ lý phân tích truyện tiên hiệp chuyên nghiệp, có khả năng duy trì và cập nhật trạng thái của thế giới truyện qua từng chương.
+const BASE_PROMPT = `Bạn là một trợ lý quản lý trạng thái thế giới (World State Manager) cho một trò chơi nhập vai dựa trên tiểu thuyết.
 
-**DỮ LIệu HIỆN TẠI:**
-Dưới đây là thông tin đã biết về nhân vật và thế giới truyện cho đến trước chương này.
+**NHIỆM VỤ:**
+Dựa trên "DỮ LIỆU CŨ" (thông tin từ các chương trước) và "NỘI DUNG CHƯƠNG MỚI", hãy tạo ra một **BẢN GHI TRẠNG THÁI HOÀN CHỈNH (FULL SNAPSHOT)**.
+
+**QUY TẮC CỐT LÕI (TUÂN THỦ TUYỆT ĐỐI):**
+1.  **KHÔNG ĐƯỢC TRẢ VỀ MẢNG RỖNG:** Nếu "DỮ LIỆU CŨ" có danh sách vật phẩm, NPC, hay kỹ năng, bạn **PHẢI SAO CHÉP** lại chúng vào kết quả đầu ra, trừ khi chúng bị phá hủy hoặc chết trong chương mới. Tuyệt đối không được trả về \`"balo": []\` nếu nhân vật đang có đồ.
+2.  **CẬP NHẬT THÔNG MINH:**
+    *   **Thêm mới:** Nếu chương mới có vật phẩm/NPC mới -> Thêm vào danh sách.
+    *   **Cập nhật:** Nếu NPC cũ thay đổi trạng thái (ví dụ: bị thương, chết, đổi phe) -> Cập nhật mục đó trong danh sách.
+    *   **Giữ nguyên:** Nếu một mục không được nhắc đến trong chương mới -> **BẮT BUỘC PHẢI GIỮ NGUYÊN** từ dữ liệu cũ.
+3.  **DỮ LIỆU SẠCH:** Không đưa lời dẫn, suy luận vào giá trị JSON.
+4.  **TẤT CẢ CÁC TRƯỜNG:** Bạn phải điền đầy đủ tất cả các trường: \`trangThai\`, \`canhGioi\`, \`heThongCanhGioi\`, \`balo\`, \`congPhap\`, \`trangBi\`, \`npcs\`, \`theLuc\`, \`diaDiem\`, \`viTriHienTai\`.
+
+**THANG ĐO MÔ TẢ QUAN HỆ:**
+*   **Cấp 6 (Xanh Lá):** \`sư đồ\`, \`phu thê\`, \`tri kỷ\`, \`huynh đệ kết nghĩa\`, \`gia tộc thân cận\`, \`sống chết có nhau\`.
+*   **Cấp 5 (Xanh Ngọc):** \`đồng minh\`, \`bằng hữu\`, \`đồng môn\`, \`thân hữu\`, \`giúp đỡ\`, \`cảm kích\`.
+*   **Cấp 4 (Vàng):** \`giao dịch\`, \`hợp tác tạm thời\`, \`quen biết sơ\`, \`người qua đường\`, \`trung lập\`.
+*   **Cấp 3 (Cam):** \`đối thủ cạnh tranh\`, \`coi thường\`, \`chán ghét\`, \`xung đột lợi ích\`, \`gây sự\`.
+*   **Cấp 2 (Đỏ Hồng):** \`kẻ thù\`, \`đối địch\`, \`phản bội\`, \`hãm hại\`, \`âm mưu\`, \`ghen ghét\`.
+*   **Cấp 1 (Đỏ Sẫm):** \`huyết hải thâm thù\`, \`truy sát đến cùng\`, \`sinh tử đại địch\`, \`diệt tộc\`.
+
+**DỮ LIỆU CŨ (PREVIOUS STATE):**
 \`\`\`json
 {previousStats}
 \`\`\`
 
-**QUY TẮC CẬP NHẬT (RẤT QUAN TRỌNG):**
-1.  **CHỈ CẬP NHẬT:** Chỉ trả về những thông tin MỚI hoặc BỊ THAY ĐỔI.
-    *   **Trường đơn lẻ:** Nếu nhân vật đột phá, chỉ trả về \`canhGioi\` mới.
-    *   **Thêm mục mới:** Nếu có NPC mới, chỉ thêm NPC đó vào mảng \`npcs\`.
-    *   **Cập nhật mục đã có:** Nếu một NPC đã tồn tại có sự thay đổi (ví dụ: trạng thái đổi thành 'dead' hoặc có thêm mối quan hệ mới), bạn PHẢI trả về TOÀN BỘ đối tượng NPC đó với đầy đủ thông tin (cũ và mới).
-2.  **LIÊN KẾT DANH XƯNG VÀ TÊN THẬT:** Chú ý các trường hợp một nhân vật được giới thiệu bằng một danh xưng (ví dụ: 'lão già áo xám') rồi sau đó mới tiết lộ tên thật. Hãy liên kết mô tả đó với tên thật và chỉ ghi nhận nhân vật bằng tên thật của họ.
-3.  **XÁC ĐỊNH NHÂN VẬT QUẦN CHÚNG:** Phân biệt rõ ràng giữa nhân vật phụ (NPC) có vai trò và nhân vật quần chúng. KHÔNG đưa nhân vật quần chúng (ví dụ: lính gác, người qua đường không có vai trò) vào danh sách \`npcs\`.
-4.  **QUẢN LÝ QUAN HỆ NPC:** Toàn bộ thông tin quan hệ giờ đây được quản lý BÊN TRONG từng đối tượng NPC.
-    *   **\`mucDoThanThiet\`**: Mô tả mối quan hệ của NPC với **NHÂN VẬT CHÍNH**. Bắt buộc sử dụng một giá trị từ "THANG ĐO MÔ TẢ QUAN HỆ" (ví dụ: 'Đồng Minh', 'Kẻ Thù').
-    *   **\`hienThiQuanHe\`**: Đặt là \`true\` nếu mối quan hệ với nhân vật chính đủ quan trọng để hiển thị trên sơ đồ (thường là bất cứ mức độ nào khác 'Trung Lập').
-    *   **\`quanHeVoiNhanVatKhac\`**: Mô tả mối quan hệ của NPC này với các **NPC khác**. Cũng sử dụng "THANG ĐO MÔ TẢ QUAN HỆ" cho trường \`moTa\`.
-5.  **VỊ TRÍ HIỆN TẠI:** \`viTriHienTai\` phải khớp chính xác với một địa điểm trong \`diaDiem\` của chương này.
-
-**THANG ĐO MÔ TẢ QUAN HỆ (RẤT QUAN TRỌNG):**
-Khi mô tả một mối quan hệ trong trường \`moTa\`, hãy sử dụng các từ khóa sau để thể hiện chính xác sắc thái và mức độ của mối quan hệ đó. Đây là cơ sở để hệ thống hiển thị màu sắc tương ứng theo thứ tự từ cao đến thấp.
-*   **Cấp 6: Thân Thiết Tột Cùng (Màu Xanh Lá):** \`sư đồ\`, \`phu thê\`, \`tri kỷ\`, \`huynh đệ kết nghĩa\`, \`gia tộc thân cận\`, \`sống chết có nhau\`, \`trung thành tuyệt đối\`, \`ân nhân cứu mạng\`.
-*   **Cấp 5: Đồng Minh / Tích Cực (Màu Xanh Ngọc):** \`đồng minh\`, \`bằng hữu\`, \`đồng môn\`, \`thân hữu\`, \`giúp đỡ\`, \`cảm kích\`, \`tiền bối đáng kính\`.
-*   **Cấp 4: Trung Lập (Màu Vàng):** \`giao dịch\`, \`hợp tác tạm thời\`, \`quen biết sơ\`, \`người qua đường\`.
-*   **Cấp 3: Mâu Thuẫn / Cạnh Tranh (Màu Cam):** \`đối thủ cạnh tranh\`, \`coi thường\`, \`chán ghét\`, \`xung đột lợi ích\`, \`gây sự\`.
-*   **Cấp 2: Thù Địch (Màu Đỏ Hồng):** \`kẻ thù\`, \`đối địch\`, \`phản bội\`, \`hãm hại\`, \`âm mưu\`, \`ghen ghét\`.
-*   **Cấp 1: Sinh Tử Đại Địch (Màu Đỏ Sẫm):** \`huyết hải thâm thù\`, \`truy sát đến cùng\`, \`sinh tử đại địch\`, \`diệt tộc\`, \`thù không đội trời chung\`.
-
-**QUY TẮC PHÂN BIỆT (CỰC KỲ QUAN TRỌNG):**
-- **CAM (Mâu thuẫn):** Chỉ dùng cho sự cạnh tranh, không ưa nhau, xung đột nhỏ. **KHÔNG** có ý định gây hại nghiêm trọng.
-- **ĐỎ HỒNG (Thù địch):** Dùng khi có ý định hoặc hành động hãm hại, phản bội. Mức độ thù ghét rõ ràng.
-- **ĐỎ SẪM (Sinh tử):** **CHỈ** dùng cho mối thù sinh tử, không thể hóa giải.
-
 **NỘI DUNG CHƯƠNG MỚI:**
 "{chapterContent}"`;
+
+// Use 'gemini-3-flash-preview' for robust data extraction and speed
+const ANALYSIS_MODEL = "gemini-3-flash-preview"; 
 
 async function executeAnalysis(prompt: string, schema: any, onKeySwitched?: () => void): Promise<{ data: any; usage: { totalTokens: number } }> {
     const { data: response, usage } = await executeApiCallWithRetry(async (client) => {
         const genResponse = await client.models.generateContent({
-            model: "gemini-3-flash-preview",
+            model: ANALYSIS_MODEL,
             contents: prompt,
             config: {
                 responseMimeType: "application/json",
                 responseSchema: schema,
+                // thinkingConfig: { thinkingBudget: 2048 } // Not needed for Flash extraction
             },
         });
         const usageMetadata = genResponse.usageMetadata || { totalTokenCount: 0 };
@@ -311,46 +307,40 @@ async function executeAnalysis(prompt: string, schema: any, onKeySwitched?: () =
 
 
 export const analyzeChapterForPrimaryCharacter = async (chapterContent: string, previousStats: CharacterStats | null, onKeySwitched?: () => void): Promise<{ data: Partial<CharacterStats> | null, usage: { totalTokens: number }}> => {
-    const taskPrompt = `**NHIỆM VỤ:**\nĐọc nội dung **CHƯƠNG MỚI** và chỉ trích xuất những thông tin **MỚI** hoặc **THAY ĐỔI** liên quan đến **TRẠNG THÁI CỦA NHÂN VẬT CHÍNH** (tên, cảnh giới, cấp độ, vật phẩm, công pháp, trang bị, tư chất).`;
+    const taskPrompt = `**NHIỆM VỤ CỤ THỂ:**\nHãy trả về trạng thái **ĐẦY ĐỦ** của nhân vật chính sau chương này. Bao gồm cả các thông tin cũ (nếu còn hiệu lực) và thông tin mới cập nhật. Đảm bảo các trường balo, congPhap, trangBi chứa toàn bộ danh sách items hiện có.`;
     const fullPrompt = BASE_PROMPT
         .replace('{previousStats}', JSON.stringify(previousStats ?? {}, null, 2))
-        .replace('**NHIỆM VỤ:**', taskPrompt)
-        .replace('{chapterContent}', chapterContent.substring(0, 15000));
+        .replace('{chapterContent}', chapterContent.substring(0, 30000)) + `\n\n${taskPrompt}`;
     return executeAnalysis(fullPrompt, primaryCharacterSchema, onKeySwitched);
 };
 
 export const analyzeChapterForWorldInfo = async (chapterContent: string, previousStats: CharacterStats | null, onKeySwitched?: () => void): Promise<{ data: Partial<CharacterStats> | null, usage: { totalTokens: number }}> => {
-    const taskPrompt = `**NHIỆM VỤ:**\nĐọc nội dung **CHƯƠNG MỚI** và chỉ trích xuất những thông tin **MỚI** hoặc **THAY ĐỔI** liên quan đến **THẾ GIỚI TRUYỆN** (nhân vật phụ, thế lực, địa điểm, vị trí hiện tại của nhân vật chính).`;
+    const taskPrompt = `**NHIỆM VỤ CỤ THỂ:**\nHãy trả về danh sách **ĐẦY ĐỦ** các nhân vật phụ (NPCs), thế lực và địa điểm sau chương này. Bạn phải liệt kê lại cả những NPC cũ đã xuất hiện trong "Dữ Liệu Cũ" trừ khi họ đã chết hoặc biến mất hoàn toàn.`;
     const fullPrompt = BASE_PROMPT
         .replace('{previousStats}', JSON.stringify(previousStats ?? {}, null, 2))
-        .replace('**NHIỆM VỤ:**', taskPrompt)
-        .replace('{chapterContent}', chapterContent.substring(0, 15000));
+        .replace('{chapterContent}', chapterContent.substring(0, 30000)) + `\n\n${taskPrompt}`;
     return executeAnalysis(fullPrompt, worldInfoSchema, onKeySwitched);
 };
 
 export const analyzeChapterForCharacterStats = async (chapterContent: string, previousStats: CharacterStats | null, onKeySwitched?: () => void): Promise<{ data: CharacterStats | null, usage: { totalTokens: number }}> => {
-    const taskPrompt = `**NHIỆM VỤ:**\nĐọc nội dung **CHƯƠNG MỚI** và chỉ trích xuất những thông tin **MỚI** hoặc **THAY ĐỔI** so với "DỮ LIỆU HIỆN TẠI".`;
+    const taskPrompt = `**NHIỆM VỤ CỤ THỂ:**\nHãy đóng vai một cơ sở dữ liệu sống. Trả về một bản ghi JSON chứa **TOÀN BỘ** thông tin nhân vật và thế giới tính đến hết chương này.
+    
+    1. **Balo/Inventory:** Kết hợp vật phẩm cũ và mới. Đừng bỏ sót vật phẩm cũ.
+    2. **NPCs:** Giữ lại NPC cũ quan trọng, cập nhật trạng thái nếu có, thêm NPC mới.
+    3. **Địa điểm/Thế lực:** Tương tự, duy trì danh sách đầy đủ.
+    
+    Mục tiêu: Người dùng nhìn vào file JSON này phải biết được toàn bộ tài sản, quan hệ và kiến thức của nhân vật mà không cần đọc lại các chương trước.`;
+    
      const fullPrompt = BASE_PROMPT
         .replace('{previousStats}', JSON.stringify(previousStats ?? {}, null, 2))
-        .replace('**NHIỆM VỤ:**', taskPrompt)
-        .replace('{chapterContent}', chapterContent.substring(0, 15000));
+        .replace('{chapterContent}', chapterContent.substring(0, 30000)) + `\n\n${taskPrompt}`;
         
     const { data: stats, usage } = await executeAnalysis(fullPrompt, characterStatsSchema, onKeySwitched);
     
     if (!stats) return { data: null, usage };
 
-    const hasData = 
-        (stats.canhGioi && stats.canhGioi.trim() !== "") ||
-        (stats.viTriHienTai && stats.viTriHienTai.trim() !== "") ||
-        (stats.heThongCanhGioi && stats.heThongCanhGioi.length > 0) ||
-        (stats.balo && stats.balo.length > 0) ||
-        (stats.congPhap && stats.congPhap.length > 0) ||
-        (stats.trangBi && stats.trangBi.length > 0) ||
-        (stats.trangThai && (!!stats.trangThai.ten || !!stats.trangThai.tuChat?.length)) ||
-        (stats.npcs && stats.npcs.length > 0) ||
-        (stats.theLuc && stats.theLuc.length > 0) ||
-        (stats.diaDiem && stats.diaDiem.length > 0) ||
-        (stats.quanHe && stats.quanHe.length > 0);
+    // Check if critical fields are populated (even if empty arrays, it implies the model tried)
+    const hasData = stats && typeof stats === 'object';
 
     const dataToReturn = hasData ? stats : null;
     return { data: dataToReturn, usage };
@@ -360,7 +350,7 @@ export const analyzeChapterForCharacterStats = async (chapterContent: string, pr
 export const chatWithChapterContent = async (prompt: string, chapterContent: string, storyTitle: string, onKeySwitched?: () => void): Promise<{ text: string, usage: { totalTokens: number }}> => {
     const { data: response, usage } = await executeApiCallWithRetry(async (client) => {
         const genResponse = await client.models.generateContent({
-            model: "gemini-3-flash-preview",
+            model: "gemini-3-flash-preview", // Flash is sufficient for simple chat
             contents: `**Bối cảnh:** Bạn là một trợ lý AI hữu ích, đang thảo luận về cuốn sách "${storyTitle}".
             **Nhiệm vụ:** Trả lời câu hỏi của người dùng chỉ dựa vào nội dung được cung cấp từ chương truyện hiện tại. Nếu câu trả lời không có trong văn bản, hãy nói rằng bạn không tìm thấy thông tin trong đoạn trích này.
 
@@ -474,6 +464,8 @@ export const chatWithEbook = async (prompt: string, zipInstance: any, chapterLis
 };
 
 export const rewriteChapterContent = async (content: string, onKeySwitched?: () => void): Promise<{ text: string, usage: { totalTokens: number } }> => {
+    // For rewriting/creative tasks, Flash is usually sufficient and much faster/cheaper.
+    // If quality is poor, user can request to upgrade this too.
     const prompt = `Bạn là một biên tập viên tiểu thuyết chuyên nghiệp và một dịch giả đại tài.
 Nhiệm vụ của bạn là viết lại (biên tập lại) đoạn văn bản dưới đây thành tiếng Việt trôi chảy, tự nhiên, và dễ hiểu, phù hợp với văn phong truyện tiểu thuyết.
 

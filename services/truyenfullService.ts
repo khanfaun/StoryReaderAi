@@ -386,22 +386,54 @@ const truyenFullGetDetails = async (
     onPartialUpdate?: (story: PartialStory & { chapters: Chapter[] }) => void,
     onFetchComplete?: () => void
 ) => {
-    // 1. Lấy thông tin trang đầu tiên (Dùng Race Mode để lấy nhanh nhất)
-    const baseUrl = url.replace(/\/trang-\d+\/?(#.*)?$/, '').replace(/#.*$/, '').replace(/\/+$/, '') + '/';
+    // 1. Chuẩn hóa URL gốc (loại bỏ page, query, hash, trailing slash)
+    // Ví dụ: https://truyenfull.vn/ten-truyen/trang-2 => https://truyenfull.vn/ten-truyen/
+    let baseUrl = url.split(/[?#]/)[0]; // Remove query/hash
+    baseUrl = baseUrl.replace(/\/trang-\d+\/?$/, ''); // Remove existing page path if any
+    baseUrl = baseUrl.replace(/\/+$/, ''); // Remove trailing slash
+    baseUrl += '/'; // Ensure exactly one trailing slash
+    
+    // Fetch trang đầu tiên
     const doc = await fetchAndParse(baseUrl, false);
     const baseDetails = extractStoryDetails(doc, source, url);
     
-    // 2. Xác định tổng số trang
+    // Sử dụng Set để kiểm tra trùng lặp chương (Content-based deduplication)
+    const existingChapterUrls = new Set<string>();
+    baseDetails.chapters.forEach(c => existingChapterUrls.add(c.url));
+
+    // 2. Xác định tổng số trang (Robust Last Page Detection)
     let lastPage = 1;
-    const paginationLinks = doc.querySelectorAll('.pagination li a');
-    paginationLinks.forEach(link => {
-        const href = link.getAttribute('href') || '';
+    const paginationItems = doc.querySelectorAll('.pagination li');
+    paginationItems.forEach(li => {
+        const a = li.querySelector('a');
+        const span = li.querySelector('span');
+        const text = (a?.textContent || span?.textContent || '').trim();
+        const href = a?.getAttribute('href') || '';
+        
+        // Cách 1: Parse số từ text
+        if (/^\d+$/.test(text)) {
+            const p = parseInt(text, 10);
+            if (p > lastPage) lastPage = p;
+        }
+        
+        // Cách 2: Parse số từ href
         const match = href.match(/trang-(\d+)/);
         if (match) {
-            const pageNum = parseInt(match[1], 10);
-            if (pageNum > lastPage) lastPage = pageNum;
+            const p = parseInt(match[1], 10);
+            if (p > lastPage) lastPage = p;
+        }
+        
+        // Cách 3: Link "Trang Cuối"
+        if (text.toLowerCase().includes('cuối') || text.includes('»') || text.toLowerCase().includes('last')) {
+             const lastMatch = href.match(/trang-(\d+)/);
+             if (lastMatch) {
+                 const p = parseInt(lastMatch[1], 10);
+                 if (p > lastPage) lastPage = p;
+             }
         }
     });
+
+    console.log(`Detected last page: ${lastPage} for ${baseUrl}`);
 
     // 3. Nếu có nhiều trang, khởi động tiến trình tải ngầm
     if (lastPage > 1) {
@@ -411,17 +443,17 @@ const truyenFullGetDetails = async (
                  const pages = [];
                  for (let i = 2; i <= lastPage; i++) pages.push(i);
                  
-                 // GIẢM BATCH SIZE XUỐNG 2 ĐỂ TRÁNH BỊ CHẶN (QUAN TRỌNG)
                  const BATCH_SIZE = 2; 
                  
                  for (let i = 0; i < pages.length; i += BATCH_SIZE) {
                      const batch = pages.slice(i, i + BATCH_SIZE);
                      
-                     // Fetch song song trong batch nhưng dùng chế độ background (ưu tiên proxy đã thành công)
+                     // Fetch song song trong batch
                      const batchResults = await Promise.allSettled(batch.map(async (pageNum) => {
                          try {
-                             // Sử dụng fetchAndParse với isBackground = true
-                             const pageDoc = await fetchAndParse(`${baseUrl}trang-${pageNum}/`, true);
+                             const pageUrl = `${baseUrl}trang-${pageNum}/`;
+                             // Fetch page
+                             const pageDoc = await fetchAndParse(pageUrl, true);
                              return { pageNum, doc: pageDoc };
                          } catch (e) {
                              console.warn(`Background fetch failed page ${pageNum}`, e);
@@ -435,14 +467,34 @@ const truyenFullGetDetails = async (
                         .sort((a, b) => (a?.pageNum || 0) - (b?.pageNum || 0));
 
                      let hasNewChapters = false;
+                     
                      validResults.forEach(res => {
                          if(res && res.doc) {
+                            // Extract chapters
+                            const newChapters: Chapter[] = [];
                             res.doc.querySelectorAll('#list-chapter .list-chapter li a, .list-chapter li a').forEach(el => {
-                                if(el.textContent && el.getAttribute('href')) {
-                                    baseDetails.chapters.push({ 
-                                        title: el.textContent.trim(), 
-                                        url: el.getAttribute('href')! 
-                                    });
+                                const chapterUrl = el.getAttribute('href');
+                                const chapterTitle = el.textContent?.trim();
+                                if(chapterTitle && chapterUrl) {
+                                    newChapters.push({ title: chapterTitle, url: chapterUrl });
+                                }
+                            });
+
+                            // REDIRECT / DUPLICATE CHECK:
+                            // Nếu chương đầu tiên của trang mới đã tồn tại trong danh sách cũ -> Đây là trang trùng (Redirect về trang 1)
+                            if (newChapters.length > 0) {
+                                const firstChapterUrl = newChapters[0].url;
+                                if (existingChapterUrls.has(firstChapterUrl)) {
+                                    console.warn(`Page ${res.pageNum} seems to be a duplicate/redirect of an earlier page. Skipping.`);
+                                    return; // Bỏ qua trang này
+                                }
+                            }
+
+                            // Nếu không trùng, thêm vào danh sách
+                            newChapters.forEach(c => {
+                                if (!existingChapterUrls.has(c.url)) {
+                                    existingChapterUrls.add(c.url);
+                                    baseDetails.chapters.push(c);
                                     hasNewChapters = true;
                                 }
                             });
@@ -453,7 +505,7 @@ const truyenFullGetDetails = async (
                          onPartialUpdate(baseDetails);
                      }
                      
-                     // TĂNG THỜI GIAN NGHỈ ĐỂ TRÁNH RATE LIMIT
+                     // Delay to be polite
                      if (i + BATCH_SIZE < pages.length) {
                          await new Promise(r => setTimeout(r, 1000)); 
                      }
@@ -535,13 +587,14 @@ const scrapers = {
                const BATCH_SIZE = 2; // Reduced batch size
                for(let i=0; i<pages.length; i+=BATCH_SIZE) {
                    const batch = pages.slice(i, i+BATCH_SIZE);
-                   const batchResults = await Promise.allSettled(batch.map(pageNum => 
-                        fetchAndParse(`${url}?page=${pageNum}`, true)
-                   ));
+                   const batchResults = await Promise.allSettled(batch.map(async (pageNum) => {
+                        const doc = await fetchAndParse(`${url}?page=${pageNum}`, true);
+                        return { doc, pageNum };
+                   }));
                    
                    const validResults = batchResults
-                    .filter((r): r is PromiseFulfilledResult<Document> => r.status === 'fulfilled')
-                    .map((r, index) => ({ doc: r.value, pageNum: batch[index] }))
+                    .filter((r): r is PromiseFulfilledResult<{doc: Document, pageNum: number}> => r.status === 'fulfilled')
+                    .map(r => r.value)
                     .sort((a, b) => a.pageNum - b.pageNum);
 
                    validResults.forEach(res => {

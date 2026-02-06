@@ -19,19 +19,19 @@ const SearchResultItem: React.FC<SearchResultItemProps> = ({ story, onSelectStor
   switch (story.source) {
       case 'TruyenFull.vn':
           sourceColor = 'bg-teal-600 hover:bg-teal-500';
-          label = 'TF';
+          label = 'TruyenFull';
           break;
       case 'TruyenFull.vision':
           sourceColor = 'bg-indigo-600 hover:bg-indigo-500';
-          label = 'TFV';
+          label = 'TruyenFull Vision';
           break;
       case 'TangThuVien.net':
           sourceColor = 'bg-orange-600 hover:bg-orange-500';
-          label = 'TTV';
+          label = 'Tàng Thư Viện';
           break;
       case 'Ebook':
           sourceColor = 'bg-emerald-600 hover:bg-emerald-500';
-          label = 'EPUB';
+          label = 'Ebook File';
           break;
       case 'Local':
           sourceColor = 'bg-green-600 hover:bg-green-500';
@@ -118,10 +118,10 @@ const SearchResultItem: React.FC<SearchResultItemProps> = ({ story, onSelectStor
         )}
         
         {/* Source Badge Overlay - Smaller */}
-        <div className="absolute top-1 right-1 z-10">
+        <div className="absolute top-1 right-1 z-10 max-w-[90%]">
              <button
                 onClick={handleSourceClick}
-                className={`px-1 py-0.5 text-[9px] font-bold text-white rounded shadow-sm opacity-90 transition-transform hover:scale-110 ${sourceColor}`}
+                className={`px-1 py-0.5 text-[9px] font-bold text-white rounded shadow-sm opacity-90 transition-transform hover:scale-110 truncate max-w-full block ${sourceColor}`}
                 title={`Lọc theo nguồn: ${label}`}
              >
                 {label}

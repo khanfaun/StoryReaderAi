@@ -173,6 +173,58 @@ export async function deleteChapterData(storyUrl: string, chapterUrl: string): P
     });
 }
 
+/**
+ * Lấy tất cả dữ liệu chương (bao gồm stats snapshot) của một truyện.
+ * Dùng cho tính năng Xuất/Backup dữ liệu.
+ */
+export async function getAllChapterData(storyUrl: string): Promise<(CachedChapter & { chapterUrl: string })[]> {
+    const db = await openDB();
+    const transaction = db.transaction(CHAPTER_STORE, 'readonly');
+    const store = transaction.objectStore(CHAPTER_STORE);
+    
+    // Tạo range tìm kiếm tất cả record có storyUrl khớp
+    const range = IDBKeyRange.bound([storyUrl, ''], [storyUrl, '\uffff']);
+    const request = store.getAll(range);
+
+    return new Promise((resolve, reject) => {
+        request.onsuccess = () => {
+            const results = request.result || [];
+            // Map kết quả về đúng format
+            const mapped = results.map(item => {
+                const { storyUrl: sUrl, ...rest } = item;
+                return rest;
+            });
+            resolve(mapped);
+        };
+        request.onerror = () => reject(request.error);
+    });
+}
+
+/**
+ * Lấy danh sách URL các chương đã được cache của một truyện.
+ * Dùng để hiển thị dấu tick "Đã tải" trên giao diện.
+ */
+export async function getCachedChapterUrls(storyUrl: string): Promise<string[]> {
+    const db = await openDB();
+    const transaction = db.transaction(CHAPTER_STORE, 'readonly');
+    const store = transaction.objectStore(CHAPTER_STORE);
+    
+    const range = IDBKeyRange.bound([storyUrl, ''], [storyUrl, '\uffff']);
+    // Dùng getAllKeys để tối ưu hiệu năng, không load nội dung
+    const request = store.getAllKeys(range);
+
+    return new Promise((resolve, reject) => {
+        request.onsuccess = () => {
+            const results = request.result || [];
+            // Kết quả là mảng các key: [storyUrl, chapterUrl]
+            // Ta chỉ cần lấy phần tử thứ 2 (chapterUrl)
+            const urls = results.map((key: any) => key[1] as string);
+            resolve(urls);
+        };
+        request.onerror = () => reject(request.error);
+    });
+}
+
 
 // --- DELETE OPERATIONS ---
 
@@ -190,17 +242,8 @@ export async function deleteEbookAndStory(id: string): Promise<void> {
     await new Promise<void>((res, rej) => { storyTx.oncomplete = () => res(); storyTx.onerror = () => rej(storyTx.error); });
 
     // 3. Delete ALL Chapter Contents associated with this story
-    // We iterate using a cursor or key range. Since CHAPTER_STORE key is [storyUrl, chapterUrl], 
-    // we use an IDBKeyRange.bound if supported, but key path is array.
-    // IDBKeyRange on array keys compares items. [id, -infinity] to [id, infinity].
-    
     const chapTx = db.transaction(CHAPTER_STORE, 'readwrite');
     const chapStore = chapTx.objectStore(CHAPTER_STORE);
-    
-    // Using IDBKeyRange.bound for array keys is tricky with standard JS strings.
-    // Simpler approach: Iterate all and delete matches (performance hit but safe for small DBs).
-    // Or use lower/upper bound correctly.
-    // For [storyUrl, chapterUrl], all keys starting with storyUrl will be grouped.
     
     const range = IDBKeyRange.bound([id, ''], [id, '\uffff']);
     const request = chapStore.delete(range);

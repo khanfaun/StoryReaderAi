@@ -1,4 +1,6 @@
-import type { CharacterStats, InfoItem, NPC, TheLuc, DiaDiem, TuChat, CharacterStatus } from '../types';
+
+import type { CharacterStats, InfoItem, NPC, TheLuc, DiaDiem, TuChat, CharacterStatus, Story, CachedChapter } from '../types';
+import * as dbService from './dbService';
 
 // Hàm generic để hợp nhất các mảng đối tượng có thuộc tính 'ten' và 'status'
 function mergeArray<T extends { ten: string; moTa: string; status?: string }>(
@@ -128,4 +130,143 @@ export const saveStoryState = (storyUrl: string, state: CharacterStats): void =>
     } catch (e) {
         console.error("Lỗi khi lưu trạng thái truyện:", e);
     }
+};
+
+// ==========================================================
+// SHARED EXPORT / IMPORT LOGIC
+// ==========================================================
+
+/**
+ * Xuất toàn bộ dữ liệu của truyện, bao gồm:
+ * 1. Trạng thái tích lũy (LocalStorage)
+ * 2. Danh sách chương đã đọc (LocalStorage)
+ * 3. Dữ liệu Cache của từng chương (IndexedDB) - QUAN TRỌNG
+ */
+export const exportStoryData = async (story: Story): Promise<void> => {
+    if (!story) return;
+    
+    try {
+        // 1. Get Cumulative Stats
+        const stats = getStoryState(story.url);
+        
+        // 2. Get Read Chapters List
+        const readChaptersRaw = localStorage.getItem(`readChapters_${story.url}`);
+        const readChapters = readChaptersRaw ? JSON.parse(readChaptersRaw) : [];
+
+        // 3. Get Cached Chapters Data from IndexedDB (Snapshot per chapter)
+        const cachedChapters = await dbService.getAllChapterData(story.url);
+
+        if (!stats && readChapters.length === 0 && cachedChapters.length === 0) {
+            alert("Truyện này chưa có dữ liệu nào để xuất.");
+            return;
+        }
+
+        const saveData = {
+            version: 2, // Bump version to 2 to indicate cachedChapters support
+            timestamp: new Date().toISOString(),
+            data: {
+                readingHistory: null,
+                readingSettings: null,
+                storyStates: {
+                    [story.url]: {
+                        stats: stats,
+                        readChapters: readChapters,
+                        cachedChapters: cachedChapters // Include cache here
+                    }
+                }
+            }
+        };
+
+        const jsonString = JSON.stringify(saveData, null, 2);
+        const blob = new Blob([jsonString], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+        a.download = `${story.title} - Full AI Data_${timestamp}.json`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+
+    } catch (e) {
+        console.error("Export Error:", e);
+        alert(`Lỗi khi xuất dữ liệu: ${(e as Error).message}`);
+    }
+};
+
+/**
+ * Nhập dữ liệu truyện từ file JSON.
+ * Hỗ trợ khôi phục cả cache IndexedDB.
+ */
+export const importStoryData = async (file: File, story: Story, onSuccess?: () => void): Promise<void> => {
+    if (!file || !story) return;
+    
+    const reader = new FileReader();
+    reader.onload = async (event) => {
+        try {
+            const text = event.target?.result;
+            if (typeof text !== 'string') throw new Error('File content is not text.');
+            
+            const json = JSON.parse(text);
+            
+            // Validate Structure
+            if (json.data && json.data.storyStates) {
+                // Try to find data for THIS story
+                let targetData = json.data.storyStates[story.url];
+                
+                // Fallback: If URL doesn't match, verify if there's only 1 story in the file
+                if (!targetData) {
+                    const keys = Object.keys(json.data.storyStates);
+                    if (keys.length === 1) {
+                        targetData = json.data.storyStates[keys[0]];
+                        console.log("Importing from different URL source (Single Entry Match):", keys[0]);
+                    }
+                }
+
+                if (targetData) {
+                    // 1. Restore Cumulative Stats
+                    if (targetData.stats) {
+                        saveStoryState(story.url, targetData.stats as CharacterStats);
+                    }
+                    
+                    // 2. Restore Read Chapters List
+                    if (targetData.readChapters) {
+                        localStorage.setItem(`readChapters_${story.url}`, JSON.stringify(targetData.readChapters));
+                    }
+                    
+                    // 3. Restore Cached Chapters (IndexedDB)
+                    if (targetData.cachedChapters && Array.isArray(targetData.cachedChapters)) {
+                        const chaptersToRestore = targetData.cachedChapters as (CachedChapter & { chapterUrl: string })[];
+                        
+                        // Use sequential writes to avoid overwhelming DB transaction if array is huge
+                        for (const chapData of chaptersToRestore) {
+                            if (chapData.chapterUrl) {
+                                await dbService.saveChapterData(story.url, chapData.chapterUrl, {
+                                    content: chapData.content,
+                                    stats: chapData.stats
+                                });
+                            }
+                        }
+                    }
+                    
+                    alert("Đã nhập dữ liệu thành công (bao gồm cả dữ liệu từng chương)!");
+                    if (onSuccess) onSuccess();
+                } else {
+                    alert("File hợp lệ nhưng không tìm thấy dữ liệu cho truyện này (URL không khớp).");
+                }
+            } else if (typeof json === 'object' && (json.trangThai || json.npcs || json.balo)) {
+                 // Legacy format support
+                 saveStoryState(story.url, json as CharacterStats);
+                 alert("Đã nhập dữ liệu thành công! (Legacy Format - Chỉ có trạng thái tổng)");
+                 if (onSuccess) onSuccess();
+            } else {
+                throw new Error("Cấu trúc file không nhận diện được.");
+            }
+        } catch (err) {
+            console.error("Import Error:", err);
+            alert(`Lỗi nhập file: ${(err as Error).message}`);
+        }
+    };
+    reader.readAsText(file);
 };
