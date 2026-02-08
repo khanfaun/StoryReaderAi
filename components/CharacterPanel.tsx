@@ -1,12 +1,12 @@
 
 import React, { useState, useMemo, useEffect, useCallback, useRef } from 'react';
 import { createPortal } from 'react-dom';
-import type { CharacterStats, DiaDiem, QuanHe, NPC, Story } from '../types';
+import type { CharacterStats, DiaDiem, QuanHe, NPC, Story, ChatMessage } from '../types';
 import LoadingSpinner from './LoadingSpinner';
 import InfoItemDisplay from './InfoItemDisplay';
 import EntityEditModal, { EntityType } from './EntityEditModal';
 import ConfirmationModal from './ConfirmationModal';
-import { PlusIcon, EditIcon, TrashIcon, DownloadIcon, UploadIcon } from './icons';
+import { PlusIcon, EditIcon, TrashIcon, DownloadIcon, UploadIcon, ChatIcon, SpinnerIcon } from './icons';
 import EntityTooltip from './EntityTooltip';
 import { getStoryState, saveStoryState, exportStoryData, importStoryData } from '../services/storyStateService';
 
@@ -21,9 +21,13 @@ interface CharacterPanelProps {
   onDataLoaded: () => void;
   onReanalyze: () => void;
   onStopAnalysis: () => void;
+  // Chat props
+  chatMessages?: ChatMessage[];
+  onSendMessage?: (message: string) => void;
+  isChatLoading?: boolean;
 }
 
-type Tab = 'status' | 'realmSystem' | 'inventory' | 'skills' | 'equipment' | 'npcs' | 'relationships' | 'factions' | 'locations' | 'data';
+type Tab = 'status' | 'realmSystem' | 'inventory' | 'skills' | 'equipment' | 'npcs' | 'relationships' | 'factions' | 'locations' | 'data' | 'chat';
 
 // ... (RelationshipGraph component code remains identical, omitted for brevity but assumed present) ...
 // NOTE: I am keeping the full file structure but focusing on the updated parts for clarity.
@@ -334,11 +338,18 @@ const RelationshipGraph: React.FC<RelationshipGraphProps> = ({ relations, mainCh
 };
 
 
-const CharacterPanel: React.FC<CharacterPanelProps> = ({ stats, story, isOpen, onClose, isAnalyzing, isSidebar = false, onStatsChange, onDataLoaded, onReanalyze, onStopAnalysis }) => {
+const CharacterPanel: React.FC<CharacterPanelProps> = ({ 
+    stats, story, isOpen, onClose, isAnalyzing, isSidebar = false, onStatsChange, onDataLoaded, onReanalyze, onStopAnalysis,
+    chatMessages, onSendMessage, isChatLoading 
+}) => {
   const [activeTab, setActiveTab] = useState<Tab>(isSidebar ? 'npcs' : 'status');
   const [modalState, setModalState] = useState<{ isOpen: boolean; type: EntityType | null; data: any | null }>({ isOpen: false, type: null, data: null });
   const [deleteConfirmation, setDeleteConfirmation] = useState<{ type: EntityType; entity: any; } | null>(null);
   const loadInputRef = useRef<HTMLInputElement>(null);
+  
+  // Chat state in case we want specific chat behaviors inside the tab
+  const [chatInput, setChatInput] = useState('');
+  const chatContainerRef = useRef<HTMLDivElement>(null);
 
   const allCharacterNames = useMemo(() => {
     if (!stats) return [];
@@ -347,6 +358,13 @@ const CharacterPanel: React.FC<CharacterPanelProps> = ({ stats, story, isOpen, o
     return [mainCharName, ...npcNames].filter((name): name is string => !!name);
   }, [stats]);
 
+  // Scroll chat to bottom
+  useEffect(() => {
+      if (activeTab === 'chat' && chatContainerRef.current) {
+          // Use scrollTop to scroll container only, preventing whole page scroll
+          chatContainerRef.current.scrollTop = chatContainerRef.current.scrollHeight;
+      }
+  }, [chatMessages, activeTab]);
 
   const handleOpenModal = (type: EntityType, data: any | null = null) => {
     setModalState({ isOpen: true, type, data });
@@ -450,6 +468,14 @@ const CharacterPanel: React.FC<CharacterPanelProps> = ({ stats, story, isOpen, o
     await importStoryData(file, story, onDataLoaded);
     if (event.target) event.target.value = '';
   };
+  
+  const handleChatSubmit = (e: React.FormEvent) => {
+      e.preventDefault();
+      if (chatInput.trim() && !isChatLoading && onSendMessage) {
+          onSendMessage(chatInput.trim());
+          setChatInput('');
+      }
+  };
 
 
   const allRelations = useMemo((): QuanHe[] => {
@@ -503,7 +529,57 @@ const CharacterPanel: React.FC<CharacterPanelProps> = ({ stats, story, isOpen, o
         stats.npcs?.length || stats.theLuc?.length || stats.diaDiem?.length || allRelations.length
     );
     
-    if (!hasAnyData && activeTab !== 'data') {
+    if (activeTab === 'chat') {
+        return (
+            <div className="flex flex-col h-[60vh] max-h-[500px]">
+                <div 
+                    ref={chatContainerRef} 
+                    className="flex-grow overflow-y-auto mb-4 space-y-4 pr-2 custom-scrollbar"
+                >
+                    {(!chatMessages || chatMessages.length === 0) && (
+                        <div className="text-center text-[var(--theme-text-secondary)] p-4 italic">
+                            <p>Hãy hỏi tôi bất cứ điều gì về cốt truyện, nhân vật hoặc các chi tiết trong chương này.</p>
+                        </div>
+                    )}
+                    {chatMessages?.map((msg, index) => (
+                        <div key={index} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+                            <div className={`max-w-[85%] px-3 py-2 rounded-2xl text-sm ${msg.role === 'user' ? 'bg-[#f59e0b] text-white' : 'bg-[var(--theme-bg-base)] text-[var(--theme-text-primary)] border border-[var(--theme-border)]'}`}>
+                                <p className="whitespace-pre-wrap break-words">{msg.content}</p>
+                            </div>
+                        </div>
+                    ))}
+                    {isChatLoading && (
+                        <div className="flex justify-start">
+                            <div className="px-3 py-2 rounded-2xl bg-[var(--theme-bg-base)] border border-[var(--theme-border)] flex items-center">
+                                <SpinnerIcon className="animate-spin w-4 h-4 text-[#f59e0b]" />
+                            </div>
+                        </div>
+                    )}
+                </div>
+                <form onSubmit={handleChatSubmit} className="flex gap-2 pt-2 border-t border-[var(--theme-border)]">
+                    <input 
+                        type="text" 
+                        value={chatInput}
+                        onChange={(e) => setChatInput(e.target.value)}
+                        placeholder="Hỏi AI..." 
+                        className="flex-grow bg-[var(--theme-bg-base)] border border-[var(--theme-border)] rounded-full px-4 py-2 text-sm text-[var(--theme-text-primary)] focus:outline-none focus:ring-1 focus:ring-[#f59e0b] disabled:opacity-50"
+                        disabled={isChatLoading}
+                    />
+                    <button 
+                        type="submit" 
+                        disabled={!chatInput.trim() || isChatLoading}
+                        className="w-9 h-9 rounded-full bg-[#f59e0b] hover:bg-[#d97706] text-white flex items-center justify-center disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                    >
+                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-5 h-5 transform rotate-90">
+                            <path d="M10.894 2.553a1 1 0 00-1.788 0l-7 14a1 1 0 001.169 1.409l5-1.429A1 1 0 009 15.571V11a1 1 0 112 0v4.571a1 1 0 00.725.962l5 1.428a1 1 0 001.17-1.408l-7-14z" />
+                        </svg>
+                    </button>
+                </form>
+            </div>
+        );
+    }
+    
+    if (!hasAnyData && activeTab !== 'data' && activeTab !== 'chat') {
         if (isAnalyzing) {
             return (
                 <div className="flex flex-col items-center justify-center h-48">
@@ -557,7 +633,7 @@ const CharacterPanel: React.FC<CharacterPanelProps> = ({ stats, story, isOpen, o
     switch(activeTab) {
       // Character Primary Panel Tabs
       case 'status':
-        const r = stats.trangThai;
+        const r = stats?.trangThai;
         return (
           <div>
             <h3 className="text-xl font-bold text-[var(--theme-accent-primary)] mb-4">Trạng Thái & Cảnh Giới</h3>
@@ -565,24 +641,24 @@ const CharacterPanel: React.FC<CharacterPanelProps> = ({ stats, story, isOpen, o
                 {r && <p className="text-lg"><strong>Tên:</strong> {r.ten || 'N/A'}</p>}
                  <p className="text-lg">
                     <strong>Cảnh giới:</strong> 
-                    <span className="text-2xl ml-2 text-[var(--theme-accent-secondary)] font-semibold">{stats.canhGioi || 'Chưa rõ'}</span>
+                    <span className="text-2xl ml-2 text-[var(--theme-accent-secondary)] font-semibold">{stats?.canhGioi || 'Chưa rõ'}</span>
                 </p>
                 {renderInfoList('Tư chất / Đặc tính', r?.tuChat, 'tuChat')}
               </div>
           </div>
         );
       case 'realmSystem':
-        return renderInfoList('Hệ Thống Cấp Độ', stats.heThongCanhGioi, 'heThongCanhGioi');
+        return renderInfoList('Hệ Thống Cấp Độ', stats?.heThongCanhGioi, 'heThongCanhGioi');
       case 'inventory':
-         return renderInfoList('Balo', stats.balo, 'balo');
+         return renderInfoList('Balo', stats?.balo, 'balo');
       case 'skills':
-         return renderInfoList('Công Pháp / Kỹ Năng', stats.congPhap, 'congPhap');
+         return renderInfoList('Công Pháp / Kỹ Năng', stats?.congPhap, 'congPhap');
       case 'equipment':
-        return renderInfoList('Trang Bị', stats.trangBi, 'trangBi');
+        return renderInfoList('Trang Bị', stats?.trangBi, 'trangBi');
       
       // World Info Panel Tabs
       case 'npcs':
-        const npcs = stats.npcs || [];
+        const npcs = stats?.npcs || [];
         return (
             <div>
                 <div className="flex justify-between items-center mb-4">
@@ -630,12 +706,12 @@ const CharacterPanel: React.FC<CharacterPanelProps> = ({ stats, story, isOpen, o
             </div>
             <RelationshipGraph 
                 relations={allRelations}
-                mainCharacterName={stats.trangThai?.ten || null}
+                mainCharacterName={stats?.trangThai?.ten || null}
             />
           </div>
         );
       case 'factions':
-        return renderInfoList('Thế Lực / Môn Phái', stats.theLuc, 'theLuc');
+        return renderInfoList('Thế Lực / Môn Phái', stats?.theLuc, 'theLuc');
       case 'locations':
         return (
             <div>
@@ -650,7 +726,7 @@ const CharacterPanel: React.FC<CharacterPanelProps> = ({ stats, story, isOpen, o
                       Thêm
                   </button>
               </div>
-              {(stats.diaDiem && stats.diaDiem.length > 0) ? (
+              {(stats?.diaDiem && stats.diaDiem.length > 0) ? (
                   <LocationTree 
                     locations={stats.diaDiem || []} 
                     currentLocation={stats.viTriHienTai || null}
@@ -707,13 +783,33 @@ const CharacterPanel: React.FC<CharacterPanelProps> = ({ stats, story, isOpen, o
     }
   };
 
-  const TabButton: React.FC<{tab: Tab, label: string}> = ({ tab, label }) => (
-      <button 
-        onClick={() => setActiveTab(tab)}
-        className={`px-3 py-2 text-sm font-medium rounded-md transition-colors ${activeTab === tab ? 'bg-[var(--theme-accent-primary)] text-white' : 'text-[var(--theme-text-secondary)] hover:bg-[var(--theme-bg-base)]'}`}>
-          {label}
-      </button>
-  );
+  const TabButton: React.FC<{tab: Tab, label: string, customColor?: string}> = ({ tab, label, customColor }) => {
+      const isActive = activeTab === tab;
+      let styleClass = '';
+      let inlineStyle = {};
+
+      if (customColor) {
+          if (isActive) {
+              styleClass = 'text-white';
+              inlineStyle = { backgroundColor: customColor };
+          } else {
+              styleClass = 'hover:bg-opacity-20';
+              inlineStyle = { color: customColor, backgroundColor: `${customColor}1A` }; // 10% opacity
+          }
+      } else {
+          styleClass = isActive ? 'bg-[var(--theme-accent-primary)] text-white' : 'text-[var(--theme-text-secondary)] hover:bg-[var(--theme-bg-base)]';
+      }
+
+      return (
+        <button 
+            onClick={() => setActiveTab(tab)}
+            className={`px-3 py-2 text-sm font-medium rounded-md transition-colors ${styleClass}`}
+            style={inlineStyle}
+        >
+            {label}
+        </button>
+      );
+  };
 
   const panelInnerContent = (
     <>
@@ -764,6 +860,7 @@ const CharacterPanel: React.FC<CharacterPanelProps> = ({ stats, story, isOpen, o
                <TabButton tab="factions" label="Thế Lực" />
                <TabButton tab="locations" label="Địa Điểm" />
                <TabButton tab="data" label="Dữ liệu" />
+               <TabButton tab="chat" label="Chat AI" customColor="#f59e0b" />
              </>
           ) : (
             <>
@@ -777,6 +874,7 @@ const CharacterPanel: React.FC<CharacterPanelProps> = ({ stats, story, isOpen, o
               <TabButton tab="factions" label="Thế Lực" />
               <TabButton tab="locations" label="Địa Điểm" />
               <TabButton tab="data" label="Dữ liệu" />
+              <TabButton tab="chat" label="Chat AI" customColor="#f59e0b" />
             </>
           )}
         </div>
@@ -820,7 +918,7 @@ const CharacterPanel: React.FC<CharacterPanelProps> = ({ stats, story, isOpen, o
   return createPortal(
     <>
     <div 
-      className={`fixed inset-0 z-40 transition-all duration-300 ${isOpen ? 'bg-black/60' : 'bg-transparent pointer-events-none'}`}
+      className={`fixed inset-0 z-[60] transition-all duration-300 ${isOpen ? 'bg-black/60' : 'bg-transparent pointer-events-none'}`}
       onClick={onClose}
     >
       <div 

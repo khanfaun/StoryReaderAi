@@ -2,7 +2,7 @@
 import React, { useState } from 'react';
 import type { ReadingSettings } from '../types';
 import { themePresets } from '../hooks/useReadingSettings';
-import { QuestionMarkCircleIcon, PlayIcon } from './icons';
+import { QuestionMarkCircleIcon, PlayIcon, ChatIcon, StopIcon, PauseIcon, CloseIcon } from './icons';
 
 interface SettingsPanelProps {
   isOpen: boolean;
@@ -10,8 +10,15 @@ interface SettingsPanelProps {
   settings: ReadingSettings;
   onSettingsChange: (newSettings: ReadingSettings) => void;
   availableSystemVoices: SpeechSynthesisVoice[];
-  mode?: 'default' | 'tts-setup'; // New prop to control display mode
-  onConfirmTts?: () => void; // New prop for confirming TTS setup
+  mode?: 'default' | 'tts-setup';
+  onConfirmTts?: () => void;
+  
+  // New props for Mobile Tools
+  onToggleTts?: () => void;
+  onToggleAutoScroll?: (target: 'top' | 'bottom') => void;
+  onToggleChat?: () => void;
+  isTtsActive?: boolean;
+  isAutoScrollActive?: boolean;
 }
 
 const SettingsPanel: React.FC<SettingsPanelProps> = ({ 
@@ -21,7 +28,12 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
     onSettingsChange, 
     availableSystemVoices,
     mode = 'default',
-    onConfirmTts
+    onConfirmTts,
+    onToggleTts,
+    onToggleAutoScroll,
+    onToggleChat,
+    isTtsActive,
+    isAutoScrollActive
 }) => {
   const [showVoiceGuide, setShowVoiceGuide] = useState(false);
 
@@ -77,12 +89,12 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
       >
         <div className="flex justify-between items-center p-4 border-b border-[var(--theme-border)]">
           <h2 className="text-xl font-bold text-[var(--theme-text-primary)]">
-              {isTtsSetup ? 'Cấu hình Giọng đọc' : 'Tùy Chỉnh'}
+              {isTtsSetup ? 'Cấu hình Giọng đọc' : 'Cài đặt'}
           </h2>
           <button onClick={onClose} className="text-[var(--theme-text-secondary)] hover:text-[var(--theme-text-primary)] text-3xl leading-none">&times;</button>
         </div>
         
-        <div className="p-6 space-y-6 overflow-y-auto max-h-[70vh]">
+        <div className="p-5 space-y-5 overflow-y-auto max-h-[70vh]">
           {/* TTS Settings - Only visible in setup mode */}
           {isTtsSetup && (
             <div className="space-y-4 p-4 rounded-lg border border-[var(--theme-border)] bg-[var(--theme-bg-base)]/50">
@@ -104,36 +116,12 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
 
                 {showVoiceGuide && (
                     <div className="mb-4 p-3 bg-[var(--theme-bg-base)] rounded text-xs text-[var(--theme-text-secondary)] border border-[var(--theme-border)] space-y-3 animate-fade-in">
-                        <p className="font-semibold text-[var(--theme-text-primary)]">Hướng dẫn thêm giọng đọc Tiếng Việt cho máy:</p>
-                        
-                        <div>
-                            <strong className="text-[var(--theme-accent-secondary)] block mb-1">🖥️ Windows:</strong>
-                            <ul className="list-disc list-inside pl-1 space-y-1">
-                                <li>Vào <b>Settings</b> &gt; <b>Time & Language</b> &gt; <b>Language & Region</b>.</li>
-                                <li>Tại mục "Preferred languages", nhấn <b>Add a language</b>.</li>
-                                <li>Tìm <b>Vietnamese</b> và cài đặt (nhớ tích chọn <b>Text-to-speech</b>).</li>
-                                <li className="mt-1">
-                                    <a href="ms-settings:regionlanguage" className="inline-flex items-center gap-1 text-blue-400 hover:text-blue-300 hover:underline bg-blue-900/30 px-2 py-1 rounded border border-blue-800">
-                                        <span>Mở cài đặt Language ngay</span>
-                                        <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" /></svg>
-                                    </a>
-                                </li>
-                            </ul>
-                        </div>
-
-                        <div className="border-t border-[var(--theme-border)] pt-2">
-                            <strong className="text-[var(--theme-accent-secondary)] block mb-1">📱 Android:</strong>
-                            <p>Vào <b>Cài đặt (Settings)</b> &gt; <b>Quản lý chung</b> &gt; <b>Ngôn ngữ & Bàn phím</b> &gt; <b>Đầu ra văn bản sang giọng nói (Text-to-speech)</b> &gt; Cài đặt (biểu tượng bánh răng) &gt; <b>Cài đặt dữ liệu giọng nói</b> &gt; Chọn <b>Tiếng Việt</b>.</p>
-                        </div>
-
-                        <div className="border-t border-[var(--theme-border)] pt-2">
-                            <strong className="text-[var(--theme-accent-secondary)] block mb-1">🍎 iOS / macOS:</strong>
-                            <p>Vào <b>Cài đặt</b> &gt; <b>Trợ năng (Accessibility)</b> &gt; <b>Nội dung được đọc (Spoken Content)</b> &gt; <b>Giọng nói</b> &gt; <b>Tiếng Việt</b> &gt; Tải về giọng (ví dụ: Linh, Nam).</p>
-                        </div>
-                        
-                        <div className="p-2 bg-yellow-900/20 border border-yellow-800/50 rounded text-yellow-500 italic mt-2">
-                            ⚠️ Lưu ý: Sau khi cài đặt xong, hãy <strong>khởi động lại trình duyệt</strong> để web nhận diện được giọng mới.
-                        </div>
+                        <p className="font-semibold text-[var(--theme-text-primary)]">Hướng dẫn thêm giọng đọc Tiếng Việt:</p>
+                        <ul className="list-disc list-inside pl-1 space-y-1">
+                            <li><b>Windows:</b> Settings &gt; Time & Language &gt; Language & Region &gt; Add "Vietnamese".</li>
+                            <li><b>Android:</b> Settings &gt; General &gt; Text-to-speech &gt; Install Voice Data.</li>
+                            <li><b>iOS:</b> Settings &gt; Accessibility &gt; Spoken Content &gt; Voices.</li>
+                        </ul>
                     </div>
                 )}
 
@@ -150,7 +138,6 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
                         </option>
                     ))}
                 </select>
-                {availableSystemVoices.length === 0 && <p className="text-xs text-yellow-400 mt-2">Không tìm thấy giọng đọc nào trên trình duyệt của bạn.</p>}
                 </div>
                 <div>
                 <label htmlFor="playbackRate" className="block text-sm font-medium text-[var(--theme-text-secondary)] mb-2">
@@ -167,117 +154,122 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
                     className="w-full h-2 bg-[var(--theme-bg-base)] rounded-lg appearance-none cursor-pointer accent-[var(--theme-accent-primary)]"
                 />
                 </div>
-                <div>
-                <label htmlFor="volume" className="block text-sm font-medium text-[var(--theme-text-secondary)] mb-2">
-                    Âm lượng: <span className="font-bold text-[var(--theme-accent-primary)]">{Math.round(settings.ttsSettings.volume * 100)}%</span>
-                </label>
-                <input
-                    id="volume"
-                    type="range"
-                    min="0"
-                    max="1"
-                    step="0.1"
-                    value={settings.ttsSettings.volume}
-                    onChange={e => handleTtsSettingChange('volume', parseFloat(e.target.value))}
-                    className="w-full h-2 bg-[var(--theme-bg-base)] rounded-lg appearance-none cursor-pointer accent-[var(--theme-accent-primary)]"
-                />
-                </div>
             </div>
           )}
 
-          {/* Display Settings - ONLY show if NOT in tts-setup mode */}
+          {/* Display Settings - Compact Layout */}
           {!isTtsSetup && (
             <div className="space-y-4">
-                <h3 className="text-lg font-semibold text-[var(--theme-accent-primary)]">Cài đặt Giao diện</h3>
-                <div>
-                <label htmlFor="themeMode" className="block text-sm font-medium text-[var(--theme-text-secondary)] mb-2">
-                    Chế độ màu
-                </label>
-                <select
-                    id="themeMode"
-                    value={settings.themeMode}
-                    onChange={e => handleModeChange(e.target.value as ReadingSettings['themeMode'])}
-                    className="w-full bg-[var(--theme-bg-base)] border border-[var(--theme-border)] rounded-md p-2 text-[var(--theme-text-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--theme-accent-primary)]"
-                >
-                    <option value="dark">Chế độ Tối</option>
-                    <option value="light">Chế độ Sáng</option>
-                    <option value="midnight">Chế độ Ban đêm</option>
-                </select>
+                {/* Row 1: Theme Mode & Font Family (2 Columns) */}
+                <div className="grid grid-cols-2 gap-3">
+                    <div>
+                        <label htmlFor="themeMode" className="block text-xs font-medium text-[var(--theme-text-secondary)] mb-1">
+                            Giao diện
+                        </label>
+                        <select
+                            id="themeMode"
+                            value={settings.themeMode}
+                            onChange={e => handleModeChange(e.target.value as ReadingSettings['themeMode'])}
+                            className="w-full bg-[var(--theme-bg-base)] border border-[var(--theme-border)] rounded-md p-2 text-sm text-[var(--theme-text-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--theme-accent-primary)]"
+                        >
+                            <option value="dark">Tối</option>
+                            <option value="light">Sáng</option>
+                            <option value="midnight">Ban đêm</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label htmlFor="fontFamily" className="block text-xs font-medium text-[var(--theme-text-secondary)] mb-1">
+                            Font chữ
+                        </label>
+                        <select
+                            id="fontFamily"
+                            value={settings.fontFamily}
+                            onChange={e => handleSettingChange('fontFamily', e.target.value)}
+                            className="w-full bg-[var(--theme-bg-base)] border border-[var(--theme-border)] rounded-md p-2 text-sm text-[var(--theme-text-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--theme-accent-primary)]"
+                        >
+                            <option value="'Readex Pro', sans-serif">Readex Pro</option>
+                            <option value="'Merriweather', serif">Merriweather</option>
+                            <option value="'Lora', serif">Lora</option>
+                            <option value="Georgia, serif">Georgia</option>
+                            <option value="Verdana, sans-serif">Verdana</option>
+                        </select>
+                    </div>
                 </div>
 
+                {/* Font Size Slider */}
                 <div>
-                <label htmlFor="fontSize" className="block text-sm font-medium text-[var(--theme-text-secondary)] mb-2">
-                    Kích thước chữ: <span className="font-bold text-[var(--theme-accent-primary)]">{settings.fontSize}px</span>
-                </label>
-                <input
-                    id="fontSize"
-                    type="range"
-                    min="14"
-                    max="32"
-                    value={settings.fontSize}
-                    onChange={e => handleSettingChange('fontSize', parseInt(e.target.value, 10))}
-                    className="w-full h-2 bg-[var(--theme-bg-base)] rounded-lg appearance-none cursor-pointer accent-[var(--theme-accent-primary)]"
-                />
-                </div>
-                
-                <div>
-                <label htmlFor="fontFamily" className="block text-sm font-medium text-[var(--theme-text-secondary)] mb-2">
-                    Font chữ
-                </label>
-                <select
-                    id="fontFamily"
-                    value={settings.fontFamily}
-                    onChange={e => handleSettingChange('fontFamily', e.target.value)}
-                    className="w-full bg-[var(--theme-bg-base)] border border-[var(--theme-border)] rounded-md p-2 text-[var(--theme-text-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--theme-accent-primary)]"
-                >
-                    <option value="'Readex Pro', sans-serif">Readex Pro (Mặc định)</option>
-                    <option value="'Merriweather', serif">Merriweather (Có chân)</option>
-                    <option value="'Lora', serif">Lora (Thanh lịch)</option>
-                    <option value="Georgia, serif">Georgia</option>
-                    <option value="Verdana, sans-serif">Verdana</option>
-                </select>
+                    <label htmlFor="fontSize" className="block text-xs font-medium text-[var(--theme-text-secondary)] mb-1">
+                        Cỡ chữ: <span className="font-bold text-[var(--theme-accent-primary)]">{settings.fontSize}px</span>
+                    </label>
+                    <input
+                        id="fontSize"
+                        type="range"
+                        min="14"
+                        max="32"
+                        value={settings.fontSize}
+                        onChange={e => handleSettingChange('fontSize', parseInt(e.target.value, 10))}
+                        className="w-full h-2 bg-[var(--theme-bg-base)] rounded-lg appearance-none cursor-pointer accent-[var(--theme-accent-primary)]"
+                    />
                 </div>
 
-                <div className="grid grid-cols-2 gap-4 pt-2">
-                    <div className="flex flex-col items-center">
-                        <label htmlFor="bgColor" className="text-sm font-medium text-[var(--theme-text-secondary)] mb-2">Màu nền</label>
-                        <input
-                        id="bgColor"
-                        type="color"
-                        value={settings.backgroundColor}
-                        onChange={e => handleSettingChange('backgroundColor', e.target.value)}
-                        className="w-16 h-10 p-1 bg-transparent border border-[var(--theme-border)] rounded-md cursor-pointer"
-                        />
+                {/* Row 2: Color Pickers (4 Columns) */}
+                <div>
+                    <label className="block text-xs font-medium text-[var(--theme-text-secondary)] mb-2">Tùy chỉnh màu sắc</label>
+                    <div className="grid grid-cols-4 gap-2">
+                        <div className="flex flex-col items-center">
+                            <input type="color" value={settings.backgroundColor} onChange={e => handleSettingChange('backgroundColor', e.target.value)} className="w-full h-8 p-0 border-0 rounded cursor-pointer" title="Màu nền" />
+                            <span className="text-[10px] text-[var(--theme-text-secondary)] mt-1">Nền</span>
+                        </div>
+                        <div className="flex flex-col items-center">
+                            <input type="color" value={settings.textColor} onChange={e => handleSettingChange('textColor', e.target.value)} className="w-full h-8 p-0 border-0 rounded cursor-pointer" title="Màu chữ" />
+                            <span className="text-[10px] text-[var(--theme-text-secondary)] mt-1">Chữ</span>
+                        </div>
+                        <div className="flex flex-col items-center">
+                            <input type="color" value={settings.titleColor} onChange={e => handleSettingChange('titleColor', e.target.value)} className="w-full h-8 p-0 border-0 rounded cursor-pointer" title="Màu tiêu đề" />
+                            <span className="text-[10px] text-[var(--theme-text-secondary)] mt-1">Tiêu đề</span>
+                        </div>
+                        <div className="flex flex-col items-center">
+                            <input type="color" value={settings.highlightColor} onChange={e => handleSettingChange('highlightColor', e.target.value)} className="w-full h-8 p-0 border-0 rounded cursor-pointer" title="Màu nổi bật" />
+                            <span className="text-[10px] text-[var(--theme-text-secondary)] mt-1">Nổi bật</span>
+                        </div>
                     </div>
-                    <div className="flex flex-col items-center">
-                        <label htmlFor="textColor" className="text-sm font-medium text-[var(--theme-text-secondary)] mb-2">Màu chữ</label>
-                        <input
-                        id="textColor"
-                        type="color"
-                        value={settings.textColor}
-                        onChange={e => handleSettingChange('textColor', e.target.value)}
-                        className="w-16 h-10 p-1 bg-transparent border border-[var(--theme-border)] rounded-md cursor-pointer"
-                        />
-                    </div>
-                    <div className="flex flex-col items-center">
-                        <label htmlFor="titleColor" className="text-sm font-medium text-[var(--theme-text-secondary)] mb-2">Màu tiêu đề</label>
-                        <input
-                        id="titleColor"
-                        type="color"
-                        value={settings.titleColor}
-                        onChange={e => handleSettingChange('titleColor', e.target.value)}
-                        className="w-16 h-10 p-1 bg-transparent border border-[var(--theme-border)] rounded-md cursor-pointer"
-                        />
-                    </div>
-                    <div className="flex flex-col items-center">
-                        <label htmlFor="highlightColor" className="text-sm font-medium text-[var(--theme-text-secondary)] mb-2">Màu nổi bật</label>
-                        <input
-                        id="highlightColor"
-                        type="color"
-                        value={settings.highlightColor}
-                        onChange={e => handleSettingChange('highlightColor', e.target.value)}
-                        className="w-16 h-10 p-1 bg-transparent border border-[var(--theme-border)] rounded-md cursor-pointer"
-                        />
+                </div>
+
+                {/* Mobile Only: Tools Section */}
+                <div className="md:hidden pt-4 border-t border-[var(--theme-border)]">
+                    <label className="block text-xs font-medium text-[var(--theme-text-secondary)] mb-2">Công cụ tiện ích</label>
+                    <div className="grid grid-cols-3 gap-2">
+                        {onToggleTts && (
+                            <button 
+                                onClick={() => { onToggleTts(); onClose(); }}
+                                className={`flex flex-col items-center justify-center p-3 rounded-lg border transition-colors ${isTtsActive ? 'bg-[var(--theme-accent-primary)] text-white border-[var(--theme-accent-primary)]' : 'bg-[var(--theme-bg-base)] border-[var(--theme-border)] text-[var(--theme-text-primary)] hover:bg-[var(--theme-border)]'}`}
+                            >
+                                {isTtsActive ? <StopIcon className="w-5 h-5 mb-1" /> : <PlayIcon className="w-5 h-5 mb-1" />}
+                                <span className="text-[10px] font-semibold">{isTtsActive ? 'Dừng đọc' : 'Đọc truyện'}</span>
+                            </button>
+                        )}
+                        
+                        {onToggleAutoScroll && (
+                            <button 
+                                onClick={() => { onToggleAutoScroll('bottom'); onClose(); }}
+                                className={`flex flex-col items-center justify-center p-3 rounded-lg border transition-colors ${isAutoScrollActive ? 'bg-[var(--theme-accent-primary)] text-white border-[var(--theme-accent-primary)]' : 'bg-[var(--theme-bg-base)] border-[var(--theme-border)] text-[var(--theme-text-primary)] hover:bg-[var(--theme-border)]'}`}
+                            >
+                                <svg xmlns="http://www.w3.org/2000/svg" className="w-5 h-5 mb-1" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                    <path strokeLinecap="round" strokeLinejoin="round" d="M19 13l-7 7-7-7m14-8l-7 7-7-7" />
+                                </svg>
+                                <span className="text-[10px] font-semibold">{isAutoScrollActive ? 'Dừng cuộn' : 'Cuộn trang'}</span>
+                            </button>
+                        )}
+
+                        {onToggleChat && (
+                            <button 
+                                onClick={() => { onToggleChat(); onClose(); }}
+                                className="flex flex-col items-center justify-center p-3 rounded-lg bg-[var(--theme-bg-base)] border border-[var(--theme-border)] text-[var(--theme-text-primary)] hover:bg-[var(--theme-border)] transition-colors"
+                            >
+                                <ChatIcon className="w-5 h-5 mb-1" />
+                                <span className="text-[10px] font-semibold">Chat AI</span>
+                            </button>
+                        )}
                     </div>
                 </div>
             </div>
@@ -286,7 +278,7 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
           {!isTtsSetup && (
             <button
                 onClick={() => onSettingsChange(defaultSettings)}
-                className="w-full mt-4 bg-slate-600 hover:bg-slate-500 text-white font-bold py-2 px-4 rounded-lg transition-colors duration-300"
+                className="w-full mt-2 bg-slate-600 hover:bg-slate-500 text-white font-bold py-2 px-4 rounded-lg transition-colors duration-300 text-sm"
             >
                 Khôi phục mặc định
             </button>

@@ -1,6 +1,5 @@
-
 import React, { useEffect, useState, useRef } from 'react';
-import type { Story, CharacterStats } from '../types';
+import type { Story, CharacterStats, DownloadConfig } from '../types';
 import { CloseIcon, PlusIcon, TrashIcon, DownloadIcon, CheckIcon, SpinnerIcon, UploadIcon, SparklesIcon } from './icons';
 import { exportStoryData, importStoryData } from '../services/storyStateService';
 
@@ -8,15 +7,6 @@ interface Range {
     id: string;
     start: number | ''; 
     end: number | '';
-}
-
-export interface DownloadConfig {
-    story: Story;
-    target: 'download'; 
-    preset: 'all' | '50' | '100' | 'custom';
-    ranges: { start: number; end: number }[];
-    format: 'epub' | 'html';
-    mergeCustom: boolean;
 }
 
 interface DownloadModalProps {

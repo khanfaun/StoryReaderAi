@@ -1,14 +1,16 @@
+
 import React from 'react';
 import type { ReadingHistoryItem } from '../types';
-import { BookOpenIcon, TrashIcon } from './icons';
+import { BookOpenIcon, TrashIcon, CloseIcon } from './icons';
 
 interface ReadingHistoryProps {
   items: ReadingHistoryItem[];
   onContinue: (item: ReadingHistoryItem) => void;
   onRequestDeleteEbook: (item: ReadingHistoryItem) => void;
+  onRemoveItem: (item: ReadingHistoryItem) => void;
 }
 
-const ReadingHistory: React.FC<ReadingHistoryProps> = ({ items, onContinue, onRequestDeleteEbook }) => {
+const ReadingHistory: React.FC<ReadingHistoryProps> = ({ items, onContinue, onRequestDeleteEbook, onRemoveItem }) => {
   if (!items || items.length === 0) {
     return null;
   }
@@ -21,7 +23,7 @@ const ReadingHistory: React.FC<ReadingHistoryProps> = ({ items, onContinue, onRe
           <li key={item.url} className="relative group">
             <button
               onClick={() => onContinue(item)}
-              className="reading-history__item-button"
+              className="reading-history__item-button pr-12"
               aria-label={`Tiếp tục đọc ${item.title}`}
             >
                 <BookOpenIcon className="reading-history__item-icon" />
@@ -33,17 +35,31 @@ const ReadingHistory: React.FC<ReadingHistoryProps> = ({ items, onContinue, onRe
                     </p>
                 </div>
             </button>
+            
+            {/* Remove from History Button (X) */}
+            <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onRemoveItem(item);
+                }}
+                className="absolute top-2 right-2 p-1.5 rounded-full text-[var(--theme-text-secondary)] hover:bg-[var(--theme-bg-base)] hover:text-[var(--theme-text-primary)] opacity-0 group-hover:opacity-100 transition-opacity duration-200 z-10"
+                aria-label={`Bỏ theo dõi ${item.title}`}
+                title="Bỏ khỏi danh sách đọc tiếp"
+            >
+                <CloseIcon className="w-4 h-4" />
+            </button>
+
              {item.source === 'Ebook' && (
               <button
                 onClick={(e) => {
                   e.stopPropagation();
                   onRequestDeleteEbook(item);
                 }}
-                className="absolute top-1/2 -translate-y-1/2 right-4 w-10 h-10 rounded-full bg-red-800/50 hover:bg-red-700 text-red-300 hover:text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity duration-300"
+                className="absolute bottom-2 right-2 w-8 h-8 rounded-full bg-red-900/30 hover:bg-red-700 text-red-400 hover:text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity duration-300 z-10"
                 aria-label={`Xóa ebook ${item.title}`}
-                title="Xóa Ebook vĩnh viễn"
+                title="Xóa file Ebook vĩnh viễn"
               >
-                <TrashIcon className="w-5 h-5" />
+                <TrashIcon className="w-4 h-4" />
               </button>
             )}
           </li>

@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import type { ChatMessage } from '../types';
@@ -88,7 +89,7 @@ const ChatPanel: React.FC<ChatPanelProps> = ({ isOpen, onClose, messages, onSend
 
   return createPortal(
     <div
-      className={`fixed inset-0 z-40 transition-all duration-300 ${isOpen ? 'bg-black/60' : 'bg-transparent pointer-events-none'}`}
+      className={`fixed inset-0 z-[60] transition-all duration-300 ${isOpen ? 'bg-black/60' : 'bg-transparent pointer-events-none'}`}
       onClick={onClose}
     >
       <div

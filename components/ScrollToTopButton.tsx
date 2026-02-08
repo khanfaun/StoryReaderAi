@@ -1,11 +1,17 @@
+
 import React, { useState, useEffect } from 'react';
 
 interface ScrollToTopButtonProps {
   isReading?: boolean;
   isBottomNavVisible?: boolean;
+  isAudioPlayerActive?: boolean;
 }
 
-const ScrollToTopButton: React.FC<ScrollToTopButtonProps> = ({ isReading = false, isBottomNavVisible = false }) => {
+const ScrollToTopButton: React.FC<ScrollToTopButtonProps> = ({ 
+  isReading = false, 
+  isBottomNavVisible = false,
+  isAudioPlayerActive = false
+}) => {
   const [isVisible, setIsVisible] = useState(false);
 
   const toggleVisibility = () => {
@@ -30,15 +36,30 @@ const ScrollToTopButton: React.FC<ScrollToTopButtonProps> = ({ isReading = false
     };
   }, []);
 
-  const bottomPosition = isReading && isBottomNavVisible ? 'bottom-24' : 'bottom-6';
+  // Logic xác định vị trí nút dựa trên trạng thái giao diện
+  let positionClass = 'bottom-6'; // Mặc định khi ẩn thanh điều hướng
+
+  if (isReading) {
+      if (isAudioPlayerActive) {
+          // Khi mở Audio Player:
+          // Mobile: Player khá cao, cần đẩy lên nhiều (bottom-40)
+          // PC: Đẩy lên một chút để không đè footer (bottom-28)
+          positionClass = 'bottom-40 md:bottom-28';
+      } else if (isBottomNavVisible) {
+          // Khi mở thanh điều hướng thường:
+          // Mobile: bottom-24
+          // PC: bottom-20
+          positionClass = 'bottom-24 md:bottom-20';
+      }
+  }
 
   return (
     <button
       onClick={scrollToTop}
-      className={`fixed ${bottomPosition} right-6 w-14 h-14 rounded-full flex items-center justify-center
-                  shadow-lg z-40 transition-all duration-300
+      className={`fixed ${positionClass} right-6 w-14 h-14 rounded-full flex items-center justify-center
+                  shadow-lg z-50 transition-all duration-300
                   ${isVisible ? 'opacity-100 scale-100' : 'opacity-0 scale-0 pointer-events-none'}
-                  bg-[var(--theme-bg-base)]/50 backdrop-blur-sm ring-2 ring-[var(--theme-accent-primary)] text-[var(--theme-accent-primary)]
+                  bg-[var(--theme-bg-base)]/80 backdrop-blur-md ring-2 ring-[var(--theme-accent-primary)] text-[var(--theme-accent-primary)]
                   hover:bg-[var(--theme-accent-primary)] hover:text-white`}
       aria-label="Cuộn lên đầu trang"
     >

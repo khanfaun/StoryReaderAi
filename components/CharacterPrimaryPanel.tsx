@@ -1,30 +1,26 @@
 
-import React, { useState, useRef } from 'react';
-import type { CharacterStats, Story } from '../types';
+import React, { useState } from 'react';
+import type { CharacterStats } from '../types';
 import LoadingSpinner from './LoadingSpinner';
 import InfoItemDisplay from './InfoItemDisplay';
 import EntityEditModal, { EntityType } from './EntityEditModal';
 import ConfirmationModal from './ConfirmationModal';
-import { PlusIcon, EditIcon, DownloadIcon, UploadIcon } from './icons';
-import { getStoryState, saveStoryState, exportStoryData, importStoryData } from '../services/storyStateService';
+import { PlusIcon, EditIcon } from './icons';
 
 interface CharacterPrimaryPanelProps {
   stats: CharacterStats | null;
-  story?: Story | null; // Added story prop
   isAnalyzing: boolean;
   onStatsChange: (newStats: CharacterStats) => void;
-  onDataLoaded: () => void;
   onReanalyze: () => void;
   onStopAnalysis: () => void;
 }
 
-type Tab = 'status' | 'realmSystem' | 'inventory' | 'skills' | 'equipment' | 'data';
+type Tab = 'status' | 'realmSystem' | 'inventory' | 'skills' | 'equipment';
 
-const CharacterPrimaryPanel: React.FC<CharacterPrimaryPanelProps> = ({ stats, story, isAnalyzing, onStatsChange, onDataLoaded, onReanalyze, onStopAnalysis }) => {
+const CharacterPrimaryPanel: React.FC<CharacterPrimaryPanelProps> = ({ stats, isAnalyzing, onStatsChange, onReanalyze, onStopAnalysis }) => {
   const [activeTab, setActiveTab] = useState<Tab>('status');
   const [modalState, setModalState] = useState<{ isOpen: boolean; type: EntityType | null; data: any | null }>({ isOpen: false, type: null, data: null });
   const [deleteConfirmation, setDeleteConfirmation] = useState<{ type: EntityType; entity: any; } | null>(null);
-  const loadInputRef = useRef<HTMLInputElement>(null);
 
   const handleOpenModal = (type: EntityType, data: any | null = null) => {
     setModalState({ isOpen: true, type, data });
@@ -95,19 +91,6 @@ const CharacterPrimaryPanel: React.FC<CharacterPrimaryPanelProps> = ({ stats, st
       onStatsChange(newStats);
       setDeleteConfirmation(null);
   };
-  
-  const handleSaveData = async () => {
-    if (!story) return;
-    await exportStoryData(story);
-  };
-
-  const handleLoadData = async (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (!file || !story) return;
-    await importStoryData(file, story, onDataLoaded);
-    if (event.target) event.target.value = '';
-  };
-
 
   const renderContent = () => {
      const hasAnyData = stats && (
@@ -115,7 +98,7 @@ const CharacterPrimaryPanel: React.FC<CharacterPrimaryPanelProps> = ({ stats, st
         stats.balo?.length || stats.congPhap?.length || stats.trangBi?.length
     );
       
-    if (!hasAnyData && activeTab !== 'data') {
+    if (!hasAnyData) {
         if (isAnalyzing) {
              return (
                 <div className="flex flex-col items-center justify-center h-48">
@@ -167,7 +150,7 @@ const CharacterPrimaryPanel: React.FC<CharacterPrimaryPanelProps> = ({ stats, st
 
     switch(activeTab) {
       case 'status':
-        const status = stats.trangThai;
+        const status = stats?.trangThai;
         return (
           <div>
             <div className="flex justify-between items-center mb-4">
@@ -185,60 +168,20 @@ const CharacterPrimaryPanel: React.FC<CharacterPrimaryPanelProps> = ({ stats, st
                 {status && <p className="text-lg"><strong>Tên:</strong> {status.ten || 'N/A'}</p>}
                  <p className="text-lg">
                     <strong>Cảnh giới:</strong> 
-                    <span className="text-2xl ml-2 text-[var(--theme-accent-secondary)] font-semibold">{stats.canhGioi || 'Chưa rõ'}</span>
+                    <span className="text-2xl ml-2 text-[var(--theme-accent-secondary)] font-semibold">{stats?.canhGioi || 'Chưa rõ'}</span>
                 </p>
                 {renderInfoList('Tư chất / Đặc tính', status?.tuChat, 'tuChat')}
               </div>
           </div>
         );
       case 'realmSystem':
-        return renderInfoList('Hệ Thống Cấp Độ', stats.heThongCanhGioi, 'heThongCanhGioi');
+        return renderInfoList('Hệ Thống Cấp Độ', stats?.heThongCanhGioi, 'heThongCanhGioi');
       case 'inventory':
-        return renderInfoList('Balo', stats.balo, 'balo');
+        return renderInfoList('Balo', stats?.balo, 'balo');
       case 'skills':
-        return renderInfoList('Công Pháp / Kỹ Năng', stats.congPhap, 'congPhap');
+        return renderInfoList('Công Pháp / Kỹ Năng', stats?.congPhap, 'congPhap');
       case 'equipment':
-        return renderInfoList('Trang Bị', stats.trangBi, 'trangBi');
-      case 'data':
-        return (
-            <div>
-                <h3 className="text-xl font-bold text-[var(--theme-accent-primary)] mb-4">Quản lý Dữ liệu AI</h3>
-                <div className="space-y-6">
-                    <div className="p-4 border border-[var(--theme-border)] rounded-lg bg-[var(--theme-bg-base)]">
-                        <h4 className="text-sm font-bold text-[var(--theme-text-primary)] mb-2">1. Xuất Dữ Liệu (Truyện Này)</h4>
-                        <p className="text-xs text-[var(--theme-text-secondary)] mb-3">Lưu trữ file .json chứa toàn bộ thông tin AI của truyện này.</p>
-                        <button 
-                            onClick={handleSaveData}
-                            className="flex items-center gap-2 px-4 py-2 bg-slate-700 hover:bg-slate-600 text-white rounded-md text-sm font-semibold transition-colors w-full justify-center"
-                        >
-                            <DownloadIcon className="w-4 h-4" />
-                            Tải file JSON
-                        </button>
-                    </div>
-
-                    <div className="p-4 border border-[var(--theme-border)] rounded-lg bg-[var(--theme-bg-base)]">
-                        <h4 className="text-sm font-bold text-[var(--theme-text-primary)] mb-2">2. Nhập Dữ Liệu (Truyện Này)</h4>
-                        <p className="text-xs text-[var(--theme-text-secondary)] mb-3">Khôi phục dữ liệu phân tích từ file .json đã lưu.</p>
-                        <div className="flex gap-2">
-                            <button 
-                                onClick={() => loadInputRef.current?.click()}
-                                className="flex items-center gap-2 px-4 py-2 bg-[var(--theme-accent-primary)] hover:brightness-110 text-white rounded-md text-sm font-semibold transition-colors w-full justify-center"
-                            >
-                                <UploadIcon className="w-4 h-4" />
-                                Chọn file và Nhập
-                            </button>
-                            <input 
-                                type="file" 
-                                ref={loadInputRef} 
-                                onChange={handleLoadData} 
-                                accept=".json" 
-                                className="hidden" 
-                            />
-                        </div>
-                    </div>
-                </div>
-            </div>
-        );
+        return renderInfoList('Trang Bị', stats?.trangBi, 'trangBi');
       default:
         return null;
     }
@@ -295,7 +238,6 @@ const CharacterPrimaryPanel: React.FC<CharacterPrimaryPanelProps> = ({ stats, st
           <TabButton tab="inventory" label="Balo" />
           <TabButton tab="skills" label="Công Pháp" />
           <TabButton tab="equipment" label="Trang Bị" />
-          <TabButton tab="data" label="Dữ liệu" />
         </div>
         
         <div className="p-6 min-h-[200px]">

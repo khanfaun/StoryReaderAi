@@ -1,4 +1,3 @@
-
 export interface Chapter {
   title: string;
   url: string;
@@ -129,4 +128,13 @@ export interface GoogleUser {
 export interface ApiKeyInfo {
   id: string; // Unique identifier, e.g., Date.now().toString()
   key: string; // The actual API key value
+}
+
+export interface DownloadConfig {
+    story: Story;
+    target: 'download'; 
+    preset: 'all' | '50' | '100' | 'custom';
+    ranges: { start: number; end: number }[];
+    format: 'epub' | 'html';
+    mergeCustom: boolean;
 }

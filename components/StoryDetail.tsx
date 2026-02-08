@@ -1,11 +1,12 @@
 
 import React, { useState } from 'react';
-import type { Story, Chapter } from '../types';
+import type { Story, Chapter, DownloadConfig } from '../types';
 import { EditIcon, TrashIcon, PlusIcon, CheckIcon, CloseIcon, SpinnerIcon, DownloadIcon, InfoIcon, PauseIcon, PlayIcon, StopIcon } from './icons';
 import ConfirmationModal from './ConfirmationModal';
 import StoryEditModal from './StoryEditModal';
 import ChapterEditModal from './ChapterEditModal';
-import DownloadModal, { DownloadConfig } from './DownloadModal';
+import DownloadModal from './DownloadModal';
+import SearchBar from './SearchBar';
 
 interface StoryDetailProps {
   story: Story;
@@ -29,8 +30,18 @@ interface StoryDetailProps {
   onStopDownload?: () => void;
   onStartBackgroundDownload?: () => void;
   
+  // Queue Props
+  isQueued?: boolean;
+  queuePosition?: number;
+  
   // Cached chapters list for checkmark
   cachedChapters?: Set<string>;
+
+  // Search & Create Props (Passed from App)
+  onSearch: (query: string) => void;
+  isSearchLoading: boolean;
+  onOpenHelpModal: () => void;
+  onCreateStory: () => void;
 }
 
 const StoryDetail: React.FC<StoryDetailProps> = ({ 
@@ -52,7 +63,13 @@ const StoryDetail: React.FC<StoryDetailProps> = ({
     onResumeDownload,
     onStopDownload,
     onStartBackgroundDownload,
-    cachedChapters
+    isQueued = false,
+    queuePosition = 0,
+    cachedChapters,
+    onSearch,
+    isSearchLoading,
+    onOpenHelpModal,
+    onCreateStory
 }) => {
   // Pagination state
   const [currentPage, setCurrentPage] = useState(1);
@@ -199,6 +216,16 @@ const StoryDetail: React.FC<StoryDetailProps> = ({
   return (
     <div className="bg-[var(--theme-bg-surface)] rounded-lg shadow-xl p-4 sm:p-6 animate-fade-in border border-[var(--theme-border)]">
       
+      {/* SEARCH BAR & CREATE BUTTON (New Section) */}
+      <div className="mb-8 flex flex-col sm:flex-row gap-4 items-stretch sm:items-center border-b border-[var(--theme-border)] pb-6">
+          <div className="flex-grow">
+              <SearchBar onSearch={onSearch} isLoading={isSearchLoading} onOpenHelpModal={onOpenHelpModal} />
+          </div>
+          <button onClick={onCreateStory} className="flex-shrink-0 flex items-center justify-center gap-2 bg-green-600 hover:bg-green-500 text-white font-semibold py-2 px-4 rounded-lg transition-colors h-auto text-sm">
+              <PlusIcon className="w-5 h-5" /> <span className="whitespace-nowrap">Tạo truyện mới</span>
+          </button>
+      </div>
+
       {/* PERSISTENT INFO ALERT */}
       {showInfoAlert && (story.source !== 'Local' && story.source !== 'Ebook') && (
           <div className="mb-6 bg-indigo-900/20 border border-indigo-500/30 rounded-lg p-4 flex items-start gap-3 relative animate-fade-in shadow-inner">
@@ -350,6 +377,25 @@ const StoryDetail: React.FC<StoryDetailProps> = ({
               </div>
           )}
 
+          {/* QUEUED STATUS INDICATOR */}
+          {isQueued && !downloadProgress && (
+              <div className="mb-6 p-4 bg-amber-900/30 border border-amber-600/50 rounded-lg flex items-center gap-3 animate-fade-in">
+                  <SpinnerIcon className="w-5 h-5 text-amber-400 animate-spin" />
+                  <div>
+                      <h3 className="font-bold text-amber-200 text-sm">Đang chờ trong hàng đợi tải...</h3>
+                      <p className="text-xs text-amber-100/80">
+                          Vị trí: <strong>#{queuePosition}</strong>. Quá trình tải sẽ tự động bắt đầu khi các truyện trước hoàn tất.
+                      </p>
+                  </div>
+                  <button 
+                      onClick={onStopDownload}
+                      className="ml-auto text-xs px-3 py-1 bg-amber-800 hover:bg-amber-700 text-white rounded border border-amber-600/50 transition-colors"
+                  >
+                      Hủy tải
+                  </button>
+              </div>
+          )}
+
           {/* BACKGROUND DOWNLOAD PROGRESS (CONTENT) */}
           {downloadProgress ? (
               <div className={`mb-6 p-4 rounded-lg shadow-lg animate-fade-in border ${isPaused ? 'bg-amber-900/20 border-amber-500/30' : 'bg-emerald-900/20 border-emerald-500/30'}`}>
@@ -395,8 +441,8 @@ const StoryDetail: React.FC<StoryDetailProps> = ({
                   </p>
               </div>
           ) : (
-              // SHOW START BUTTON IF NOT FULLY DOWNLOADED
-              (story.chapters && story.chapters.length > 0 && downloadPercentage < 100 && story.source !== 'Local' && story.source !== 'Ebook' && !isBackgroundLoading) && (
+              // SHOW START BUTTON IF NOT FULLY DOWNLOADED AND NOT QUEUED
+              (story.chapters && story.chapters.length > 0 && downloadPercentage < 100 && story.source !== 'Local' && story.source !== 'Ebook' && !isBackgroundLoading && !isQueued) && (
                   <div className="mb-6 flex justify-center">
                       <button 
                         onClick={onStartBackgroundDownload}
