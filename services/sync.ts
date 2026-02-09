@@ -13,6 +13,10 @@ const SCOPES = 'https://www.googleapis.com/auth/drive.appdata';
 // Tên file danh mục chính
 const INDEX_FILENAME = 'library_index.json';
 
+// Keys cho localStorage
+const STORAGE_KEY_TOKEN = 'gdrive_access_token';
+const STORAGE_KEY_EXPIRY = 'gdrive_token_expiry';
+
 let tokenClient: any;
 let gapiInited = false;
 let gisInited = false;
@@ -49,6 +53,12 @@ export async function initGoogleDrive(): Promise<void> {
                             throw (resp);
                         }
                         accessToken = resp.access_token;
+                        
+                        // Lưu token và thời gian hết hạn vào localStorage
+                        const expiresIn = resp.expires_in; // giây
+                        const expirationTime = Date.now() + (expiresIn * 1000);
+                        localStorage.setItem(STORAGE_KEY_TOKEN, accessToken!);
+                        localStorage.setItem(STORAGE_KEY_EXPIRY, expirationTime.toString());
                     },
                 });
                 gisInited = true;
@@ -60,6 +70,8 @@ export async function initGoogleDrive(): Promise<void> {
 
         const maybeResolve = () => {
             if (gapiInited && gisInited) {
+                // Thử khôi phục token từ localStorage nếu có và chưa hết hạn
+                tryRestoreSession();
                 resolve();
             }
         };
@@ -69,24 +81,61 @@ export async function initGoogleDrive(): Promise<void> {
     });
 }
 
+function tryRestoreSession() {
+    const storedToken = localStorage.getItem(STORAGE_KEY_TOKEN);
+    const storedExpiry = localStorage.getItem(STORAGE_KEY_EXPIRY);
+
+    if (storedToken && storedExpiry) {
+        const expiryTime = parseInt(storedExpiry, 10);
+        // Kiểm tra xem token còn hạn không (trừ đi 1 phút buffer cho chắc chắn)
+        if (Date.now() < expiryTime - 60000) {
+            accessToken = storedToken;
+            // Cập nhật cho gapi client nếu cần (dù logic fetch thủ công bên dưới dùng header trực tiếp)
+            if (gapi.client) {
+                gapi.client.setToken({ access_token: accessToken });
+            }
+            console.log("Restored Google Drive session.");
+        } else {
+            // Token hết hạn, xóa đi
+            signOut();
+        }
+    }
+}
+
 export async function signInToDrive(): Promise<boolean> {
     return new Promise((resolve, reject) => {
         try {
             if (!tokenClient) throw new Error("Google Drive Service chưa được khởi tạo.");
             
+            // Override callback để resolve promise
+            const originalCallback = tokenClient.callback;
             tokenClient.callback = (resp: any) => {
+                if (originalCallback) originalCallback(resp); // Gọi logic lưu storage đã define ở init
+                
                 if (resp.error !== undefined) {
                     reject(resp);
+                } else {
+                    resolve(true);
                 }
-                accessToken = resp.access_token;
-                resolve(true);
             };
             
-            tokenClient.requestAccessToken({ prompt: 'consent' });
+            // Nếu token còn hạn thì skip prompt, nếu không thì hiện prompt
+            if (accessToken) {
+                tokenClient.requestAccessToken({ prompt: '' });
+            } else {
+                tokenClient.requestAccessToken({ prompt: 'consent' });
+            }
         } catch(e) {
             reject(e);
         }
     });
+}
+
+export function signOut() {
+    accessToken = null;
+    localStorage.removeItem(STORAGE_KEY_TOKEN);
+    localStorage.removeItem(STORAGE_KEY_EXPIRY);
+    if (gapi.client) gapi.client.setToken(null);
 }
 
 export function isAuthenticated(): boolean {
@@ -125,6 +174,8 @@ async function findFileId(filename: string): Promise<string | null> {
         return null;
     } catch (e) {
         console.error(`Error finding file ${filename}:`, e);
+        // Nếu lỗi 401 (Unauthorized), có thể token hết hạn -> Sign out
+        if ((e as any)?.status === 401) signOut();
         return null;
     }
 }
@@ -161,6 +212,7 @@ async function uploadFile(filename: string, content: any): Promise<void> {
     });
 
     if (!response.ok) {
+        if (response.status === 401) signOut();
         throw new Error(`Upload failed: ${response.statusText}`);
     }
 }
@@ -177,7 +229,10 @@ async function downloadFile<T>(filename: string): Promise<T | null> {
             headers: { 'Authorization': 'Bearer ' + accessToken }
         });
         
-        if (!response.ok) return null;
+        if (!response.ok) {
+            if (response.status === 401) signOut();
+            return null;
+        }
         return await response.json();
     } catch (e) {
         console.error(`Download error for ${filename}:`, e);
