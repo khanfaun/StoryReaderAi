@@ -14,6 +14,11 @@ export interface Story {
   isSearchLink?: boolean; // Cờ để xác định đây là link tìm kiếm, không phải truyện
   createdAt?: number; // Timestamp khi truyện được thêm vào thư viện
   tags?: string[]; // Danh sách thể loại/nhãn (Ví dụ: Tiên Hiệp, Kiếm Hiệp)
+  
+  // Google Drive Sync Fields
+  driveFolderId?: string; // ID của folder truyện trên Drive
+  lastSyncedAt?: number; // Thời gian sync lần cuối
+  isCloudOnly?: boolean; // Cờ đánh dấu truyện chỉ có trên Cloud (chưa tải chi tiết về Local)
 }
 
 export type PartialStory = Omit<Story, 'chapters'>;

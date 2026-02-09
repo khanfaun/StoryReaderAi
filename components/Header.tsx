@@ -1,15 +1,16 @@
 
 import React from 'react';
-import { KeyIcon, BellIcon } from './icons';
+import { KeyIcon, BellIcon, CloudIcon } from './icons';
 
 interface HeaderProps {
   onOpenApiKeySettings: () => void;
   onOpenUpdateModal: () => void;
+  onOpenSyncModal: () => void;
   onGoHome: () => void;
   storyTitle?: string;
 }
 
-const Header: React.FC<HeaderProps> = ({ onOpenApiKeySettings, onOpenUpdateModal, onGoHome, storyTitle }) => {
+const Header: React.FC<HeaderProps> = ({ onOpenApiKeySettings, onOpenUpdateModal, onOpenSyncModal, onGoHome, storyTitle }) => {
   return (
     <header className="bg-[var(--theme-bg-surface)] shadow-lg border-b border-[var(--theme-border)] relative z-50">
       <div className="container mx-auto px-4 py-4 flex justify-between items-center relative">
@@ -32,9 +33,18 @@ const Header: React.FC<HeaderProps> = ({ onOpenApiKeySettings, onOpenUpdateModal
 
         <div className="flex items-center gap-2 flex-shrink-0 z-10">
           <button
+            onClick={onOpenSyncModal}
+            className="p-2 rounded-full text-[var(--theme-text-secondary)] hover:bg-[var(--theme-border)] hover:text-[var(--theme-text-primary)] transition-colors duration-200"
+            aria-label="Đồng bộ Google Drive"
+            title="Đồng bộ Drive"
+          >
+            <CloudIcon className="w-6 h-6" />
+          </button>
+          <button
             onClick={onOpenUpdateModal}
             className="p-2 rounded-full text-[var(--theme-text-secondary)] hover:bg-[var(--theme-border)] hover:text-[var(--theme-text-primary)] transition-colors duration-200"
             aria-label="Xem thông báo cập nhật"
+            title="Thông báo cập nhật"
           >
             <BellIcon className="w-6 h-6" />
           </button>
@@ -42,6 +52,7 @@ const Header: React.FC<HeaderProps> = ({ onOpenApiKeySettings, onOpenUpdateModal
             onClick={onOpenApiKeySettings}
             className="p-2 rounded-full text-[var(--theme-text-secondary)] hover:bg-[var(--theme-border)] hover:text-[var(--theme-text-primary)] transition-colors duration-200"
             aria-label="Quản lý API Key"
+            title="Cài đặt API Key"
           >
             <KeyIcon className="w-6 h-6" />
           </button>

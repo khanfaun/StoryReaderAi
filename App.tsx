@@ -1,6 +1,5 @@
-
 import React, { useState, useCallback, useEffect, useRef, useMemo } from 'react';
-import type { Story, Chapter, ReadingHistoryItem, ApiKeyInfo, DownloadConfig } from './types';
+import type { Story, Chapter, ReadingHistoryItem, ApiKeyInfo, DownloadConfig, GoogleUser } from './types';
 import { searchStory, getStoryDetails, getStoryFromUrl, parseHtml, parseStoryDetailsFromDoc } from './services/truyenfullService';
 import { validateApiKey } from './services/geminiService';
 import { getCachedChapter, setCachedChapter } from './services/cacheService';
@@ -8,6 +7,7 @@ import { useReadingSettings } from './hooks/useReadingSettings';
 import { getReadingHistory, saveReadingHistory, updateReadingHistory } from './services/history';
 import * as dbService from './services/dbService';
 import * as apiKeyService from './services/apiKeyService';
+import * as driveService from './services/googleDriveService'; // IMPORT DRIVE SERVICE
 import { parseEbookFile } from './services/ebookParser';
 import { useBackgroundDownload } from './hooks/useBackgroundDownload';
 import { useDownloader } from './hooks/useDownloader';
@@ -26,6 +26,7 @@ import StoryEditModal from './components/StoryEditModal';
 import DownloadModal from './components/DownloadModal';
 import ConfirmationModal from './components/ConfirmationModal';
 import GlobalDownloadManager from './components/GlobalDownloadManager';
+import SyncModal from './components/SyncModal'; // Import SyncModal
 import { PlusIcon, StopIcon, SpinnerIcon, CheckIcon, CloseIcon, UploadIcon, DownloadIcon } from './components/icons';
 
 // New Component for active story logic
@@ -80,7 +81,7 @@ const App: React.FC = () => {
       handleStartBackgroundDownload, 
       handlePauseBackgroundDownload, 
       handleResumeBackgroundDownload, 
-      handleStopBackgroundDownload,
+      handleStopBackgroundDownload, 
       handlePrioritize,
       handleRemoveFromQueue,
       runBackgroundContentFetcher 
@@ -107,6 +108,9 @@ const App: React.FC = () => {
   
   const [isCreateStoryModalOpen, setIsCreateStoryModalOpen] = useState(false);
   const [isDownloadModalOpen, setIsDownloadModalOpen] = useState(false);
+  const [isSyncModalOpen, setIsSyncModalOpen] = useState(false); // Sync Modal State - Starts FALSE
+  const [user, setUser] = useState<GoogleUser | null>(null); 
+
   const [pendingStory, setPendingStory] = useState<Story | null>(null); 
 
   const loadingAbortRef = useRef(false); 
@@ -140,9 +144,6 @@ const App: React.FC = () => {
   };
   
   const handleImportDataSuccess = () => {
-      // Triggered after import via DownloadModal, just force reload to be safe
-      // In StoryViewer, onDataChange handles local refresh. 
-      // For App level, we might want to refresh history/local stories.
       reloadDataFromStorage();
   };
 
@@ -152,6 +153,16 @@ const App: React.FC = () => {
     const localHistory = getReadingHistory();
     const dbStories = await dbService.getAllStories();
     setLocalStories(dbStories);
+    
+    // Auto-sync attempt (silent) - THIS DOES NOT OPEN MODAL
+    try {
+        if (driveService.isSignedIn()) {
+            const { stories: mergedStories } = await driveService.syncManifest(dbStories);
+            setLocalStories(mergedStories);
+        }
+    } catch (e) {
+        console.warn("Auto-sync failed or skipped:", e);
+    }
     
     const historyMap = new Map(localHistory.map(item => [item.url, item]));
     
@@ -192,6 +203,8 @@ const App: React.FC = () => {
   useEffect(() => {
     const loadInitialData = async () => {
       setIsLoading(true);
+      setIsSyncModalOpen(false); // Force close sync modal on startup
+      await driveService.initDriveApi(); // Initialize Drive API
       await reloadDataFromStorage();
       
       const hasSeenUpdate = localStorage.getItem(UPDATE_MODAL_VERSION);
@@ -234,14 +247,24 @@ const App: React.FC = () => {
 
           let fullStory = selectedStory;
           
-          const needsFetching = (!selectedStory.chapters || selectedStory.chapters.length === 0 || forceFetch) 
-                                && selectedStory.source !== 'Local' && selectedStory.source !== 'Ebook';
+          // LAZY LOAD LOGIC
+          if (selectedStory.isCloudOnly || (!selectedStory.chapters && selectedStory.driveFolderId)) {
+              console.log("Lazy loading from Drive...");
+              const driveStory = await driveService.fetchStoryMetadata(selectedStory);
+              if (driveStory) {
+                  fullStory = driveStory;
+                  await dbService.saveStory(fullStory); // Cache locally
+              }
+          }
+
+          const needsFetching = (!fullStory.chapters || fullStory.chapters.length === 0 || forceFetch) 
+                                && fullStory.source !== 'Local' && fullStory.source !== 'Ebook';
           
           if (needsFetching) {
               if (loadingAbortRef.current) throw new Error("Đã hủy quá trình tải.");
-              setBackgroundLoadingStories(prev => new Set(prev).add(selectedStory.url));
+              setBackgroundLoadingStories(prev => new Set(prev).add(fullStory.url));
               
-              fullStory = await getStoryDetails(selectedStory, 
+              fullStory = await getStoryDetails(fullStory, 
                   async (updatedStory) => {
                       if (loadingAbortRef.current) return;
                       setStory(prev => {
@@ -251,6 +274,13 @@ const App: React.FC = () => {
                           return prev;
                       });
                       await dbService.saveStory(updatedStory);
+                      // Update manifest in background if connected
+                      if (driveService.isSignedIn()) {
+                          driveService.saveStoryMetadata(updatedStory).then(id => {
+                              updatedStory.driveFolderId = id;
+                              driveService.syncManifest([updatedStory]);
+                          });
+                      }
                       setLocalStories(prev => {
                           if (prev.some(s => s.url === updatedStory.url)) {
                               return prev.map(s => s.url === updatedStory.url ? updatedStory : s);
@@ -261,7 +291,7 @@ const App: React.FC = () => {
                   () => {
                       setBackgroundLoadingStories(prev => {
                           const next = new Set(prev);
-                          next.delete(selectedStory.url);
+                          next.delete(fullStory.url);
                           return next;
                       });
                   }
@@ -303,71 +333,27 @@ const App: React.FC = () => {
   };
 
   const handleSelectStory = useCallback(async (selectedStory: Story) => {
+      // Logic ưu tiên: Local DB -> Drive (Lazy) -> Web Fetch
       if (selectedStory.source === 'Ebook' || selectedStory.source === 'Local') {
           handleSelectStoryInternal(selectedStory);
           return;
       }
 
+      // Check DB first
       const existingStory = await dbService.getStory(selectedStory.url);
-      if (existingStory && existingStory.chapters && existingStory.chapters.length > 0) {
+      
+      // If found in DB and has content, use it. 
+      if (existingStory) {
            handleSelectStoryInternal(existingStory);
-           if (existingStory.chapters.length > 10) {
+           // Background pre-fetch next chapters if needed
+           if (existingStory.chapters && existingStory.chapters.length > 10 && !existingStory.isCloudOnly) {
                runBackgroundContentFetcher(existingStory, 10);
            }
            return;
       }
 
-      setIsDataLoading(true); 
-      loadingAbortRef.current = false;
-      try {
-          if (loadingAbortRef.current) return;
-          let fullStory = await getStoryDetails(selectedStory, undefined, () => {});
-          
-          if (loadingAbortRef.current) return;
+      handleSelectStoryInternal(selectedStory);
 
-          await dbService.saveStory(fullStory);
-          setLocalStories(prev => [fullStory, ...prev.filter(s => s.url !== fullStory.url)]);
-          
-          if (fullStory.chapters && fullStory.chapters.length > 0) {
-              const preloadCount = Math.min(fullStory.chapters.length, 10);
-              const toLoad = fullStory.chapters.slice(0, preloadCount);
-              
-              await Promise.all(toLoad.map(async (c) => {
-                   if (loadingAbortRef.current) return;
-                   try {
-                      // Check cache first to be safe
-                      // getCachedChapter logic handles DB read
-                      const cached = await dbService.getChapterData(fullStory.url, c.url);
-                      if (!cached) {
-                          // Note: getChapterContent needs to be imported or available. 
-                          // It is imported from truyenfullService
-                          const { getChapterContent } = await import('./services/truyenfullService');
-                          const content = await getChapterContent(c, fullStory.source);
-                          await setCachedChapter(fullStory.url, c.url, { content, stats: null });
-                      }
-                   } catch(e) { 
-                       console.warn(`Failed to preload chapter ${c.title}`, e);
-                   }
-              }));
-              
-              if (loadingAbortRef.current) return;
-
-              handleSelectStoryInternal(fullStory); 
-              
-              if (fullStory.chapters.length > 10) {
-                  runBackgroundContentFetcher(fullStory, 10);
-              }
-          } else {
-              handleSelectStoryInternal(fullStory);
-          }
-
-      } catch (e) {
-          if (!loadingAbortRef.current) {
-            setError(`Lỗi khởi tạo truyện: ${(e as Error).message}`);
-          }
-      } finally {
-          setIsDataLoading(false);
-      }
   }, [runBackgroundContentFetcher]);
 
   const handleCancelLoading = () => {
@@ -466,6 +452,12 @@ const App: React.FC = () => {
   const handleUpdateStory = async (updatedStory: Story) => {
       try {
           await dbService.saveStory(updatedStory);
+          
+          // Sync update to Drive
+          if (driveService.isSignedIn()) {
+              await driveService.saveStoryMetadata(updatedStory);
+          }
+
           setStory(updatedStory);
           setLocalStories(prev => prev.map(s => s.url === updatedStory.url ? updatedStory : s));
           
@@ -537,7 +529,11 @@ const App: React.FC = () => {
              if (storedStory) storyToLoad = storedStory; else throw new Error("Thông tin truyện không tìm thấy.");
         } else {
              const storedStory = await dbService.getStory(item.url);
-             if (storedStory) storyToLoad = storedStory; else { if (item.source === 'Local') throw new Error("Truyện này đã bị xóa."); storyToLoad = await getStoryFromUrl(item.url); }
+             if (storedStory) storyToLoad = storedStory; 
+             else { 
+                 if (item.source === 'Local') throw new Error("Truyện này đã bị xóa."); 
+                 storyToLoad = await getStoryFromUrl(item.url); 
+             }
         }
         if (storyToLoad) {
             setStory(storyToLoad);
@@ -546,6 +542,20 @@ const App: React.FC = () => {
         }
     } catch (e) { setError(`Không thể khôi phục truyện: ${(e as Error).message}`); } finally { setIsDataLoading(false); }
   }, []);
+
+  const handleSyncDrive = async () => {
+      try {
+          const { stories } = await driveService.syncManifest(localStories);
+          setLocalStories(stories);
+          if (driveService.isSignedIn()) {
+              setUser({ name: 'Google User', email: 'Connected', imageUrl: '' }); // Simplified user
+          }
+          return true;
+      } catch (e) {
+          console.error("Sync failed:", e);
+          return false;
+      }
+  };
 
   const filteredLibraryStories = useMemo(() => {
       let filtered = [...localStories];
@@ -586,6 +596,7 @@ const App: React.FC = () => {
               <Header 
                 onOpenApiKeySettings={() => setIsApiKeyModalOpen(true)} 
                 onOpenUpdateModal={() => setIsUpdateModalOpen(true)} 
+                onOpenSyncModal={() => setIsSyncModalOpen(true)}
                 onGoHome={handleBackToMain} 
                 storyTitle={isReadingMode ? story.title : undefined}
               />
@@ -648,12 +659,14 @@ const App: React.FC = () => {
 
               <StoryEditModal isOpen={isCreateStoryModalOpen} onClose={() => setIsCreateStoryModalOpen(false)} onSave={handleCreateStory} onParseEbook={parseEbookFile} />
               <DownloadModal isOpen={isDownloadModalOpen} onClose={handleReadWithoutDownload} story={pendingStory || story} onStartDownload={handleStartDownloadWrapper} onDataImported={handleImportDataSuccess} />
+              {isSyncModalOpen && <SyncModal isOpen={isSyncModalOpen} onClose={() => setIsSyncModalOpen(false)} onSync={handleSyncDrive} user={user} />}
+              <UpdateModal isOpen={isUpdateModalOpen} onClose={handleCloseUpdateModal} />
           </div>
       )
   }
 
   // Otherwise, render Library / Dashboard
-  const appContentClass = isApiKeyModalOpen || isUpdateModalOpen || isHelpModalOpen || manualImportState.isOpen || isCreateStoryModalOpen || isDownloadModalOpen ? 'blur-sm pointer-events-none' : '';
+  const appContentClass = isApiKeyModalOpen || isUpdateModalOpen || isHelpModalOpen || manualImportState.isOpen || isCreateStoryModalOpen || isDownloadModalOpen || isSyncModalOpen ? 'blur-sm pointer-events-none' : '';
 
   return (
     <div className="flex flex-col min-h-screen bg-[var(--theme-bg-base)] text-[var(--theme-text-primary)] font-sans transition-colors duration-300 relative">
@@ -685,7 +698,12 @@ const App: React.FC = () => {
       )}
 
       <div className={`flex flex-col flex-grow ${appContentClass}`}>
-        <Header onOpenApiKeySettings={() => setIsApiKeyModalOpen(true)} onOpenUpdateModal={() => setIsUpdateModalOpen(true)} onGoHome={handleBackToMain} />
+        <Header 
+            onOpenApiKeySettings={() => setIsApiKeyModalOpen(true)} 
+            onOpenUpdateModal={() => setIsUpdateModalOpen(true)} 
+            onOpenSyncModal={() => setIsSyncModalOpen(true)}
+            onGoHome={handleBackToMain} 
+        />
         <main className="max-w-screen-2xl mx-auto px-4 py-8 sm:py-12 flex-grow mb-16">
             <div className="mb-8 flex flex-col sm:flex-row gap-4 items-stretch sm:items-center">
                 <div className="flex-grow">
@@ -771,7 +789,7 @@ const App: React.FC = () => {
                             {onlineStories.length > 0 && (
                                 <div>
                                     <h3 className="text-lg font-bold text-[var(--theme-text-secondary)] mb-4 flex items-center gap-2">
-                                        <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse"></div> Truyện đang theo dõi (Online)
+                                        <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse"></div> Truyện đang theo dõi (Online & Cloud)
                                     </h3>
                                     <SearchResultsList results={onlineStories} onSelectStory={handleSelectStory} onFilterAuthor={setFilterAuthor} onFilterSource={setFilterSource} onFilterTag={(tag) => setFilterTags([tag])} backgroundLoadingStories={backgroundLoadingStories} />
                                 </div>
@@ -810,6 +828,8 @@ const App: React.FC = () => {
         <p>Bạn có chắc chắn muốn xóa truyện <strong className="text-[var(--theme-text-primary)]">{deleteConfirmation.item?.title}</strong> {' '}vĩnh viễn không?</p>
         <p className="mt-2 text-sm text-rose-400">Hành động này không thể hoàn tác.</p>
       </ConfirmationModal>
+      {/* Explicitly check isSyncModalOpen to ensure it is not rendered unless true */}
+      {isSyncModalOpen && <SyncModal isOpen={isSyncModalOpen} onClose={() => setIsSyncModalOpen(false)} onSync={handleSyncDrive} user={user} />}
     </div>
   );
 };
