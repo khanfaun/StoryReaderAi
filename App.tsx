@@ -94,7 +94,14 @@ const App: React.FC = () => {
   const [ebookInstance, setEbookInstance] = useState<EbookHandler | null>(null);
 
   const [deleteConfirmation, setDeleteConfirmation] = useState<{ isOpen: boolean; item?: ReadingHistoryItem }>({ isOpen: false });
-  const [isApiKeyModalOpen, setIsApiKeyModalOpen] = useState<boolean>(!apiKeyService.hasApiKey());
+  
+  // SỬA ĐỔI: Khởi tạo state dựa trên localStorage để không hiện lại nếu đã tắt
+  const [isApiKeyModalOpen, setIsApiKeyModalOpen] = useState<boolean>(() => {
+      const hasKey = apiKeyService.hasApiKey();
+      const hasDismissed = localStorage.getItem('dismissed_api_key_modal');
+      return !hasKey && !hasDismissed;
+  });
+
   const [tokenUsage, setTokenUsage] = useState<apiKeyService.TokenUsage>(apiKeyService.getTokenUsage());
   
   const [isUpdateModalOpen, setIsUpdateModalOpen] = useState(false);
@@ -140,6 +147,12 @@ const App: React.FC = () => {
   
   const handleImportDataSuccess = () => {
       reloadDataFromStorage();
+  };
+
+  // SỬA ĐỔI: Hàm đóng ApiKeyModal và lưu trạng thái vào localStorage
+  const handleCloseApiKeyModal = () => {
+      localStorage.setItem('dismissed_api_key_modal', 'true');
+      setIsApiKeyModalOpen(false);
   };
 
   const reloadDataFromStorage = useCallback(async () => {
@@ -217,7 +230,11 @@ const App: React.FC = () => {
         }
     }
     setTokenUsage(apiKeyService.getTokenUsage());
-    setIsApiKeyModalOpen(!apiKeyService.hasApiKey());
+    
+    // SỬA ĐỔI: Chỉ mở lại nếu chưa từng tắt. Không force mở mỗi lần reload.
+    if (!apiKeyService.hasApiKey() && !localStorage.getItem('dismissed_api_key_modal')) {
+        setIsApiKeyModalOpen(true);
+    }
     
     setIsDataLoading(false);
   }, [setSettings]);
@@ -837,7 +854,7 @@ const App: React.FC = () => {
 
       <UpdateModal isOpen={isUpdateModalOpen} onClose={handleCloseUpdateModal} />
       <HelpModal isOpen={isHelpModalOpen} onClose={() => setIsHelpModalOpen(false)} />
-      <ApiKeyModal isOpen={isApiKeyModalOpen} onClose={() => setIsApiKeyModalOpen(false)} onValidateKey={handleValidateKey} onDataChange={reloadDataFromStorage} tokenUsage={tokenUsage} />
+      <ApiKeyModal isOpen={isApiKeyModalOpen} onClose={handleCloseApiKeyModal} onValidateKey={handleValidateKey} onDataChange={reloadDataFromStorage} tokenUsage={tokenUsage} />
       <ManualImportModal isOpen={manualImportState.isOpen} onClose={() => setManualImportState(prev => ({ ...prev, isOpen: false }))} urlToImport={manualImportState.url} message={manualImportState.message} onFileSelected={handleManualImportFile} />
       <StoryEditModal isOpen={isCreateStoryModalOpen} onClose={() => setIsCreateStoryModalOpen(false)} onSave={handleCreateStory} onParseEbook={parseEbookFile} />
       <DownloadModal isOpen={isDownloadModalOpen} onClose={handleReadWithoutDownload} story={pendingStory || story} onStartDownload={handleStartDownloadWrapper} onDataImported={handleImportDataSuccess} />
