@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useRef, useCallback, useMemo, useLayoutEffect } from 'react';
 import type { Story, Chapter, ReadingSettings, CharacterStats } from '../types';
 import ChapterListModal from './ChapterListModal';
@@ -115,7 +114,7 @@ const ChapterContent: React.FC<ChapterContentProps> = ({
   // Refs
   const utteranceRef = useRef<SpeechSynthesisUtterance | null>(null);
   const globalCharIndexRef = useRef(0); // Tracks the absolute character position across all chunks
-  const scrollTimeoutRef = useRef<NodeJS.Timeout | null>(null); // Debounce scroll event
+  const scrollTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null); // Debounce scroll event
 
   // Precompute chunk metadata: Start index, End index, Length for each chunk
   // This allows mapping global progress to specific chunk + offset

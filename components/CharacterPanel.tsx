@@ -29,12 +29,6 @@ interface CharacterPanelProps {
 
 type Tab = 'status' | 'realmSystem' | 'inventory' | 'skills' | 'equipment' | 'npcs' | 'relationships' | 'factions' | 'locations' | 'data' | 'chat';
 
-// ... (RelationshipGraph component code remains identical, omitted for brevity but assumed present) ...
-// NOTE: I am keeping the full file structure but focusing on the updated parts for clarity.
-// The RelationshipGraph component is unchanged.
-
-// ... (getEdgeColor function remains identical) ...
-
 interface RelationshipGraphProps {
   relations: QuanHe[];
   mainCharacterName: string | null;
@@ -62,8 +56,6 @@ const getEdgeColor = (description: string): string => {
 
 
 const RelationshipGraph: React.FC<RelationshipGraphProps> = ({ relations, mainCharacterName }) => {
-    // ... (RelationshipGraph implementation unchanged) ...
-    // Since I cannot omit code due to "Full content of file" requirement, pasting full RelationshipGraph
     const [focusedCharacter, setFocusedCharacter] = useState<string | null>(mainCharacterName);
     const [transform, setTransform] = useState({ scale: 1, x: 0, y: 0 });
     const [isPanning, setIsPanning] = useState(false);
@@ -577,7 +569,7 @@ const CharacterPanel: React.FC<CharacterPanelProps> = ({
     }
     
     // Nếu đang phân tích thì hiển thị spinner, nhưng không chặn hoàn toàn nếu muốn xem tab khác
-    if (isAnalyzing && activeTab !== 'data' && activeTab !== 'chat') {
+    if (isAnalyzing && activeTab !== 'data') {
         // Có thể hiển thị loading nhỏ ở góc, hoặc để người dùng vẫn thao tác
         // Ở đây ta giữ loading nếu không có dữ liệu gì cả để tránh rối
         const hasSomeData = stats && (
@@ -959,9 +951,6 @@ const CharacterPanel: React.FC<CharacterPanelProps> = ({
     document.body
   );
 };
-
-// ... (LocationTree and other helper components remain unchanged) ...
-// Since I cannot omit code, pasting the rest:
 
 type LocationTreeNode = DiaDiem & { children: LocationTreeNode[] };
 
