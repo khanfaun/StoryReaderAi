@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo, useLayoutEffect } from 'react';
 import type { Story, Chapter, ReadingSettings, CharacterStats } from '../types';
 import ChapterListModal from './ChapterListModal';
 import ChapterEditModal from './ChapterEditModal';
@@ -43,6 +43,10 @@ interface ChapterContentProps {
   // Stats Toggle passed from Parent
   onToggleChat?: () => void; // Keep for compatibility if needed, but unused in UI
   onToggleStats?: () => void;
+
+  // Scroll Restoration
+  initialScrollPercentage?: number;
+  onScrollProgress?: (percentage: number) => void;
 }
 
 // Helper format thời gian mm:ss
@@ -62,7 +66,9 @@ const ChapterContent: React.FC<ChapterContentProps> = ({
     isBusy = false, isAnalyzing = false,
     onTtsRequest, onTtsStop, onTtsStatusChange, onTtsChunkChange,
     ttsStatus, ttsError, ttsTextChunks, ttsCurrentChunkIndex, availableSystemVoices,
-    onToggleChat, onToggleStats
+    onToggleChat, onToggleStats,
+    initialScrollPercentage = 0,
+    onScrollProgress
 }) => {
   const [isListVisible, setIsListVisible] = useState(false);
   const [isNavBarVisible, setIsNavBarVisible] = useState(true);
@@ -109,6 +115,7 @@ const ChapterContent: React.FC<ChapterContentProps> = ({
   // Refs
   const utteranceRef = useRef<SpeechSynthesisUtterance | null>(null);
   const globalCharIndexRef = useRef(0); // Tracks the absolute character position across all chunks
+  const scrollTimeoutRef = useRef<NodeJS.Timeout | null>(null); // Debounce scroll event
 
   // Precompute chunk metadata: Start index, End index, Length for each chunk
   // This allows mapping global progress to specific chunk + offset
@@ -144,6 +151,51 @@ const ChapterContent: React.FC<ChapterContentProps> = ({
       setEditableContent(content);
       setIsEditingContent(false);
   }, [content]);
+
+  // Restore Scroll Position Logic
+  useLayoutEffect(() => {
+      // Only restore if we have content and an initial percentage > 0
+      if (content && initialScrollPercentage > 0) {
+          const scrollHeight = document.documentElement.scrollHeight;
+          const clientHeight = document.documentElement.clientHeight;
+          const targetScroll = initialScrollPercentage * (scrollHeight - clientHeight);
+          
+          window.scrollTo({
+              top: targetScroll,
+              behavior: 'auto' // Instant jump to avoid disorientation
+          });
+      } else if (content) {
+          // New chapter loaded without history (or explicitly reset), scroll to top
+          window.scrollTo(0,0);
+      }
+  }, [content, initialScrollPercentage]);
+
+  // Track Scroll Progress
+  useEffect(() => {
+      const handleScroll = () => {
+          if (scrollTimeoutRef.current) {
+              clearTimeout(scrollTimeoutRef.current);
+          }
+
+          scrollTimeoutRef.current = setTimeout(() => {
+              const scrollTop = window.scrollY;
+              const docHeight = document.documentElement.scrollHeight;
+              const winHeight = window.innerHeight;
+              const scrollPercent = scrollTop / (docHeight - winHeight);
+              
+              if (onScrollProgress && !isNaN(scrollPercent)) {
+                  onScrollProgress(Math.min(Math.max(scrollPercent, 0), 1));
+              }
+          }, 500); // Debounce 500ms
+      };
+
+      window.addEventListener('scroll', handleScroll);
+      return () => {
+          window.removeEventListener('scroll', handleScroll);
+          if (scrollTimeoutRef.current) clearTimeout(scrollTimeoutRef.current);
+      };
+  }, [onScrollProgress]);
+
 
   // Reset progress when chapter changes (content changes)
   useEffect(() => {

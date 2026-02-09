@@ -1,3 +1,4 @@
+
 export interface Chapter {
   title: string;
   url: string;
@@ -27,6 +28,7 @@ export interface ReadingHistoryItem {
   lastChapterUrl: string;
   lastChapterTitle: string;
   lastReadTimestamp: number;
+  lastScrollPosition?: number; // 0.0 to 1.0 (Percentage)
 }
 
 export interface TuChat {

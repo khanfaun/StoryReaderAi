@@ -5,7 +5,7 @@ import { getChapterContent, parseHtml, parseChapterContentFromDoc } from '../ser
 import { analyzeChapterForCharacterStats, chatWithEbook, chatWithChapterContent, rewriteChapterContent } from '../services/geminiService';
 import { getCachedChapter, setCachedChapter } from '../services/cacheService';
 import { getStoryState, saveStoryState as saveStoryStateLocal, mergeChapterStats } from '../services/storyStateService';
-import { updateReadingHistory } from '../services/history';
+import { updateReadingHistory, saveScrollPosition } from '../services/history';
 import * as dbService from '../services/dbService';
 import * as apiKeyService from '../services/apiKeyService';
 import * as syncService from '../services/sync'; // Import Sync Service
@@ -30,6 +30,7 @@ interface StoryViewerProps {
   story: Story;
   initialEbookInstance: EbookHandler | null;
   initialChapterIndex?: number | null; // Prop mới
+  initialScrollPercentage?: number; // Prop mới cho vị trí cuộn
   settings: ReadingSettings;
   onSettingsChange: (settings: ReadingSettings) => void;
   onBack: () => void;
@@ -84,7 +85,7 @@ interface TtsState {
 }
 
 const StoryViewer: React.FC<StoryViewerProps> = ({
-    story, initialEbookInstance, initialChapterIndex, settings, onSettingsChange, onBack,
+    story, initialEbookInstance, initialChapterIndex, initialScrollPercentage, settings, onSettingsChange, onBack,
     onUpdateStory, onDeleteStory, readChapters, onReadChapterUpdate, setReadingHistory,
     backgroundDownloads, downloadQueue, cachedChapters, onPauseDownload, onResumeDownload, onStopDownload, onStartBackgroundDownload, onStartDownloadExport, onRedownload,
     setIsBottomNavForReadingVisible, isBottomNavForReadingVisible, onTokenUsageUpdate,
@@ -96,6 +97,9 @@ const StoryViewer: React.FC<StoryViewerProps> = ({
     const [chapterContent, setChapterContent] = useState<string | null>(null);
     const [isChapterLoading, setIsChapterLoading] = useState<boolean>(false);
     const [error, setError] = useState<string | null>(null);
+    
+    // State for scroll restoration - only applies on initial load of the viewer
+    const [targetScrollPercentage, setTargetScrollPercentage] = useState<number>(initialScrollPercentage || 0);
     
     const [cumulativeStats, setCumulativeStats] = useState<CharacterStats | null>(null);
     const [isAnalyzing, setIsAnalyzing] = useState<boolean>(false);
@@ -204,6 +208,10 @@ const StoryViewer: React.FC<StoryViewerProps> = ({
         setCumulativeStats(stats || {});
     };
 
+    const handleScrollProgress = useCallback((percentage: number) => {
+        saveScrollPosition(story.url, percentage);
+    }, [story.url]);
+
     // --- Content Fetching & Analysis ---
 
     const processAndAnalyzeContent = useCallback(async (storyToLoad: Story, chapterUrl: string, content: string, overrideBaseStats?: CharacterStats | null) => {
@@ -266,6 +274,11 @@ const StoryViewer: React.FC<StoryViewerProps> = ({
         cleanupTts();
         const chapter = storyToLoad.chapters[chapterIndex];
         
+        // Reset scroll restoration target if we are manually changing chapters (only use initial prop on first load)
+        if (chapterIndex !== initialChapterIndex) {
+            setTargetScrollPercentage(0);
+        }
+
         setSelectedChapterIndex(chapterIndex);
         setIsChapterLoading(true);
         setChapterContent(null);
@@ -385,7 +398,7 @@ const StoryViewer: React.FC<StoryViewerProps> = ({
             setError(`Lỗi tải chương: ${error.message}.`);
             setIsChapterLoading(false);
         }
-    }, [initialEbookInstance, processAndAnalyzeContent, cleanupTts, setReadingHistory, onReadChapterUpdate]);
+    }, [initialEbookInstance, processAndAnalyzeContent, cleanupTts, setReadingHistory, onReadChapterUpdate, initialChapterIndex]);
 
     // --- Interaction Handlers ---
 
@@ -610,6 +623,8 @@ const StoryViewer: React.FC<StoryViewerProps> = ({
                         ttsTextChunks={ttsState.textChunks} ttsCurrentChunkIndex={ttsState.currentChunkIndex}
                         availableSystemVoices={availableSystemVoices}
                         onToggleStats={() => setIsPanelVisible(!isPanelVisible)}
+                        initialScrollPercentage={targetScrollPercentage}
+                        onScrollProgress={handleScrollProgress}
                     />
                 </div>
                 <aside className="hidden xl:block sticky top-8 self-start">

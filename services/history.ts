@@ -1,3 +1,4 @@
+
 import type { Story, ReadingHistoryItem, Chapter } from '../types';
 
 const HISTORY_KEY = 'novel_reader_history';
@@ -26,11 +27,6 @@ export function saveReadingHistory(history: ReadingHistoryItem[]): void {
 
     const rawHistory = JSON.stringify(sortedHistory);
     localStorage.setItem(HISTORY_KEY, rawHistory);
-
-    // Sync to drive in the background (deprecated)
-    // saveHistoryToDrive(sortedHistory).catch(err => {
-    //   console.warn("Drive Sync (deprecated): Background push failed:", err);
-    // });
   } catch (error) {
     console.error("Error saving history:", error);
   }
@@ -47,6 +43,7 @@ export function updateReadingHistory(story: Story, chapter: Chapter): ReadingHis
     item.lastChapterUrl = chapter.url;
     item.lastChapterTitle = chapter.title;
     item.lastReadTimestamp = now;
+    item.lastScrollPosition = 0; // Reset scroll when changing chapter
     // Move to top by removing and re-adding
     history.splice(existingIndex, 1);
     history.unshift(item);
@@ -60,6 +57,7 @@ export function updateReadingHistory(story: Story, chapter: Chapter): ReadingHis
       lastChapterUrl: chapter.url,
       lastChapterTitle: chapter.title,
       lastReadTimestamp: now,
+      lastScrollPosition: 0,
     };
     history.unshift(newItem);
   }
@@ -71,4 +69,18 @@ export function updateReadingHistory(story: Story, chapter: Chapter): ReadingHis
   
   saveReadingHistory(history);
   return history;
+}
+
+export function saveScrollPosition(storyUrl: string, scrollPercentage: number): void {
+    const history = getReadingHistory();
+    const existingIndex = history.findIndex(item => item.url === storyUrl);
+
+    if (existingIndex > -1) {
+        history[existingIndex].lastScrollPosition = scrollPercentage;
+        history[existingIndex].lastReadTimestamp = Date.now();
+        // We don't necessarily need to sort/splice here to avoid UI jumpiness if history is displayed live,
+        // but for consistency with "Last Read", we save it.
+        // Direct save without re-sort to avoid performance hit on scroll
+        localStorage.setItem(HISTORY_KEY, JSON.stringify(history));
+    }
 }

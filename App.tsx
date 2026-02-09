@@ -64,7 +64,8 @@ const App: React.FC = () => {
   const [localStories, setLocalStories] = useState<Story[]>([]);
   const [story, setStory] = useState<Story | null>(null);
   const [initialChapterIndex, setInitialChapterIndex] = useState<number | null>(null); // State mới để điều hướng trực tiếp
-  
+  const [initialScrollPercentage, setInitialScrollPercentage] = useState<number>(0);
+
   const [isLoading, setIsLoading] = useState<boolean>(true); 
   const [isDataLoading, setIsDataLoading] = useState<boolean>(false); 
   const [error, setError] = useState<string | null>(null);
@@ -386,6 +387,7 @@ const App: React.FC = () => {
   const handleSelectStory = useCallback(async (selectedStory: Story) => {
       // Logic chọn truyện
       const existingStory = await dbService.getStory(selectedStory.url);
+      setInitialScrollPercentage(0); // Reset scroll on fresh select
       
       if (existingStory) {
            handleSelectStoryInternal(existingStory);
@@ -481,6 +483,7 @@ const App: React.FC = () => {
     setInitialChapterIndex(null); // Reset chỉ số chương khởi tạo
     setEbookInstance(null); // Reset ebook instance
     setIsReadingMode(false); // Reset reading mode
+    setInitialScrollPercentage(0);
   };
   
   const handleCreateStory = async (storyData: Partial<Story> & { ebookFile?: File }) => {
@@ -636,6 +639,9 @@ const App: React.FC = () => {
             } else {
                 setInitialChapterIndex(0);
             }
+            
+            // Set initial scroll position if available
+            setInitialScrollPercentage(item.lastScrollPosition || 0);
 
             setStory(storyToLoad);
             const savedRead = localStorage.getItem(`readChapters_${storyToLoad.url}`);
@@ -691,6 +697,7 @@ const App: React.FC = () => {
                   story={story}
                   initialEbookInstance={ebookInstance}
                   initialChapterIndex={initialChapterIndex} // Truyền index chương cần đọc
+                  initialScrollPercentage={initialScrollPercentage} // Truyền vị trí cuộn
                   settings={settings}
                   onSettingsChange={setSettings}
                   onBack={handleBackToMain}
