@@ -1,15 +1,16 @@
 
 import React from 'react';
-import { KeyIcon, BellIcon } from './icons';
+import { KeyIcon, BellIcon, CloudIcon } from './icons';
 
 interface HeaderProps {
   onOpenApiKeySettings: () => void;
   onOpenUpdateModal: () => void;
   onGoHome: () => void;
   storyTitle?: string;
+  onOpenSyncModal?: () => void; // Thêm prop để mở SyncModal
 }
 
-const Header: React.FC<HeaderProps> = ({ onOpenApiKeySettings, onOpenUpdateModal, onGoHome, storyTitle }) => {
+const Header: React.FC<HeaderProps> = ({ onOpenApiKeySettings, onOpenUpdateModal, onGoHome, storyTitle, onOpenSyncModal }) => {
   return (
     <header className="bg-[var(--theme-bg-surface)] shadow-lg border-b border-[var(--theme-border)] relative z-50">
       <div className="container mx-auto px-4 py-4 flex justify-between items-center relative">
@@ -31,6 +32,16 @@ const Header: React.FC<HeaderProps> = ({ onOpenApiKeySettings, onOpenUpdateModal
         )}
 
         <div className="flex items-center gap-2 flex-shrink-0 z-10">
+          {onOpenSyncModal && (
+              <button
+                onClick={onOpenSyncModal}
+                className="p-2 rounded-full text-[var(--theme-text-secondary)] hover:bg-[var(--theme-border)] hover:text-[var(--theme-text-primary)] transition-colors duration-200"
+                aria-label="Đồng bộ Cloud"
+                title="Đồng bộ Cloud"
+              >
+                <CloudIcon className="w-6 h-6" />
+              </button>
+          )}
           <button
             onClick={onOpenUpdateModal}
             className="p-2 rounded-full text-[var(--theme-text-secondary)] hover:bg-[var(--theme-border)] hover:text-[var(--theme-text-primary)] transition-colors duration-200"

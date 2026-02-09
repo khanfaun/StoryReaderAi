@@ -26,6 +26,7 @@ import StoryEditModal from './components/StoryEditModal';
 import DownloadModal from './components/DownloadModal';
 import ConfirmationModal from './components/ConfirmationModal';
 import GlobalDownloadManager from './components/GlobalDownloadManager';
+import SyncModal from './components/SyncModal'; // Import SyncModal
 import { PlusIcon, StopIcon, SpinnerIcon, CheckIcon, CloseIcon, UploadIcon, DownloadIcon } from './components/icons';
 
 // New Component for active story logic
@@ -100,6 +101,7 @@ const App: React.FC = () => {
   
   const [isUpdateModalOpen, setIsUpdateModalOpen] = useState(false);
   const [isHelpModalOpen, setIsHelpModalOpen] = useState(false);
+  const [isSyncModalOpen, setIsSyncModalOpen] = useState(false); // State for Sync Modal
   
   const [manualImportState, setManualImportState] = useState<ManualImportState>({
       isOpen: false, url: '', message: '', type: 'chapter', source: ''
@@ -588,6 +590,7 @@ const App: React.FC = () => {
                 onOpenUpdateModal={() => setIsUpdateModalOpen(true)} 
                 onGoHome={handleBackToMain} 
                 storyTitle={isReadingMode ? story.title : undefined}
+                onOpenSyncModal={() => setIsSyncModalOpen(true)} // Pass handler
               />
               
               <StoryViewer 
@@ -648,12 +651,13 @@ const App: React.FC = () => {
 
               <StoryEditModal isOpen={isCreateStoryModalOpen} onClose={() => setIsCreateStoryModalOpen(false)} onSave={handleCreateStory} onParseEbook={parseEbookFile} />
               <DownloadModal isOpen={isDownloadModalOpen} onClose={handleReadWithoutDownload} story={pendingStory || story} onStartDownload={handleStartDownloadWrapper} onDataImported={handleImportDataSuccess} />
+              {isSyncModalOpen && <SyncModal onClose={() => setIsSyncModalOpen(false)} />}
           </div>
       )
   }
 
   // Otherwise, render Library / Dashboard
-  const appContentClass = isApiKeyModalOpen || isUpdateModalOpen || isHelpModalOpen || manualImportState.isOpen || isCreateStoryModalOpen || isDownloadModalOpen ? 'blur-sm pointer-events-none' : '';
+  const appContentClass = isApiKeyModalOpen || isUpdateModalOpen || isHelpModalOpen || manualImportState.isOpen || isCreateStoryModalOpen || isDownloadModalOpen || isSyncModalOpen ? 'blur-sm pointer-events-none' : '';
 
   return (
     <div className="flex flex-col min-h-screen bg-[var(--theme-bg-base)] text-[var(--theme-text-primary)] font-sans transition-colors duration-300 relative">
@@ -685,7 +689,12 @@ const App: React.FC = () => {
       )}
 
       <div className={`flex flex-col flex-grow ${appContentClass}`}>
-        <Header onOpenApiKeySettings={() => setIsApiKeyModalOpen(true)} onOpenUpdateModal={() => setIsUpdateModalOpen(true)} onGoHome={handleBackToMain} />
+        <Header 
+            onOpenApiKeySettings={() => setIsApiKeyModalOpen(true)} 
+            onOpenUpdateModal={() => setIsUpdateModalOpen(true)} 
+            onGoHome={handleBackToMain} 
+            onOpenSyncModal={() => setIsSyncModalOpen(true)} // Pass handler
+        />
         <main className="max-w-screen-2xl mx-auto px-4 py-8 sm:py-12 flex-grow mb-16">
             <div className="mb-8 flex flex-col sm:flex-row gap-4 items-stretch sm:items-center">
                 <div className="flex-grow">
@@ -810,6 +819,8 @@ const App: React.FC = () => {
         <p>Bạn có chắc chắn muốn xóa truyện <strong className="text-[var(--theme-text-primary)]">{deleteConfirmation.item?.title}</strong> {' '}vĩnh viễn không?</p>
         <p className="mt-2 text-sm text-rose-400">Hành động này không thể hoàn tác.</p>
       </ConfirmationModal>
+      {/* Sync Modal */}
+      {isSyncModalOpen && <SyncModal onClose={() => setIsSyncModalOpen(false)} />}
     </div>
   );
 };

@@ -253,3 +253,57 @@ export async function deleteEbookAndStory(id: string): Promise<void> {
         request.onerror = () => rej(request.error); 
     });
 }
+
+// --- FULL BACKUP/RESTORE OPERATIONS (FOR DRIVE SYNC) ---
+
+export interface FullBackupData {
+    stories: Story[];
+    chapters: any[];
+    ebooks: { id: string; data: ArrayBuffer }[]; // Warning: This can be huge
+}
+
+export async function exportDatabase(): Promise<FullBackupData> {
+    const db = await openDB();
+    const transaction = db.transaction([STORY_STORE, CHAPTER_STORE, EBOOK_STORE], 'readonly');
+    
+    const storiesReq = transaction.objectStore(STORY_STORE).getAll();
+    const chaptersReq = transaction.objectStore(CHAPTER_STORE).getAll();
+    const ebooksReq = transaction.objectStore(EBOOK_STORE).getAll();
+
+    return new Promise((resolve, reject) => {
+        transaction.oncomplete = () => {
+            resolve({
+                stories: storiesReq.result,
+                chapters: chaptersReq.result,
+                ebooks: ebooksReq.result
+            });
+        };
+        transaction.onerror = () => reject(transaction.error);
+    });
+}
+
+export async function importDatabase(data: FullBackupData): Promise<void> {
+    const db = await openDB();
+    const transaction = db.transaction([STORY_STORE, CHAPTER_STORE, EBOOK_STORE], 'readwrite');
+    
+    // Clear existing data? Let's use put to overwrite/add
+    const storyStore = transaction.objectStore(STORY_STORE);
+    if (data.stories) {
+        for (const s of data.stories) storyStore.put(s);
+    }
+
+    const chapterStore = transaction.objectStore(CHAPTER_STORE);
+    if (data.chapters) {
+        for (const c of data.chapters) chapterStore.put(c);
+    }
+
+    const ebookStore = transaction.objectStore(EBOOK_STORE);
+    if (data.ebooks) {
+        for (const e of data.ebooks) ebookStore.put(e);
+    }
+
+    return new Promise((resolve, reject) => {
+        transaction.oncomplete = () => resolve();
+        transaction.onerror = () => reject(transaction.error);
+    });
+}

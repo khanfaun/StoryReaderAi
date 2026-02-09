@@ -1,5 +1,4 @@
 import type { Story, ReadingHistoryItem, Chapter } from '../types';
-import { saveHistoryToDrive } from './sync';
 
 const HISTORY_KEY = 'novel_reader_history';
 const MAX_HISTORY_ITEMS = 20;
