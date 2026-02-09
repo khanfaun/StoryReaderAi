@@ -1,7 +1,7 @@
 
 import React, { useEffect, useState, useRef } from 'react';
 import type { Story, CharacterStats, DownloadConfig, GoogleUser } from '../types';
-import { CloseIcon, PlusIcon, TrashIcon, DownloadIcon, CheckIcon, SpinnerIcon, UploadIcon, SparklesIcon, CloudIcon } from './icons';
+import { CloseIcon, PlusIcon, TrashIcon, DownloadIcon, CheckIcon, SpinnerIcon, UploadIcon, SparklesIcon, CloudIcon, SyncIcon } from './icons';
 import { exportStoryData, importStoryData } from '../services/storyStateService';
 import * as driveService from '../services/googleDriveService';
 import { uploadStoryToDrive } from '../services/sync';
@@ -48,6 +48,7 @@ const DownloadModal: React.FC<DownloadModalProps> = ({
   // Drive State
   const [isDriveProcessing, setIsDriveProcessing] = useState(false);
   const [driveStatusMsg, setDriveStatusMsg] = useState('');
+  const [autoSync, setAutoSync] = useState(false);
   
   // Login Feedback
   const [loginSuccess, setLoginSuccess] = useState(false);
@@ -66,6 +67,10 @@ const DownloadModal: React.FC<DownloadModalProps> = ({
         // Reset message
         setDriveStatusMsg('');
         setLoginSuccess(false);
+        
+        // Load settings
+        const savedAutoSync = localStorage.getItem('settings_auto_sync') === 'true';
+        setAutoSync(savedAutoSync);
     }
   }, [isOpen, totalChapters]);
 
@@ -166,6 +171,14 @@ const DownloadModal: React.FC<DownloadModalProps> = ({
   const handleDriveSignIn = () => {
       driveService.signIn();
   };
+  
+  const handleDriveSignOut = () => {
+      // Call service signOut which invokes callback to clear local state
+      driveService.signOut(() => {
+          // No explicit state update needed here as parent App passes googleUser prop
+          // which will become null
+      });
+  };
 
   const handleDriveUpload = async () => {
       if (!story || !googleUser) return;
@@ -173,7 +186,7 @@ const DownloadModal: React.FC<DownloadModalProps> = ({
       setDriveStatusMsg('Đang tải lên...');
       try {
           await uploadStoryToDrive(story);
-          setDriveStatusMsg('Đã tải lên thành công!');
+          setDriveStatusMsg('Đã lưu thành công!');
           setTimeout(() => setDriveStatusMsg(''), 3000);
       } catch (e) {
           console.error(e);
@@ -190,7 +203,6 @@ const DownloadModal: React.FC<DownloadModalProps> = ({
       
       try {
           const STORY_PREFIX = 'story_metadata_';
-          // Sanitize naming logic same as sync.ts
           const fileName = `${STORY_PREFIX}${story.url.replace(/[^a-zA-Z0-9]/g, '_')}.json`;
           
           const files = await driveService.listFiles();
@@ -208,13 +220,7 @@ const DownloadModal: React.FC<DownloadModalProps> = ({
               throw new Error("File rỗng hoặc không tải được.");
           }
 
-          // Convert JSON content back to File object to reuse importStoryData logic
-          // Note: The structure from Drive (via sync.ts) might need adaptation if importStoryData expects the 'export' format.
-          // Check sync.ts: payload = { story, aiState, readChapters, lastModified }
-          // Check storyStateService.ts: importStoryData expects { version, data: { storyStates: ... } } OR legacy format.
-          
           // Construct a compatible format for importStoryData
-          // We wrap the cloud payload into the structure importStoryData expects
           const compatibleData = {
               version: 2,
               timestamp: new Date().toISOString(),
@@ -223,7 +229,6 @@ const DownloadModal: React.FC<DownloadModalProps> = ({
                       [story.url]: {
                           stats: content.aiState,
                           readChapters: content.readChapters,
-                          // cachedChapters: content.cachedChapters // If we start syncing cache to drive
                       }
                   }
               }
@@ -243,6 +248,12 @@ const DownloadModal: React.FC<DownloadModalProps> = ({
       } finally {
           setIsDriveProcessing(false);
       }
+  };
+  
+  const toggleAutoSync = () => {
+      const newVal = !autoSync;
+      setAutoSync(newVal);
+      localStorage.setItem('settings_auto_sync', String(newVal));
   };
 
   if (!isOpen) return null;
@@ -467,25 +478,49 @@ const DownloadModal: React.FC<DownloadModalProps> = ({
                                     className="bg-white hover:bg-gray-100 text-gray-800 font-bold py-3 px-6 rounded-lg inline-flex items-center justify-center gap-3 transition-colors duration-300 border border-gray-300"
                                 >
                                     <svg className="w-5 h-5" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg"><g clipPath="url(#clip0_17_40)"><path fill="#4285F4" d="M43.611 20.083H42V20H24V28H35.303C33.6747 33.148 29.2287 37.001 24 37C17.373 37 12 31.627 12 25C12 18.373 17.373 13 24 13C26.96 13 29.56 14.14 31.63 15.87L37.18 10.32C33.4725 6.94524 28.9375 5.00195 24 5C13.464 5 5 13.464 5 24C5 34.536 13.464 43 24 43C34.536 43 43 34.536 43 24C43 22.663 42.871 21.35 42.611 20.083V20.083Z"></path><path fill="#EA4335" d="M31.63 15.87L24 22.88L37.18 10.32C33.4725 6.94524 28.9375 5.00195 24 5V13C26.96 13 29.56 14.14 31.63 15.87Z"></path><path fill="#34A853" d="M24 43C28.9375 42.998 33.4725 41.0548 37.18 37.68L31.63 32.13C29.56 33.86 26.96 35 24 35C21.04 35 18.44 33.86 16.37 32.13L10.82 37.68C14.5275 41.0548 19.0625 42.998 24 43V43Z"></path><path fill="#FBBC05" d="M42.611 20.083H24V28H35.303C34.51 30.245 33.16 32.068 31.63 32.13L37.18 37.68C40.6552 34.4172 42.6625 30.0125 42.962 25.083C43.001 24.524 43 23.5 43 23C43 22.663 42.871 21.35 42.611 20.083V20.083Z"></path></g><defs><clipPath id="clip0_17_40"><rect width="48" height="48" fill="white"></rect></clipPath></defs></svg>
-                                    <span>Đăng nhập Google</span>
+                                    <span>Tiếp tục với Google</span>
                                 </button>
                             </div>
                         ) : (
                             <div className="space-y-6">
-                                <div className="flex items-center justify-between p-3 bg-[var(--theme-bg-base)] border border-[var(--theme-border)] rounded-lg">
-                                    <div className="flex items-center gap-3">
-                                        {googleUser.imageUrl ? (
-                                            <img src={googleUser.imageUrl} alt="Avatar" className="w-8 h-8 rounded-full" />
-                                        ) : (
-                                            <div className="w-8 h-8 rounded-full bg-blue-500 flex items-center justify-center text-white font-bold">{googleUser.name.charAt(0)}</div>
-                                        )}
-                                        <div>
-                                            <p className="text-sm font-semibold text-[var(--theme-text-primary)]">{googleUser.name}</p>
-                                            <p className="text-xs text-[var(--theme-text-secondary)]">{googleUser.email}</p>
+                                {/* User Info Card */}
+                                <div className="p-4 bg-[var(--theme-bg-base)] border border-[var(--theme-border)] rounded-lg">
+                                    <div className="flex items-center justify-between mb-3">
+                                        <div className="flex items-center gap-3">
+                                            {googleUser.imageUrl ? (
+                                                <img src={googleUser.imageUrl} alt="Avatar" className="w-10 h-10 rounded-full border-2 border-[var(--theme-accent-primary)]" />
+                                            ) : (
+                                                <div className="w-10 h-10 rounded-full bg-blue-600 flex items-center justify-center text-white font-bold text-lg">
+                                                    {googleUser.name.charAt(0)}
+                                                </div>
+                                            )}
+                                            <div>
+                                                <p className="font-bold text-[var(--theme-text-primary)]">{googleUser.name}</p>
+                                                <p className="text-xs text-[var(--theme-text-secondary)]">{googleUser.email}</p>
+                                            </div>
                                         </div>
+                                        <span className="text-[10px] font-bold px-2 py-1 bg-green-900/30 text-green-400 rounded-full border border-green-800 flex items-center gap-1">
+                                            <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse"></span>
+                                            Đã kết nối
+                                        </span>
                                     </div>
-                                    <div className="text-xs text-green-400 font-medium bg-green-900/20 px-2 py-1 rounded border border-green-800">
-                                        Đã kết nối
+                                    
+                                    <div className="flex items-center justify-between pt-3 border-t border-[var(--theme-border)]">
+                                        <div className="flex items-center gap-2">
+                                            <button 
+                                                onClick={toggleAutoSync}
+                                                className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors focus:outline-none ${autoSync ? 'bg-[var(--theme-accent-primary)]' : 'bg-gray-700'}`}
+                                            >
+                                                <span className={`inline-block h-3 w-3 transform rounded-full bg-white transition-transform ${autoSync ? 'translate-x-5' : 'translate-x-1'}`} />
+                                            </button>
+                                            <span className="text-xs text-[var(--theme-text-secondary)]">Tự động đồng bộ</span>
+                                        </div>
+                                        <button 
+                                            onClick={handleDriveSignOut}
+                                            className="text-xs text-rose-400 hover:text-rose-300 hover:underline"
+                                        >
+                                            Đăng xuất
+                                        </button>
                                     </div>
                                 </div>
                                 
@@ -504,32 +539,30 @@ const DownloadModal: React.FC<DownloadModalProps> = ({
                                     </div>
                                 )}
 
-                                <div className="grid gap-4">
-                                    <div className="p-4 border border-[var(--theme-border)] rounded-lg bg-[var(--theme-bg-base)]">
-                                        <h4 className="text-sm font-bold text-[var(--theme-text-primary)] mb-2">1. Sao lưu lên Drive (Upload)</h4>
-                                        <p className="text-xs text-[var(--theme-text-secondary)] mb-3">Tải dữ liệu phân tích, tiến độ đọc của truyện này lên Cloud.</p>
-                                        <button 
-                                            onClick={handleDriveUpload}
-                                            disabled={isDriveProcessing}
-                                            className="flex items-center gap-2 px-4 py-2 bg-blue-700 hover:bg-blue-600 text-white rounded-md text-sm font-semibold transition-colors w-full justify-center disabled:opacity-50 disabled:cursor-wait"
-                                        >
-                                            {isDriveProcessing ? <SpinnerIcon className="w-4 h-4 animate-spin"/> : <CloudIcon className="w-4 h-4" />}
-                                            {isDriveProcessing ? 'Đang xử lý...' : 'Tải lên Drive'}
-                                        </button>
-                                    </div>
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                                    <button 
+                                        onClick={handleDriveUpload}
+                                        disabled={isDriveProcessing}
+                                        className="flex flex-col items-center justify-center p-4 bg-blue-600/10 hover:bg-blue-600/20 border border-blue-600/30 hover:border-blue-500 rounded-lg transition-all group disabled:opacity-50 disabled:cursor-wait"
+                                    >
+                                        <div className="p-3 bg-blue-600 rounded-full text-white mb-2 group-hover:scale-110 transition-transform">
+                                            {isDriveProcessing ? <SpinnerIcon className="w-6 h-6 animate-spin"/> : <CloudIcon className="w-6 h-6" />}
+                                        </div>
+                                        <span className="font-bold text-blue-200 text-sm">Lưu lên Cloud</span>
+                                        <span className="text-[10px] text-blue-400/70 mt-1">Backup dữ liệu truyện này</span>
+                                    </button>
 
-                                    <div className="p-4 border border-[var(--theme-border)] rounded-lg bg-[var(--theme-bg-base)]">
-                                        <h4 className="text-sm font-bold text-[var(--theme-text-primary)] mb-2">2. Khôi phục từ Drive (Import)</h4>
-                                        <p className="text-xs text-[var(--theme-text-secondary)] mb-3">Tìm bản sao lưu của truyện này trên Drive và tải về máy.</p>
-                                        <button 
-                                            onClick={handleDriveImport}
-                                            disabled={isDriveProcessing}
-                                            className="flex items-center gap-2 px-4 py-2 bg-[var(--theme-accent-primary)] hover:brightness-110 text-white rounded-md text-sm font-semibold transition-colors w-full justify-center disabled:opacity-50 disabled:cursor-wait"
-                                        >
-                                            {isDriveProcessing ? <SpinnerIcon className="w-4 h-4 animate-spin"/> : <DownloadIcon className="w-4 h-4" />}
-                                            {isDriveProcessing ? 'Đang xử lý...' : 'Tải về từ Drive'}
-                                        </button>
-                                    </div>
+                                    <button 
+                                        onClick={handleDriveImport}
+                                        disabled={isDriveProcessing}
+                                        className="flex flex-col items-center justify-center p-4 bg-[var(--theme-accent-primary)]/10 hover:bg-[var(--theme-accent-primary)]/20 border border-[var(--theme-accent-primary)]/30 hover:border-[var(--theme-accent-primary)] rounded-lg transition-all group disabled:opacity-50 disabled:cursor-wait"
+                                    >
+                                        <div className="p-3 bg-[var(--theme-accent-primary)] rounded-full text-white mb-2 group-hover:scale-110 transition-transform">
+                                            {isDriveProcessing ? <SpinnerIcon className="w-6 h-6 animate-spin"/> : <DownloadIcon className="w-6 h-6" />}
+                                        </div>
+                                        <span className="font-bold text-[var(--theme-text-primary)] text-sm">Tải về máy</span>
+                                        <span className="text-[10px] text-[var(--theme-text-secondary)] mt-1">Khôi phục từ Cloud</span>
+                                    </button>
                                 </div>
                             </div>
                         )}

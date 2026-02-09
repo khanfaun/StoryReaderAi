@@ -112,6 +112,7 @@ const App: React.FC = () => {
   
   // Google Drive User State
   const [googleUser, setGoogleUser] = useState<GoogleUser | null>(null);
+  const previousUserRef = useRef<GoogleUser | null>(null);
   
   const [manualImportState, setManualImportState] = useState<ManualImportState>({
       isOpen: false, url: '', message: '', type: 'chapter', source: ''
@@ -204,6 +205,12 @@ const App: React.FC = () => {
       // Initialize Drive Logic Global
       driveService.initGoogleDrive((user) => {
           setGoogleUser(user);
+          // Auto-refresh data if user logs in (transition from null to user)
+          if (user && !previousUserRef.current) {
+              console.log("User logged in - refreshing data...");
+              reloadDataFromStorage();
+          }
+          previousUserRef.current = user;
       });
 
       await reloadDataFromStorage();
