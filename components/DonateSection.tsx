@@ -23,10 +23,13 @@ const DonateSection: React.FC = () => {
         <div className="bg-white p-2 rounded-lg shadow-lg mb-4 w-full max-w-[220px] aspect-square flex items-center justify-center overflow-hidden relative">
             {!imgError ? (
                 <img 
-                    src="assets/qr_donate.jpg" 
+                    src="/assets/qr_donate.jpg" 
                     alt="QR Ngân Hàng" 
                     className="w-full h-full object-contain"
-                    onError={() => setImgError(true)}
+                    onError={(e) => {
+                        console.error("Không thể tải ảnh QR. Đang hiển thị placeholder.", e);
+                        setImgError(true);
+                    }}
                 />
             ) : (
                 <div className="flex flex-col items-center justify-center text-gray-300 h-full w-full bg-gray-50">
