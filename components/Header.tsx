@@ -1,17 +1,15 @@
+
 import React from 'react';
-import { KeyIcon, BellIcon, CloudIcon } from './icons';
-import type { GoogleUser } from '../types';
+import { KeyIcon, BellIcon } from './icons';
 
 interface HeaderProps {
   onOpenApiKeySettings: () => void;
   onOpenUpdateModal: () => void;
-  onOpenSyncModal: () => void;
   onGoHome: () => void;
   storyTitle?: string;
-  user?: GoogleUser | null;
 }
 
-const Header: React.FC<HeaderProps> = ({ onOpenApiKeySettings, onOpenUpdateModal, onOpenSyncModal, onGoHome, storyTitle, user }) => {
+const Header: React.FC<HeaderProps> = ({ onOpenApiKeySettings, onOpenUpdateModal, onGoHome, storyTitle }) => {
   return (
     <header className="bg-[var(--theme-bg-surface)] shadow-lg border-b border-[var(--theme-border)] relative z-50">
       <div className="container mx-auto px-4 py-4 flex justify-between items-center relative">
@@ -33,41 +31,19 @@ const Header: React.FC<HeaderProps> = ({ onOpenApiKeySettings, onOpenUpdateModal
         )}
 
         <div className="flex items-center gap-2 flex-shrink-0 z-10">
-          {/* API Key Icon moved to Left */}
-          <button
-            onClick={onOpenApiKeySettings}
-            className="p-2 rounded-full text-[var(--theme-text-secondary)] hover:bg-[var(--theme-border)] hover:text-[var(--theme-text-primary)] transition-colors duration-200"
-            aria-label="Quản lý API Key"
-            title="Cài đặt API Key"
-          >
-            <KeyIcon className="w-6 h-6" />
-          </button>
-
           <button
             onClick={onOpenUpdateModal}
             className="p-2 rounded-full text-[var(--theme-text-secondary)] hover:bg-[var(--theme-border)] hover:text-[var(--theme-text-primary)] transition-colors duration-200"
             aria-label="Xem thông báo cập nhật"
-            title="Thông báo cập nhật"
           >
             <BellIcon className="w-6 h-6" />
           </button>
-
-          {/* Sync/User Icon moved to Right */}
           <button
-            onClick={onOpenSyncModal}
-            className="p-1 rounded-full text-[var(--theme-text-secondary)] hover:bg-[var(--theme-border)] hover:text-[var(--theme-text-primary)] transition-colors duration-200"
-            aria-label="Đồng bộ Google Drive"
-            title={user ? `Đã kết nối: ${user.name}` : "Đồng bộ Drive"}
+            onClick={onOpenApiKeySettings}
+            className="p-2 rounded-full text-[var(--theme-text-secondary)] hover:bg-[var(--theme-border)] hover:text-[var(--theme-text-primary)] transition-colors duration-200"
+            aria-label="Quản lý API Key"
           >
-            {user && user.imageUrl ? (
-                <div className="w-8 h-8 rounded-full overflow-hidden border border-[var(--theme-border)]">
-                    <img src={user.imageUrl} alt={user.name} className="w-full h-full object-cover" />
-                </div>
-            ) : (
-                <div className="p-1">
-                    <CloudIcon className="w-6 h-6" />
-                </div>
-            )}
+            <KeyIcon className="w-6 h-6" />
           </button>
         </div>
       </div>

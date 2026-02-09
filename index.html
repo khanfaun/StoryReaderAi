@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="vi">
   <head>
@@ -10,9 +11,6 @@
     <link href="https://fonts.googleapis.com/css2?family=Readex+Pro:wght@300;400;500;600;700&family=Merriweather:ital,wght@0,400;0,700;1,400&family=Lora:ital,wght@0,400;0,700;1,400&display=swap" rel="stylesheet">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/epubjs/dist/epub.min.js"></script>
-    <!-- Google Identity Services & API -->
-    <script src="https://accounts.google.com/gsi/client" async defer></script>
-    <script src="https://apis.google.com/js/api.js" async defer></script>
     <style>
       body {
         font-family: 'Readex Pro', sans-serif;
@@ -70,8 +68,8 @@
       .reading-history__item-author, .reading-history__item-chapter { font-size: 0.875rem; color: var(--theme-text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
       .reading-history__item-chapter { color: var(--theme-accent-primary); opacity: 0.9; }
 
-      /* Sync Modal - Increased Z-Index to avoid overlap issues */
-      .sync-modal-overlay { position: fixed; inset: 0; background-color: rgba(0,0,0,0.7); z-index: 200; display: flex; align-items: center; justify-content: center; padding: 1rem; }
+      /* Sync Modal */
+      .sync-modal-overlay { position: fixed; inset: 0; background-color: rgba(0,0,0,0.7); z-index: 50; display: flex; align-items: center; justify-content: center; padding: 1rem; }
       .sync-modal { background-color: var(--theme-bg-surface); border-radius: 0.75rem; box-shadow: 0 10px 25px rgba(0,0,0,0.3); width: 100%; max-width: 450px; border: 1px solid var(--theme-border); display: flex; flex-direction: column; max-height: 90vh; }
       .sync-modal__header { display: flex; justify-content: space-between; align-items: center; padding: 1rem 1.5rem; border-bottom: 1px solid var(--theme-border); }
       .sync-modal__title { font-size: 1.25rem; font-weight: 600; color: var(--theme-text-primary); }

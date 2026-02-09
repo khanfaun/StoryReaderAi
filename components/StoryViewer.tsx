@@ -1,3 +1,4 @@
+
 import React, { useState, useCallback, useEffect, useRef, useMemo } from 'react';
 import type { Story, Chapter, CharacterStats, ReadingSettings, ChatMessage, ReadingHistoryItem, DownloadConfig } from '../types';
 import { getChapterContent, parseHtml, parseChapterContentFromDoc } from '../services/truyenfullService';
@@ -7,7 +8,6 @@ import { getStoryState, saveStoryState as saveStoryStateLocal, mergeChapterStats
 import { updateReadingHistory } from '../services/history';
 import * as dbService from '../services/dbService';
 import * as apiKeyService from '../services/apiKeyService';
-import * as driveService from '../services/googleDriveService'; // IMPORT DRIVE SERVICE
 import { splitChapterIntoChunks } from '../utils/textUtils';
 import { useTts } from '../hooks/useTts';
 
@@ -17,7 +17,7 @@ import LoadingSpinner from './LoadingSpinner';
 import CharacterPanel from './CharacterPanel';
 import ScrollToTopButton from './ScrollToTopButton';
 import CharacterPrimaryPanel from './CharacterPrimaryPanel';
-import ChatPanel from './ChatPanel'; 
+import ChatPanel from './ChatPanel'; // Có thể xóa import này nếu không dùng ChatPanel nữa
 import ApiKeyModal from './ApiKeyModal';
 import ManualImportModal from './ManualImportModal';
 
@@ -55,7 +55,7 @@ interface StoryViewerProps {
   setIsApiKeyModalOpen: (val: boolean) => void;
   tokenUsage: apiKeyService.TokenUsage;
   onDataChange: () => void;
-  onReadingModeChange: (isReading: boolean) => void; 
+  onReadingModeChange: (isReading: boolean) => void; // New prop
 
   // Search & Create Props
   onSearch: (query: string) => void;
@@ -179,10 +179,6 @@ const StoryViewer: React.FC<StoryViewerProps> = ({
         
         try {
             await setCachedChapter(storyToLoad.url, chapterUrl, { content, stats: null });
-            // Auto-save to Drive in background if signed in
-            if (driveService.isSignedIn()) {
-                driveService.saveChapterToDrive(storyToLoad, chapterUrl, { content, stats: null }).catch(console.error);
-            }
         } catch (e) {
             console.error("Failed to initial cache chapter", e);
         }
@@ -204,13 +200,6 @@ const StoryViewer: React.FC<StoryViewerProps> = ({
             setCumulativeStats(fullChapterState);
             persistStoryState(storyToLoad.url, fullChapterState);
             await setCachedChapter(storyToLoad.url, chapterUrl, { content, stats: fullChapterState });
-            
-            // Auto-save analyzed state to Drive
-            if (driveService.isSignedIn()) {
-                driveService.saveChapterToDrive(storyToLoad, chapterUrl, { content, stats: fullChapterState }).catch(console.error);
-                driveService.saveStoryMetadata({ ...storyToLoad, ...fullChapterState }).catch(console.error);
-            }
-
         } catch (analysisError) {
             if (currentOpId !== operationIdRef.current) return;
             handleApiError(analysisError);
@@ -235,18 +224,7 @@ const StoryViewer: React.FC<StoryViewerProps> = ({
         onReadChapterUpdate(chapter.url);
         
         try {
-            // 1. Check Local Cache
-            let cachedData = await getCachedChapter(storyToLoad.url, chapter.url);
-            
-            // 2. Check Drive (Lazy Load) if not in local and signed in
-            if (!cachedData && driveService.isSignedIn()) {
-                console.log("Lazy loading chapter from Drive...");
-                cachedData = await driveService.fetchChapterFromDrive(storyToLoad, chapter.url);
-                if (cachedData) {
-                    // Save to local cache for next time
-                    await setCachedChapter(storyToLoad.url, chapter.url, cachedData);
-                }
-            }
+            const cachedData = await getCachedChapter(storyToLoad.url, chapter.url);
             
             if (cachedData && cachedData.content) {
                 setChapterContent(cachedData.content);
@@ -329,11 +307,7 @@ const StoryViewer: React.FC<StoryViewerProps> = ({
         const chapter = story.chapters[selectedChapterIndex];
         setChapterContent(newContent);
         try {
-            const newData = { content: newContent, stats: cumulativeStats };
-            await setCachedChapter(story.url, chapter.url, newData);
-            if (driveService.isSignedIn()) {
-                driveService.saveChapterToDrive(story, chapter.url, newData).catch(console.error);
-            }
+            await setCachedChapter(story.url, chapter.url, { content: newContent, stats: cumulativeStats });
         } catch (e) {
             setError("Không thể lưu nội dung chỉnh sửa.");
         }
@@ -371,11 +345,7 @@ const StoryViewer: React.FC<StoryViewerProps> = ({
                 setCumulativeStats(fullChapterState);
                 persistStoryState(story.url, fullChapterState);
                 if (selectedChapterIndex !== null && story.chapters) {
-                    const newData = { content: chapterContent, stats: fullChapterState };
-                    await setCachedChapter(story.url, story.chapters[selectedChapterIndex].url, newData);
-                    if (driveService.isSignedIn()) {
-                        driveService.saveChapterToDrive(story, story.chapters[selectedChapterIndex].url, newData).catch(console.error);
-                    }
+                    await setCachedChapter(story.url, story.chapters[selectedChapterIndex].url, { content: chapterContent, stats: fullChapterState });
                 }
             }
         } catch (err) {
