@@ -1,30 +1,23 @@
 
 import React, { useState, useEffect } from 'react';
-import { CloseIcon, SpinnerIcon, UploadIcon, DownloadIcon, SyncIcon } from './icons';
-import { initGoogleDrive, signInToDrive, checkBackupStatus, backupToDriveSecure, restoreFromDrive } from '../services/sync';
+import { CloseIcon, SpinnerIcon, SyncIcon, CheckIcon, CloudIcon } from './icons';
+import { initGoogleDrive, signInToDrive, isAuthenticated, syncLibraryIndex } from '../services/sync';
 
 interface SyncModalProps {
   onClose: () => void;
-  // Removed old Firebase props
-  onSync?: () => Promise<boolean>; 
-  user?: any;
 }
 
 const SyncModal: React.FC<SyncModalProps> = ({ onClose }) => {
   const [status, setStatus] = useState('');
   const [isWorking, setIsWorking] = useState(false);
-  const [isSignedIn, setIsSignedIn] = useState(false);
-  const [backupInfo, setBackupInfo] = useState<{ exists: boolean; date?: string; size?: string } | null>(null);
+  const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [initError, setInitError] = useState<string | null>(null);
 
   useEffect(() => {
-    // Initialize Drive API on mount
     const init = async () => {
         try {
             await initGoogleDrive();
-            // Check if we have a token already (soft check) - actually we can't easily check validity without a call
-            // We'll rely on the user clicking "Login" or checking backup status failing to detect auth state
-            updateBackupInfo();
+            setIsLoggedIn(isAuthenticated());
         } catch (e) {
             setInitError("Không thể tải thư viện Google Drive. Vui lòng kiểm tra kết nối mạng.");
             console.error(e);
@@ -33,61 +26,51 @@ const SyncModal: React.FC<SyncModalProps> = ({ onClose }) => {
     init();
   }, []);
 
-  const updateBackupInfo = async () => {
-      const info = await checkBackupStatus();
-      setBackupInfo(info);
-      if (info.exists || info.date) {
-          setIsSignedIn(true); // Implicitly signed in if we can read appData
-      }
-  };
-
   const handleSignIn = async () => {
     setIsWorking(true);
-    setStatus('Đang mở cửa sổ đăng nhập Google...');
+    setStatus('Đang kết nối Google Drive...');
     try {
       await signInToDrive();
-      setStatus('Đăng nhập thành công!');
-      setIsSignedIn(true);
-      await updateBackupInfo();
+      setIsLoggedIn(true);
+      setStatus('Đăng nhập thành công! Đang đồng bộ danh sách truyện...');
+      
+      // Tự động đồng bộ danh sách ngay sau khi đăng nhập
+      await syncLibraryIndex();
+      
+      setStatus('Đồng bộ danh sách hoàn tất! Bạn có thể đóng cửa sổ này.');
+      setTimeout(() => {
+          // Tải lại trang để cập nhật danh sách truyện mới vào App state
+          window.location.reload(); 
+      }, 1500);
+
     } catch (error: any) {
-        setStatus('Đăng nhập thất bại.');
+        setStatus('Đăng nhập thất bại hoặc bị hủy.');
         console.error(error);
     } finally {
         setIsWorking(false);
     }
   };
 
-  const handleBackup = async () => {
+  const handleManualSyncIndex = async () => {
       setIsWorking(true);
+      setStatus("Đang tải danh sách truyện từ Drive...");
       try {
-          await backupToDriveSecure((msg) => setStatus(msg));
-          await updateBackupInfo();
+          await syncLibraryIndex();
+          setStatus("Đã cập nhật danh sách truyện mới nhất!");
+          setTimeout(() => window.location.reload(), 1000);
       } catch (e: any) {
-          setStatus(`Lỗi sao lưu: ${e.message}`);
+          setStatus("Lỗi đồng bộ: " + e.message);
       } finally {
           setIsWorking(false);
       }
-  };
-
-  const handleRestore = async () => {
-      if (!confirm("Cảnh báo: Hành động này sẽ GHI ĐÈ toàn bộ dữ liệu hiện tại bằng dữ liệu từ bản sao lưu. Bạn có chắc chắn muốn tiếp tục?")) return;
-      
-      setIsWorking(true);
-      try {
-          await restoreFromDrive((msg) => setStatus(msg));
-          // Success message handled in restoreFromDrive (which reloads page)
-      } catch (e: any) {
-          setStatus(`Lỗi khôi phục: ${e.message}`);
-          setIsWorking(false);
-      }
-  };
+  }
 
   return (
     <div className="sync-modal-overlay animate-fade-in" onClick={onClose} role="dialog" aria-modal="true">
       <div className="sync-modal animate-fade-in-up" onClick={(e) => e.stopPropagation()}>
         <header className="sync-modal__header">
           <h2 id="sync-modal-title" className="sync-modal__title flex items-center gap-2">
-              <SyncIcon className="w-6 h-6 text-[var(--theme-accent-primary)]" />
+              <CloudIcon className="w-6 h-6 text-[var(--theme-accent-primary)]" />
               Đồng bộ Google Drive
           </h2>
           <button onClick={onClose} className="sync-modal__close-btn" aria-label="Đóng">
@@ -98,15 +81,21 @@ const SyncModal: React.FC<SyncModalProps> = ({ onClose }) => {
         <div className="p-6">
           {initError ? (
               <p className="text-rose-400 text-center">{initError}</p>
-          ) : !isSignedIn ? (
+          ) : !isLoggedIn ? (
             <div>
-              <p className="sync-modal__description text-center">
-                Đăng nhập để lưu trữ an toàn truyện đã tải, lịch sử đọc và dữ liệu phân tích AI lên Google Drive của bạn. Dữ liệu được lưu trong thư mục riêng của ứng dụng.
-              </p>
+              <div className="text-center mb-6">
+                  <div className="bg-blue-900/30 p-4 rounded-full w-20 h-20 mx-auto flex items-center justify-center mb-4">
+                      <CloudIcon className="w-10 h-10 text-blue-400" />
+                  </div>
+                  <h3 className="text-lg font-bold text-[var(--theme-text-primary)] mb-2">Lưu trữ & Đồng bộ</h3>
+                  <p className="text-sm text-[var(--theme-text-secondary)]">
+                    Đăng nhập để tự động lưu truyện và dữ liệu AI vào Google Drive của bạn (Thư mục Ẩn). Dữ liệu sẽ được tải về khi bạn cần (Lazy Loading).
+                  </p>
+              </div>
               <button
                 onClick={handleSignIn}
                 disabled={isWorking}
-                className="w-full mt-4 bg-white hover:bg-gray-100 text-gray-800 font-semibold py-3 px-4 rounded-lg flex items-center justify-center gap-3 transition-colors duration-300 shadow-md border border-gray-300"
+                className="w-full bg-white hover:bg-gray-100 text-gray-800 font-semibold py-3 px-4 rounded-lg flex items-center justify-center gap-3 transition-colors duration-300 shadow-md border border-gray-300"
               >
                  {isWorking ? <SpinnerIcon className="sync-modal-form__spinner text-gray-600" /> : (
                      <>
@@ -118,40 +107,32 @@ const SyncModal: React.FC<SyncModalProps> = ({ onClose }) => {
             </div>
           ) : (
             <div className="space-y-6">
-                <div className="bg-[var(--theme-bg-base)] p-4 rounded-lg border border-[var(--theme-border)] text-center">
-                    <p className="text-sm font-semibold text-[var(--theme-text-primary)] mb-2">Trạng thái bản sao lưu trên Cloud</p>
-                    {backupInfo?.exists ? (
-                        <div className="text-[var(--theme-accent-primary)]">
-                            <p className="font-bold text-lg">Đã có bản sao lưu</p>
-                            <p className="text-xs text-[var(--theme-text-secondary)] mt-1">Ngày tạo: {backupInfo.date}</p>
-                            <p className="text-xs text-[var(--theme-text-secondary)]">Dung lượng: {backupInfo.size}</p>
-                        </div>
-                    ) : (
-                        <p className="text-[var(--theme-text-secondary)] text-sm">Chưa tìm thấy bản sao lưu nào.</p>
-                    )}
+                <div className="bg-emerald-900/20 p-4 rounded-lg border border-emerald-500/50 flex items-center gap-3">
+                    <div className="bg-emerald-500 rounded-full p-1"><CheckIcon className="w-5 h-5 text-white" /></div>
+                    <div>
+                        <p className="text-sm font-bold text-emerald-400">Đã kết nối Google Drive</p>
+                        <p className="text-xs text-emerald-200/70">Tài khoản của bạn đã sẵn sàng.</p>
+                    </div>
                 </div>
 
-                <div className="grid grid-cols-1 gap-3">
-                    <button
-                        onClick={handleBackup}
-                        className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3 px-4 rounded-lg flex items-center justify-center gap-2 transition-colors disabled:opacity-50"
-                        disabled={isWorking}
-                    >
-                        {isWorking && status.includes('sao lưu') ? <SpinnerIcon className="w-5 h-5 animate-spin" /> : <UploadIcon className="w-5 h-5" />}
-                        <span>Sao lưu lên Cloud</span>
-                    </button>
-                    <p className="text-[10px] text-center text-[var(--theme-text-secondary)]">Ghi đè bản sao lưu cũ trên Drive bằng dữ liệu hiện tại.</p>
-
-                    <button
-                        onClick={handleRestore}
-                        className="w-full bg-slate-700 hover:bg-slate-600 text-white font-bold py-3 px-4 rounded-lg flex items-center justify-center gap-2 transition-colors disabled:opacity-50 mt-2"
-                        disabled={isWorking || !backupInfo?.exists}
-                    >
-                        {isWorking && status.includes('khôi phục') ? <SpinnerIcon className="w-5 h-5 animate-spin" /> : <DownloadIcon className="w-5 h-5" />}
-                        <span>Khôi phục từ Cloud</span>
-                    </button>
-                    <p className="text-[10px] text-center text-[var(--theme-text-secondary)]">Tải dữ liệu từ Drive về máy và ghi đè dữ liệu hiện tại.</p>
+                <div className="bg-[var(--theme-bg-base)] p-4 rounded-lg border border-[var(--theme-border)] text-sm space-y-3">
+                    <p className="font-semibold text-[var(--theme-text-primary)]">Cơ chế hoạt động:</p>
+                    <ul className="list-disc list-inside text-[var(--theme-text-secondary)] space-y-1 pl-1">
+                        <li><strong>Khi mở App:</strong> Tự động tải danh sách truyện từ Drive.</li>
+                        <li><strong>Khi mở Truyện:</strong> Nếu truyện chưa có đủ chương, sẽ tải từ Drive.</li>
+                        <li><strong>Khi đọc Chương:</strong> Nếu nội dung chưa có, sẽ tải từ Drive.</li>
+                        <li><strong>Khi lưu/tải:</strong> Dữ liệu sẽ tự động được đẩy lên Drive.</li>
+                    </ul>
                 </div>
+
+                <button
+                    onClick={handleManualSyncIndex}
+                    disabled={isWorking}
+                    className="w-full bg-[var(--theme-accent-primary)] hover:brightness-110 text-white font-bold py-3 px-4 rounded-lg flex items-center justify-center gap-2 transition-colors disabled:opacity-50"
+                >
+                    {isWorking ? <SpinnerIcon className="w-5 h-5 animate-spin" /> : <SyncIcon className="w-5 h-5" />}
+                    <span>Làm mới danh sách truyện ngay</span>
+                </button>
             </div>
           )}
         </div>

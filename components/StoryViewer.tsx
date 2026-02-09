@@ -8,6 +8,7 @@ import { getStoryState, saveStoryState as saveStoryStateLocal, mergeChapterStats
 import { updateReadingHistory } from '../services/history';
 import * as dbService from '../services/dbService';
 import * as apiKeyService from '../services/apiKeyService';
+import * as syncService from '../services/sync'; // Import Sync Service
 import { splitChapterIntoChunks } from '../utils/textUtils';
 import { useTts } from '../hooks/useTts';
 
@@ -17,7 +18,7 @@ import LoadingSpinner from './LoadingSpinner';
 import CharacterPanel from './CharacterPanel';
 import ScrollToTopButton from './ScrollToTopButton';
 import CharacterPrimaryPanel from './CharacterPrimaryPanel';
-import ChatPanel from './ChatPanel'; // Có thể xóa import này nếu không dùng ChatPanel nữa
+import ChatPanel from './ChatPanel'; 
 import ApiKeyModal from './ApiKeyModal';
 import ManualImportModal from './ManualImportModal';
 
@@ -179,6 +180,10 @@ const StoryViewer: React.FC<StoryViewerProps> = ({
         
         try {
             await setCachedChapter(storyToLoad.url, chapterUrl, { content, stats: null });
+            // DRIVE SYNC: Sau khi có nội dung mới, đẩy lên Drive nếu đã đăng nhập
+            if (syncService.isAuthenticated()) {
+                syncService.saveChapterContentToDrive(storyToLoad.url, chapterUrl, { content, stats: null }).catch(console.error);
+            }
         } catch (e) {
             console.error("Failed to initial cache chapter", e);
         }
@@ -199,7 +204,14 @@ const StoryViewer: React.FC<StoryViewerProps> = ({
             
             setCumulativeStats(fullChapterState);
             persistStoryState(storyToLoad.url, fullChapterState);
-            await setCachedChapter(storyToLoad.url, chapterUrl, { content, stats: fullChapterState });
+            const dataToSave = { content, stats: fullChapterState };
+            await setCachedChapter(storyToLoad.url, chapterUrl, dataToSave);
+            
+            // DRIVE SYNC: Cập nhật lại với stats
+            if (syncService.isAuthenticated()) {
+                syncService.saveChapterContentToDrive(storyToLoad.url, chapterUrl, dataToSave).catch(console.error);
+            }
+
         } catch (analysisError) {
             if (currentOpId !== operationIdRef.current) return;
             handleApiError(analysisError);
@@ -224,6 +236,7 @@ const StoryViewer: React.FC<StoryViewerProps> = ({
         onReadChapterUpdate(chapter.url);
         
         try {
+            // 1. Kiểm tra Local Cache trước
             const cachedData = await getCachedChapter(storyToLoad.url, chapter.url);
             
             if (cachedData && cachedData.content) {
@@ -236,7 +249,30 @@ const StoryViewer: React.FC<StoryViewerProps> = ({
                 await processAndAnalyzeContent(storyToLoad, chapter.url, cachedData.content);
                 return;
             }
+
+            // 2. Nếu Local Cache trống & Đã đăng nhập Drive -> Thử tải từ Drive
+            if (syncService.isAuthenticated()) {
+                try {
+                    console.log("Checking Drive for chapter content...");
+                    const driveData = await syncService.fetchChapterContentFromDrive(storyToLoad.url, chapter.url);
+                    if (driveData && driveData.content) {
+                        setChapterContent(driveData.content);
+                        // Lưu lại vào Local Cache để lần sau đọc nhanh hơn
+                        await setCachedChapter(storyToLoad.url, chapter.url, driveData);
+                        if (driveData.stats) {
+                            setCumulativeStats(driveData.stats);
+                            setIsChapterLoading(false);
+                            return;
+                        }
+                        await processAndAnalyzeContent(storyToLoad, chapter.url, driveData.content);
+                        return;
+                    }
+                } catch (driveErr) {
+                    console.warn("Failed to fetch from Drive, falling back to Web/Ebook", driveErr);
+                }
+            }
             
+            // 3. Nếu Drive cũng không có -> Fetch từ Web hoặc Ebook
             let content = "";
             if (storyToLoad.source === 'Ebook' && initialEbookInstance) {
                 const { zip } = initialEbookInstance;
@@ -307,7 +343,12 @@ const StoryViewer: React.FC<StoryViewerProps> = ({
         const chapter = story.chapters[selectedChapterIndex];
         setChapterContent(newContent);
         try {
-            await setCachedChapter(story.url, chapter.url, { content: newContent, stats: cumulativeStats });
+            const dataToSave = { content: newContent, stats: cumulativeStats };
+            await setCachedChapter(story.url, chapter.url, dataToSave);
+            // Sync update to Drive
+            if(syncService.isAuthenticated()) {
+                syncService.saveChapterContentToDrive(story.url, chapter.url, dataToSave).catch(console.error);
+            }
         } catch (e) {
             setError("Không thể lưu nội dung chỉnh sửa.");
         }
@@ -345,7 +386,11 @@ const StoryViewer: React.FC<StoryViewerProps> = ({
                 setCumulativeStats(fullChapterState);
                 persistStoryState(story.url, fullChapterState);
                 if (selectedChapterIndex !== null && story.chapters) {
-                    await setCachedChapter(story.url, story.chapters[selectedChapterIndex].url, { content: chapterContent, stats: fullChapterState });
+                    const dataToSave = { content: chapterContent, stats: fullChapterState };
+                    await setCachedChapter(story.url, story.chapters[selectedChapterIndex].url, dataToSave);
+                    if(syncService.isAuthenticated()) {
+                        syncService.saveChapterContentToDrive(story.url, story.chapters[selectedChapterIndex].url, dataToSave).catch(console.error);
+                    }
                 }
             }
         } catch (err) {
@@ -423,6 +468,12 @@ const StoryViewer: React.FC<StoryViewerProps> = ({
             await setCachedChapter(targetStory.url, newChapter.url, { content, stats: null });
             await dbService.saveStory(updatedStory);
             onUpdateStory(updatedStory);
+            
+            // Sync to Drive
+            if(syncService.isAuthenticated()) {
+                syncService.saveStoryDetailsToDrive(updatedStory).catch(console.error);
+                syncService.saveChapterContentToDrive(targetStory.url, newChapter.url, { content, stats: null }).catch(console.error);
+            }
         } catch (e) {
             setError(`Lỗi tạo chương: ${(e as Error).message}`);
         }

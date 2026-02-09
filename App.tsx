@@ -8,6 +8,7 @@ import { useReadingSettings } from './hooks/useReadingSettings';
 import { getReadingHistory, saveReadingHistory, updateReadingHistory } from './services/history';
 import * as dbService from './services/dbService';
 import * as apiKeyService from './services/apiKeyService';
+import * as syncService from './services/sync'; // Import Sync Service
 import { parseEbookFile } from './services/ebookParser';
 import { useBackgroundDownload } from './hooks/useBackgroundDownload';
 import { useDownloader } from './hooks/useDownloader';
@@ -26,10 +27,9 @@ import StoryEditModal from './components/StoryEditModal';
 import DownloadModal from './components/DownloadModal';
 import ConfirmationModal from './components/ConfirmationModal';
 import GlobalDownloadManager from './components/GlobalDownloadManager';
-import SyncModal from './components/SyncModal'; // Import SyncModal
+import SyncModal from './components/SyncModal'; 
 import { PlusIcon, StopIcon, SpinnerIcon, CheckIcon, CloseIcon, UploadIcon, DownloadIcon } from './components/icons';
 
-// New Component for active story logic
 import StoryViewer from './components/StoryViewer';
 
 declare var JSZip: any;
@@ -68,13 +68,11 @@ const App: React.FC = () => {
   const [isDataLoading, setIsDataLoading] = useState<boolean>(false); 
   const [error, setError] = useState<string | null>(null);
   
-  // Track Reading Mode to adjust UI (Header title, hide global download manager)
   const [isReadingMode, setIsReadingMode] = useState<boolean>(false);
   
   const [backgroundLoadingStories, setBackgroundLoadingStories] = useState<Set<string>>(new Set());
   const [cachedChapters, setCachedChapters] = useState<Set<string>>(new Set());
 
-  // Using Hooks
   const { 
       backgroundDownloads,
       downloadQueue, 
@@ -101,7 +99,7 @@ const App: React.FC = () => {
   
   const [isUpdateModalOpen, setIsUpdateModalOpen] = useState(false);
   const [isHelpModalOpen, setIsHelpModalOpen] = useState(false);
-  const [isSyncModalOpen, setIsSyncModalOpen] = useState(false); // State for Sync Modal
+  const [isSyncModalOpen, setIsSyncModalOpen] = useState(false); 
   
   const [manualImportState, setManualImportState] = useState<ManualImportState>({
       isOpen: false, url: '', message: '', type: 'chapter', source: ''
@@ -120,7 +118,6 @@ const App: React.FC = () => {
   const [isTagDropdownOpen, setIsTagDropdownOpen] = useState(false);
   const tagDropdownRef = useRef<HTMLDivElement>(null);
 
-  // Close dropdown logic
   useEffect(() => {
       const handleClickOutside = (event: MouseEvent) => {
           if (tagDropdownRef.current && !tagDropdownRef.current.contains(event.target as Node)) {
@@ -142,22 +139,57 @@ const App: React.FC = () => {
   };
   
   const handleImportDataSuccess = () => {
-      // Triggered after import via DownloadModal, just force reload to be safe
-      // In StoryViewer, onDataChange handles local refresh. 
-      // For App level, we might want to refresh history/local stories.
       reloadDataFromStorage();
   };
 
   const reloadDataFromStorage = useCallback(async () => {
     setIsDataLoading(true);
-    // Note: Don't clear story here to avoid flickering if called during reading
+    
+    // 1. Tải dữ liệu Local
     const localHistory = getReadingHistory();
     const dbStories = await dbService.getAllStories();
-    setLocalStories(dbStories);
     
+    // 2. Nếu đã đăng nhập Drive, tải Index từ Drive về và hợp nhất (Lazy Sync)
+    try {
+        await syncService.initGoogleDrive(); // Đảm bảo init để check token
+        if (syncService.isAuthenticated()) {
+            console.log("Drive authenticated, lazy syncing index...");
+            // Lấy danh sách từ Drive
+            const driveStories = await syncService.fetchLibraryIndexFromDrive();
+            
+            // Hợp nhất: Thêm truyện từ Drive nếu Local chưa có
+            const mergedStories = [...dbStories];
+            const existingUrls = new Set(dbStories.map(s => s.url));
+            
+            let hasNewFromDrive = false;
+            for (const dStory of driveStories) {
+                if (!existingUrls.has(dStory.url)) {
+                    mergedStories.push(dStory);
+                    existingUrls.add(dStory.url);
+                    // Lưu metadata cơ bản vào local DB để hiển thị
+                    await dbService.saveStory(dStory); 
+                    hasNewFromDrive = true;
+                }
+            }
+            
+            if (hasNewFromDrive) {
+                setLocalStories(mergedStories);
+            } else {
+                setLocalStories(dbStories);
+            }
+        } else {
+            setLocalStories(dbStories);
+        }
+    } catch (e) {
+        console.warn("Sync check failed", e);
+        setLocalStories(dbStories);
+    }
+    
+    // 3. Xây dựng lịch sử đọc
     const historyMap = new Map(localHistory.map(item => [item.url, item]));
-    
-    dbStories.forEach(dbStory => {
+    const currentStories = await dbService.getAllStories(); // Lấy lại bản mới nhất sau khi merge
+
+    currentStories.forEach(dbStory => {
       if (!historyMap.has(dbStory.url)) {
            const placeholderItem: ReadingHistoryItem = {
               title: dbStory.title, author: dbStory.author, url: dbStory.url,
@@ -194,6 +226,11 @@ const App: React.FC = () => {
   useEffect(() => {
     const loadInitialData = async () => {
       setIsLoading(true);
+      // Init Drive trước khi load data
+      try {
+          await syncService.initGoogleDrive();
+      } catch(e) { console.warn("Google Drive API init failed", e); }
+
       await reloadDataFromStorage();
       
       const hasSeenUpdate = localStorage.getItem(UPDATE_MODAL_VERSION);
@@ -236,14 +273,25 @@ const App: React.FC = () => {
 
           let fullStory = selectedStory;
           
-          const needsFetching = (!selectedStory.chapters || selectedStory.chapters.length === 0 || forceFetch) 
-                                && selectedStory.source !== 'Local' && selectedStory.source !== 'Ebook';
+          // LAZY LOAD: Nếu truyện local chưa có chương (hoặc ít chương), thử tải từ Drive trước
+          if (syncService.isAuthenticated() && (!fullStory.chapters || fullStory.chapters.length === 0)) {
+              console.log("Checking Drive for story metadata...");
+              const driveStory = await syncService.fetchStoryDetailsFromDrive(fullStory.url);
+              if (driveStory) {
+                  console.log("Loaded story details from Drive.");
+                  fullStory = driveStory;
+                  await dbService.saveStory(fullStory); // Cache lại local
+              }
+          }
+
+          const needsFetching = (!fullStory.chapters || fullStory.chapters.length === 0 || forceFetch) 
+                                && fullStory.source !== 'Local' && fullStory.source !== 'Ebook';
           
           if (needsFetching) {
               if (loadingAbortRef.current) throw new Error("Đã hủy quá trình tải.");
-              setBackgroundLoadingStories(prev => new Set(prev).add(selectedStory.url));
+              setBackgroundLoadingStories(prev => new Set(prev).add(fullStory.url));
               
-              fullStory = await getStoryDetails(selectedStory, 
+              fullStory = await getStoryDetails(fullStory, 
                   async (updatedStory) => {
                       if (loadingAbortRef.current) return;
                       setStory(prev => {
@@ -263,7 +311,7 @@ const App: React.FC = () => {
                   () => {
                       setBackgroundLoadingStories(prev => {
                           const next = new Set(prev);
-                          next.delete(selectedStory.url);
+                          next.delete(fullStory.url);
                           return next;
                       });
                   }
@@ -273,6 +321,14 @@ const App: React.FC = () => {
           if (loadingAbortRef.current) throw new Error("Đã hủy quá trình tải.");
 
           await dbService.saveStory(fullStory);
+          
+          // DRIVE SYNC: Sau khi có metadata đầy đủ, lưu lên Drive
+          if (syncService.isAuthenticated()) {
+              syncService.saveStoryDetailsToDrive(fullStory).catch(console.error);
+              // Cập nhật index vì có thể có truyện mới
+              syncService.syncLibraryIndex().catch(console.error);
+          }
+
           setLocalStories(prev => {
               if (prev.some(s => s.url === fullStory.url)) {
                   return prev.map(s => s.url === fullStory.url ? fullStory : s);
@@ -305,71 +361,21 @@ const App: React.FC = () => {
   };
 
   const handleSelectStory = useCallback(async (selectedStory: Story) => {
-      if (selectedStory.source === 'Ebook' || selectedStory.source === 'Local') {
-          handleSelectStoryInternal(selectedStory);
-          return;
-      }
-
+      // Logic chọn truyện
       const existingStory = await dbService.getStory(selectedStory.url);
-      if (existingStory && existingStory.chapters && existingStory.chapters.length > 0) {
+      
+      if (existingStory) {
            handleSelectStoryInternal(existingStory);
-           if (existingStory.chapters.length > 10) {
+           // Nêu local có, check xem có cần fetch thêm không (ví dụ ít chương quá)
+           if (existingStory.chapters && existingStory.chapters.length > 10 && existingStory.source !== 'Local' && existingStory.source !== 'Ebook') {
                runBackgroundContentFetcher(existingStory, 10);
            }
            return;
       }
+      
+      // Nếu không có local, gọi hàm internal để xử lý (nó sẽ check Drive -> Web)
+      handleSelectStoryInternal(selectedStory);
 
-      setIsDataLoading(true); 
-      loadingAbortRef.current = false;
-      try {
-          if (loadingAbortRef.current) return;
-          let fullStory = await getStoryDetails(selectedStory, undefined, () => {});
-          
-          if (loadingAbortRef.current) return;
-
-          await dbService.saveStory(fullStory);
-          setLocalStories(prev => [fullStory, ...prev.filter(s => s.url !== fullStory.url)]);
-          
-          if (fullStory.chapters && fullStory.chapters.length > 0) {
-              const preloadCount = Math.min(fullStory.chapters.length, 10);
-              const toLoad = fullStory.chapters.slice(0, preloadCount);
-              
-              await Promise.all(toLoad.map(async (c) => {
-                   if (loadingAbortRef.current) return;
-                   try {
-                      // Check cache first to be safe
-                      // getCachedChapter logic handles DB read
-                      const cached = await dbService.getChapterData(fullStory.url, c.url);
-                      if (!cached) {
-                          // Note: getChapterContent needs to be imported or available. 
-                          // It is imported from truyenfullService
-                          const { getChapterContent } = await import('./services/truyenfullService');
-                          const content = await getChapterContent(c, fullStory.source);
-                          await setCachedChapter(fullStory.url, c.url, { content, stats: null });
-                      }
-                   } catch(e) { 
-                       console.warn(`Failed to preload chapter ${c.title}`, e);
-                   }
-              }));
-              
-              if (loadingAbortRef.current) return;
-
-              handleSelectStoryInternal(fullStory); 
-              
-              if (fullStory.chapters.length > 10) {
-                  runBackgroundContentFetcher(fullStory, 10);
-              }
-          } else {
-              handleSelectStoryInternal(fullStory);
-          }
-
-      } catch (e) {
-          if (!loadingAbortRef.current) {
-            setError(`Lỗi khởi tạo truyện: ${(e as Error).message}`);
-          }
-      } finally {
-          setIsDataLoading(false);
-      }
   }, [runBackgroundContentFetcher]);
 
   const handleCancelLoading = () => {
@@ -448,6 +454,13 @@ const App: React.FC = () => {
      try {
          if (storyData.ebookFile) await dbService.saveEbook(newStory.url, storyData.ebookFile);
          await dbService.saveStory(newStory);
+         
+         // DRIVE SYNC: Lưu truyện mới tạo
+         if (syncService.isAuthenticated()) {
+             await syncService.saveStoryDetailsToDrive(newStory);
+             await syncService.syncLibraryIndex();
+         }
+
          setLocalStories(prev => [newStory, ...prev]);
          if (isEbook && storyData.ebookFile) {
              const zip = await JSZip.loadAsync(storyData.ebookFile);
@@ -471,6 +484,10 @@ const App: React.FC = () => {
           setStory(updatedStory);
           setLocalStories(prev => prev.map(s => s.url === updatedStory.url ? updatedStory : s));
           
+          if (syncService.isAuthenticated()) {
+              syncService.saveStoryDetailsToDrive(updatedStory).catch(console.error);
+          }
+
           const history = getReadingHistory();
           const existingIndex = history.findIndex(item => item.url === updatedStory.url);
           if (existingIndex > -1) {
@@ -492,6 +509,7 @@ const App: React.FC = () => {
           saveReadingHistory(history);
           setReadingHistory(history);
           setLocalStories(prev => prev.filter(s => s.url !== storyToDelete.url));
+          // Note: Currently not deleting from Drive to prevent accidental data loss, user can manually delete in Drive if needed or implement later
           handleBackToMain();
       } catch (e) {
           setError(`Lỗi xóa truyện: ${(e as Error).message}`);
@@ -538,8 +556,22 @@ const App: React.FC = () => {
              const storedStory = await dbService.getStory(item.url);
              if (storedStory) storyToLoad = storedStory; else throw new Error("Thông tin truyện không tìm thấy.");
         } else {
-             const storedStory = await dbService.getStory(item.url);
-             if (storedStory) storyToLoad = storedStory; else { if (item.source === 'Local') throw new Error("Truyện này đã bị xóa."); storyToLoad = await getStoryFromUrl(item.url); }
+             // Thử lấy từ local DB
+             let storedStory = await dbService.getStory(item.url);
+             
+             // Nếu local chưa có nhưng đã login Drive, thử tải về (Lazy Sync)
+             if (!storedStory && syncService.isAuthenticated()) {
+                 console.log("Lazy loading story details from Drive for history item...");
+                 storedStory = await syncService.fetchStoryDetailsFromDrive(item.url);
+                 if (storedStory) await dbService.saveStory(storedStory);
+             }
+
+             if (storedStory) {
+                 storyToLoad = storedStory;
+             } else { 
+                 if (item.source === 'Local') throw new Error("Truyện này đã bị xóa."); 
+                 storyToLoad = await getStoryFromUrl(item.url); 
+             }
         }
         if (storyToLoad) {
             setStory(storyToLoad);
@@ -581,7 +613,6 @@ const App: React.FC = () => {
 
   // Main Render Logic
   
-  // If a story is selected, delegate to StoryViewer
   if (story) {
       return (
           <div className="flex flex-col min-h-screen bg-[var(--theme-bg-base)] text-[var(--theme-text-primary)] font-sans transition-colors duration-300 relative">
@@ -590,7 +621,7 @@ const App: React.FC = () => {
                 onOpenUpdateModal={() => setIsUpdateModalOpen(true)} 
                 onGoHome={handleBackToMain} 
                 storyTitle={isReadingMode ? story.title : undefined}
-                onOpenSyncModal={() => setIsSyncModalOpen(true)} // Pass handler
+                onOpenSyncModal={() => setIsSyncModalOpen(true)} 
               />
               
               <StoryViewer 
@@ -627,14 +658,12 @@ const App: React.FC = () => {
                   onDataChange={reloadDataFromStorage}
                   onReadingModeChange={setIsReadingMode}
 
-                  // Pass Search & Create props
                   onSearch={handleSearch}
                   isSearchLoading={isDataLoading}
                   onOpenHelpModal={() => setIsHelpModalOpen(true)}
                   onCreateStory={() => setIsCreateStoryModalOpen(true)}
               />
               
-              {/* GLOBAL DOWNLOAD MANAGER (Hidden when Reading) */}
               {!isReadingMode && (
                   <GlobalDownloadManager 
                       activeDownloads={backgroundDownloads}
@@ -656,12 +685,12 @@ const App: React.FC = () => {
       )
   }
 
-  // Otherwise, render Library / Dashboard
+  // Dashboard logic unchanged except for props passed to components
+  // ... (giữ nguyên phần render Dashboard) ...
   const appContentClass = isApiKeyModalOpen || isUpdateModalOpen || isHelpModalOpen || manualImportState.isOpen || isCreateStoryModalOpen || isDownloadModalOpen || isSyncModalOpen ? 'blur-sm pointer-events-none' : '';
 
   return (
     <div className="flex flex-col min-h-screen bg-[var(--theme-bg-base)] text-[var(--theme-text-primary)] font-sans transition-colors duration-300 relative">
-      {/* GLOBAL DOWNLOAD PROGRESS TOAST - REMOVED (Replaced by GlobalDownloadManager) */}
       {downloadStatus.isProcessing && (
           <div className="fixed bottom-14 left-4 z-[200] max-w-sm w-full bg-[var(--theme-bg-surface)] border border-[var(--theme-border)] rounded-lg shadow-2xl p-4 animate-fade-in-up">
               <div className="flex justify-between items-center mb-2">
@@ -693,7 +722,7 @@ const App: React.FC = () => {
             onOpenApiKeySettings={() => setIsApiKeyModalOpen(true)} 
             onOpenUpdateModal={() => setIsUpdateModalOpen(true)} 
             onGoHome={handleBackToMain} 
-            onOpenSyncModal={() => setIsSyncModalOpen(true)} // Pass handler
+            onOpenSyncModal={() => setIsSyncModalOpen(true)} 
         />
         <main className="max-w-screen-2xl mx-auto px-4 py-8 sm:py-12 flex-grow mb-16">
             <div className="mb-8 flex flex-col sm:flex-row gap-4 items-stretch sm:items-center">
@@ -707,7 +736,6 @@ const App: React.FC = () => {
                 )}
             </div>
             
-            {/* Main Content Area */}
             {(isLoading || isDataLoading) ? (
                 <LoadingSpinner>
                     <div className="text-center mt-4 space-y-2">
@@ -767,7 +795,6 @@ const App: React.FC = () => {
                                 </div>
                             )}
                             
-                            {/* Separate Offline and Online Stories */}
                             {offlineStories.length > 0 && (
                                 <div className="mb-8">
                                     <h3 className="text-lg font-bold text-[var(--theme-accent-primary)] mb-4 flex items-center gap-2">
@@ -792,7 +819,6 @@ const App: React.FC = () => {
             )}
         </main>
         
-        {/* GLOBAL DOWNLOAD MANAGER (Library Mode) */}
         {!isReadingMode && (
             <GlobalDownloadManager 
                 activeDownloads={backgroundDownloads}
@@ -819,7 +845,6 @@ const App: React.FC = () => {
         <p>Bạn có chắc chắn muốn xóa truyện <strong className="text-[var(--theme-text-primary)]">{deleteConfirmation.item?.title}</strong> {' '}vĩnh viễn không?</p>
         <p className="mt-2 text-sm text-rose-400">Hành động này không thể hoàn tác.</p>
       </ConfirmationModal>
-      {/* Sync Modal */}
       {isSyncModalOpen && <SyncModal onClose={() => setIsSyncModalOpen(false)} />}
     </div>
   );
