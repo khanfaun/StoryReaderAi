@@ -180,21 +180,21 @@ const DownloadModal: React.FC<DownloadModalProps> = ({
   };
 
   const confirmSignOut = () => {
-      // Đánh dấu để UI biết đang xử lý (có thể thêm spinner nếu cần)
+      // 1. Đóng modal ngay lập tức
       setIsSignOutConfirmOpen(false);
-      
-      // Gọi service để đăng xuất (xóa token, cache)
-      driveService.signOut(() => {
-          // Callback này sẽ được gọi khi service hoàn tất
-          console.log("Service logout complete. Reloading...");
-          window.location.reload();
-      });
 
-      // BACKUP: Buộc reload sau 1 giây nếu callback trên bị treo (do lỗi Google API chẳng hạn)
-      setTimeout(() => {
-          console.log("Force reloading page...");
-          window.location.reload();
-      }, 1000);
+      // 2. Xóa dữ liệu local ngay lập tức (không chờ callback)
+      localStorage.removeItem('gdrive_user_cache');
+      
+      // 3. Gọi service revoke token (Fire and forget - không quan tâm kết quả)
+      try {
+          driveService.signOut(() => {}); 
+      } catch (e) {
+          console.warn("Revoke token warning:", e);
+      }
+
+      // 4. Force Reload trang ngay lập tức để reset toàn bộ state
+      window.location.reload();
   };
 
   const handleDriveUpload = async () => {
@@ -483,8 +483,8 @@ const DownloadModal: React.FC<DownloadModalProps> = ({
                     {activeTab === 'drive' && (
                         <div className="space-y-6 animate-fade-in">
                             <div className="space-y-6">
-                                {/* User Info Card - Always visible */}
-                                <div className={`p-4 bg-[var(--theme-bg-base)] border border-[var(--theme-border)] rounded-lg transition-opacity ${!googleUser ? 'opacity-90' : 'opacity-100'}`}>
+                                {/* User Info Card - Always visible but styled based on login status */}
+                                <div className={`p-4 bg-[var(--theme-bg-base)] border border-[var(--theme-border)] rounded-lg transition-all ${!googleUser ? 'border-dashed border-slate-600' : ''}`}>
                                     <div className="flex items-center justify-between mb-3">
                                         <div className="flex items-center gap-3">
                                             {googleUser?.imageUrl ? (
@@ -503,39 +503,46 @@ const DownloadModal: React.FC<DownloadModalProps> = ({
                                                 </p>
                                             </div>
                                         </div>
-                                        <span className={`text-[10px] font-bold px-2 py-1 rounded-full border flex items-center gap-1 ${googleUser ? 'bg-green-900/30 text-green-400 border-green-800' : 'bg-slate-700 text-slate-300 border-slate-600'}`}>
-                                            <span className={`w-2 h-2 rounded-full ${googleUser ? 'bg-green-500 animate-pulse' : 'bg-slate-400'}`}></span>
-                                            {googleUser ? 'Đã kết nối' : 'Chưa kết nối'}
-                                        </span>
+                                        {/* Status Badge & Toggle Button Group */}
+                                        <div className="flex flex-col items-end gap-2">
+                                            <span className={`text-[10px] font-bold px-2 py-1 rounded-full border flex items-center gap-1 ${googleUser ? 'bg-green-900/30 text-green-400 border-green-800' : 'bg-slate-700 text-slate-300 border-slate-600'}`}>
+                                                <span className={`w-2 h-2 rounded-full ${googleUser ? 'bg-green-500 animate-pulse' : 'bg-slate-400'}`}></span>
+                                                {googleUser ? 'Đã kết nối' : 'Chưa kết nối'}
+                                            </span>
+                                            
+                                            {/* Sign In / Sign Out Button */}
+                                            {googleUser ? (
+                                                <button 
+                                                    onClick={handleDriveSignOut}
+                                                    className="text-xs text-rose-400 hover:text-rose-300 hover:underline"
+                                                >
+                                                    Đăng xuất
+                                                </button>
+                                            ) : (
+                                                <button 
+                                                    onClick={handleDriveSignIn}
+                                                    className="text-xs font-bold text-[var(--theme-accent-primary)] hover:underline flex items-center gap-1"
+                                                >
+                                                    <svg className="w-3 h-3" viewBox="0 0 24 24" fill="currentColor"><path d="M12.0003 3C16.9709 3 21.0003 7.02944 21.0003 12C21.0003 16.9706 16.9709 21 12.0003 21C7.02974 21 3.00031 16.9706 3.00031 12C3.00031 7.02944 7.02974 3 12.0003 3ZM12.0003 16V13H8.00031V11H12.0003V8L17.0003 12L12.0003 16Z"/></svg>
+                                                    Đăng nhập ngay
+                                                </button>
+                                            )}
+                                        </div>
                                     </div>
                                     
-                                    <div className="flex items-center justify-between pt-3 border-t border-[var(--theme-border)]">
-                                        <div className={`flex items-center gap-2 ${!googleUser ? 'opacity-50 pointer-events-none' : ''}`}>
-                                            <button 
-                                                onClick={toggleAutoSync}
-                                                className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors focus:outline-none ${autoSync ? 'bg-[var(--theme-accent-primary)]' : 'bg-gray-700'}`}
-                                            >
-                                                <span className={`inline-block h-3 w-3 transform rounded-full bg-white transition-transform ${autoSync ? 'translate-x-5' : 'translate-x-1'}`} />
-                                            </button>
-                                            <span className="text-xs text-[var(--theme-text-secondary)]">Tự động đồng bộ</span>
+                                    {googleUser && (
+                                        <div className="flex items-center justify-between pt-3 border-t border-[var(--theme-border)]">
+                                            <div className="flex items-center gap-2">
+                                                <button 
+                                                    onClick={toggleAutoSync}
+                                                    className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors focus:outline-none ${autoSync ? 'bg-[var(--theme-accent-primary)]' : 'bg-gray-700'}`}
+                                                >
+                                                    <span className={`inline-block h-3 w-3 transform rounded-full bg-white transition-transform ${autoSync ? 'translate-x-5' : 'translate-x-1'}`} />
+                                                </button>
+                                                <span className="text-xs text-[var(--theme-text-secondary)]">Tự động đồng bộ</span>
+                                            </div>
                                         </div>
-                                        {googleUser ? (
-                                            <button 
-                                                onClick={handleDriveSignOut}
-                                                className="text-xs text-rose-400 hover:text-rose-300 hover:underline"
-                                            >
-                                                Đăng xuất
-                                            </button>
-                                        ) : (
-                                            <button 
-                                                onClick={handleDriveSignIn}
-                                                className="text-xs font-bold text-[var(--theme-accent-primary)] hover:underline flex items-center gap-1"
-                                            >
-                                                <svg className="w-3 h-3" viewBox="0 0 24 24" fill="currentColor"><path d="M12.0003 3C16.9709 3 21.0003 7.02944 21.0003 12C21.0003 16.9706 16.9709 21 12.0003 21C7.02974 21 3.00031 16.9706 3.00031 12C3.00031 7.02944 7.02974 3 12.0003 3ZM12.0003 16V13H8.00031V11H12.0003V8L17.0003 12L12.0003 16Z"/></svg>
-                                                Đăng nhập ngay
-                                            </button>
-                                        )}
-                                    </div>
+                                    )}
                                 </div>
                                 
                                 {loginSuccess && (
@@ -613,7 +620,7 @@ const DownloadModal: React.FC<DownloadModalProps> = ({
         >
             <p>Bạn có chắc chắn muốn đăng xuất?</p>
             <p className="text-xs text-[var(--theme-text-secondary)] mt-2">
-                Trang web sẽ được tải lại để xóa các dữ liệu phiên làm việc.
+                Hệ thống sẽ tải lại trang để xóa dữ liệu phiên làm việc.
             </p>
         </ConfirmationModal>
     </>
