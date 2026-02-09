@@ -63,6 +63,7 @@ const App: React.FC = () => {
   const [searchResults, setSearchResults] = useState<Story[] | null>(null);
   const [localStories, setLocalStories] = useState<Story[]>([]);
   const [story, setStory] = useState<Story | null>(null);
+  const [initialChapterIndex, setInitialChapterIndex] = useState<number | null>(null); // State mới để điều hướng trực tiếp
   
   const [isLoading, setIsLoading] = useState<boolean>(true); 
   const [isDataLoading, setIsDataLoading] = useState<boolean>(false); 
@@ -472,6 +473,7 @@ const App: React.FC = () => {
 
   const handleBackToMain = () => {
     setStory(null);
+    setInitialChapterIndex(null); // Reset chỉ số chương khởi tạo
     setEbookInstance(null); // Reset ebook instance
     setIsReadingMode(false); // Reset reading mode
   };
@@ -616,7 +618,20 @@ const App: React.FC = () => {
                  storyToLoad = await getStoryFromUrl(item.url); 
              }
         }
+        
         if (storyToLoad) {
+            // Tìm index của chương cuối cùng đã đọc để nhảy tới
+            if (storyToLoad.chapters && item.lastChapterUrl) {
+                const chapterIndex = storyToLoad.chapters.findIndex(c => c.url === item.lastChapterUrl);
+                if (chapterIndex !== -1) {
+                    setInitialChapterIndex(chapterIndex);
+                } else {
+                    setInitialChapterIndex(0); // Mặc định về chương đầu nếu không tìm thấy
+                }
+            } else {
+                setInitialChapterIndex(0);
+            }
+
             setStory(storyToLoad);
             const savedRead = localStorage.getItem(`readChapters_${storyToLoad.url}`);
             if (savedRead) setReadChapters(new Set(JSON.parse(savedRead)));
@@ -670,6 +685,7 @@ const App: React.FC = () => {
               <StoryViewer 
                   story={story}
                   initialEbookInstance={ebookInstance}
+                  initialChapterIndex={initialChapterIndex} // Truyền index chương cần đọc
                   settings={settings}
                   onSettingsChange={setSettings}
                   onBack={handleBackToMain}

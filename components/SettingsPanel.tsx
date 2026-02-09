@@ -235,7 +235,7 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
                     </div>
                 </div>
 
-                {/* Mobile Only: Tools Section */}
+                {/* Mobile Only: Tools Section - Hidden on Tablet (md) and Desktop */}
                 <div className="md:hidden pt-4 border-t border-[var(--theme-border)]">
                     <label className="block text-xs font-medium text-[var(--theme-text-secondary)] mb-2">Công cụ tiện ích</label>
                     <div className="grid grid-cols-3 gap-2">

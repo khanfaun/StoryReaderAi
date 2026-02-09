@@ -29,6 +29,7 @@ interface EbookHandler {
 interface StoryViewerProps {
   story: Story;
   initialEbookInstance: EbookHandler | null;
+  initialChapterIndex?: number | null; // Prop mới
   settings: ReadingSettings;
   onSettingsChange: (settings: ReadingSettings) => void;
   onBack: () => void;
@@ -83,7 +84,7 @@ interface TtsState {
 }
 
 const StoryViewer: React.FC<StoryViewerProps> = ({
-    story, initialEbookInstance, settings, onSettingsChange, onBack,
+    story, initialEbookInstance, initialChapterIndex, settings, onSettingsChange, onBack,
     onUpdateStory, onDeleteStory, readChapters, onReadChapterUpdate, setReadingHistory,
     backgroundDownloads, downloadQueue, cachedChapters, onPauseDownload, onResumeDownload, onStopDownload, onStartBackgroundDownload, onStartDownloadExport, onRedownload,
     setIsBottomNavForReadingVisible, isBottomNavForReadingVisible, onTokenUsageUpdate,
@@ -91,7 +92,7 @@ const StoryViewer: React.FC<StoryViewerProps> = ({
     onSearch, isSearchLoading, onOpenHelpModal, onCreateStory
 }) => {
     // Local State specific to the active story session
-    const [selectedChapterIndex, setSelectedChapterIndex] = useState<number | null>(null);
+    const [selectedChapterIndex, setSelectedChapterIndex] = useState<number | null>(initialChapterIndex ?? null);
     const [chapterContent, setChapterContent] = useState<string | null>(null);
     const [isChapterLoading, setIsChapterLoading] = useState<boolean>(false);
     const [error, setError] = useState<string | null>(null);
@@ -127,15 +128,30 @@ const StoryViewer: React.FC<StoryViewerProps> = ({
         onReadingModeChange(isReading);
     }, [isReading, onReadingModeChange]);
 
-    // Load initial stats when story mounts
+    // Load initial stats when story mounts OR update when chapter changes logic is handled in fetchChapter
     useEffect(() => {
-        const stats = getStoryState(story.url);
-        setCumulativeStats(stats || {});
-        // If story changes, reset view
+        // Chỉ tải state tổng quan nếu không đang đọc chương cụ thể
+        if (initialChapterIndex === null || initialChapterIndex === undefined) {
+            const stats = getStoryState(story.url);
+            setCumulativeStats(stats || {});
+        }
+        
         return () => {
             cleanupTts();
         };
-    }, [story.url]);
+    }, [story.url, initialChapterIndex]);
+
+    // Effect để tự động tải chương nếu có initialChapterIndex
+    useEffect(() => {
+        if (initialChapterIndex !== null && initialChapterIndex !== undefined && story.chapters && initialChapterIndex < story.chapters.length) {
+            // Sử dụng một hàm async IIFE để gọi fetchChapter
+            (async () => {
+                await fetchChapter(story, initialChapterIndex);
+            })();
+        }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []); // Chỉ chạy 1 lần khi mount hoặc khi story/index thay đổi lớn (thực tế story object đổi thì component này remount)
+
 
     const cleanupTts = useCallback(() => {
         window.speechSynthesis.cancel();
@@ -169,11 +185,14 @@ const StoryViewer: React.FC<StoryViewerProps> = ({
         setChapterContent(null);
         setError(null);
         setIsPanelVisible(false);
+        // Refresh global state when going back to detail view
+        const stats = getStoryState(story.url);
+        setCumulativeStats(stats || {});
     };
 
     // --- Content Fetching & Analysis ---
 
-    const processAndAnalyzeContent = useCallback(async (storyToLoad: Story, chapterUrl: string, content: string) => {
+    const processAndAnalyzeContent = useCallback(async (storyToLoad: Story, chapterUrl: string, content: string, overrideBaseStats?: CharacterStats | null) => {
         const currentOpId = ++operationIdRef.current;
         
         setChapterContent(content);
@@ -194,7 +213,9 @@ const StoryViewer: React.FC<StoryViewerProps> = ({
 
         setIsAnalyzing(true);
         try {
-            const baseStats = cumulativeStats || {};
+            // SỬA ĐỔI: Sử dụng baseStats được truyền vào (từ chương trước) thay vì state hiện tại
+            const baseStats = overrideBaseStats !== undefined ? (overrideBaseStats || {}) : (cumulativeStats || {});
+            
             const { data: deltaStats, usage } = await analyzeChapterForCharacterStats(content, baseStats);
             
             if (currentOpId !== operationIdRef.current) return; 
@@ -224,6 +245,9 @@ const StoryViewer: React.FC<StoryViewerProps> = ({
     const fetchChapter = useCallback(async (storyToLoad: Story, chapterIndex: number) => {
         if (!storyToLoad || !storyToLoad.chapters || chapterIndex < 0 || chapterIndex >= storyToLoad.chapters.length) return;
         
+        // SỬA ĐỔI: Reset stats ngay lập tức để tránh hiển thị dữ liệu của chương cũ
+        setCumulativeStats(null);
+        
         cleanupTts();
         const chapter = storyToLoad.chapters[chapterIndex];
         
@@ -247,7 +271,20 @@ const StoryViewer: React.FC<StoryViewerProps> = ({
                     setIsChapterLoading(false); 
                     return; 
                 }
-                await processAndAnalyzeContent(storyToLoad, chapter.url, cachedData.content);
+                
+                // SỬA ĐỔI: Nếu không có stats của chương này, tìm stats của chương trước để làm cơ sở
+                let prevStats = null;
+                if (chapterIndex > 0) {
+                    const prevChapUrl = storyToLoad.chapters[chapterIndex - 1].url;
+                    const prevCache = await dbService.getChapterData(storyToLoad.url, prevChapUrl);
+                    if (prevCache && prevCache.stats) {
+                        prevStats = prevCache.stats;
+                    }
+                }
+                
+                // Nếu là chương đầu tiên hoặc không tìm thấy stats chương trước, dùng object rỗng hoặc global state (cân nhắc)
+                // Ở đây dùng prevStats || {} để đảm bảo tính cô lập
+                await processAndAnalyzeContent(storyToLoad, chapter.url, cachedData.content, prevStats);
                 return;
             }
 
@@ -265,7 +302,16 @@ const StoryViewer: React.FC<StoryViewerProps> = ({
                             setIsChapterLoading(false);
                             return;
                         }
-                        await processAndAnalyzeContent(storyToLoad, chapter.url, driveData.content);
+                        
+                        // Tương tự, tìm stats chương trước
+                        let prevStats = null;
+                        if (chapterIndex > 0) {
+                            const prevChapUrl = storyToLoad.chapters[chapterIndex - 1].url;
+                            const prevCache = await dbService.getChapterData(storyToLoad.url, prevChapUrl);
+                            prevStats = prevCache?.stats || null;
+                        }
+
+                        await processAndAnalyzeContent(storyToLoad, chapter.url, driveData.content, prevStats);
                         return;
                     }
                 } catch (driveErr) {
@@ -295,7 +341,15 @@ const StoryViewer: React.FC<StoryViewerProps> = ({
                  content = await getChapterContent(chapter, storyToLoad.source);
             }
             
-            await processAndAnalyzeContent(storyToLoad, chapter.url, content);
+            // Tương tự, tìm stats chương trước cho trường hợp fetch mới
+            let prevStats = null;
+            if (chapterIndex > 0) {
+                const prevChapUrl = storyToLoad.chapters[chapterIndex - 1].url;
+                const prevCache = await dbService.getChapterData(storyToLoad.url, prevChapUrl);
+                prevStats = prevCache?.stats || null;
+            }
+
+            await processAndAnalyzeContent(storyToLoad, chapter.url, content, prevStats);
             
         } catch (err) {
             const error = err as Error;
@@ -376,6 +430,7 @@ const StoryViewer: React.FC<StoryViewerProps> = ({
         const currentOpId = ++operationIdRef.current;
 
         try {
+            // Sử dụng stats hiện tại làm base cho re-analyze
             const baseStats = cumulativeStats || {};
             const { data: deltaStats, usage } = await analyzeChapterForCharacterStats(chapterContent, baseStats);
 
@@ -498,10 +553,20 @@ const StoryViewer: React.FC<StoryViewerProps> = ({
         }
     };
 
+    // Loading State specifically for initial navigation
+    if (initialChapterIndex !== null && initialChapterIndex !== undefined && chapterContent === null && !error) {
+         return (
+            <div className="flex flex-col items-center justify-center min-h-[50vh]">
+                <LoadingSpinner />
+                <p className="mt-4 text-[var(--theme-text-secondary)]">Đang tải chương...</p>
+            </div>
+         );
+    }
+
     if (isReading && story.chapters) {
         return (
-            <div className="grid grid-cols-1 lg:grid-cols-[24rem_minmax(0,1fr)_24rem] xl:grid-cols-[28rem_minmax(0,1fr)_28rem] lg:gap-8 w-full px-4 sm:px-8 py-8 sm:py-12 flex-grow">
-                <aside className="hidden lg:block sticky top-8 self-start">
+            <div className="grid grid-cols-1 xl:grid-cols-[24rem_minmax(0,1fr)_24rem] 2xl:grid-cols-[28rem_minmax(0,1fr)_28rem] xl:gap-8 w-full px-4 sm:px-8 py-8 sm:py-12 flex-grow">
+                <aside className="hidden xl:block sticky top-8 self-start">
                     <CharacterPrimaryPanel 
                         stats={cumulativeStats} 
                         isAnalyzing={isAnalyzing} 
@@ -512,7 +577,7 @@ const StoryViewer: React.FC<StoryViewerProps> = ({
                 </aside>
                 <div className="min-w-0">
                     <ChapterContent
-                        story={story} currentChapterIndex={selectedChapterIndex!} content={chapterContent}
+                        story={story} currentChapterIndex={selectedChapterIndex!} content={chapterContent || ''}
                         onBack={handleBackToStory} onPrev={handlePrevChapter} onNext={handleNextChapter}
                         onSelectChapter={handleSelectChapter} readChapters={readChapters} settings={settings}
                         onSettingsChange={onSettingsChange} onNavBarVisibilityChange={setIsBottomNavForReadingVisible}
@@ -528,7 +593,7 @@ const StoryViewer: React.FC<StoryViewerProps> = ({
                         onToggleStats={() => setIsPanelVisible(!isPanelVisible)}
                     />
                 </div>
-                <aside className="hidden lg:block sticky top-8 self-start">
+                <aside className="hidden xl:block sticky top-8 self-start">
                     <CharacterPanel 
                         stats={cumulativeStats} 
                         story={story}
@@ -547,7 +612,7 @@ const StoryViewer: React.FC<StoryViewerProps> = ({
                 </aside>
 
                 {/* Mobile Floating Panels */}
-                <div className="lg:hidden">
+                <div className="xl:hidden">
                     <CharacterPanel 
                         isOpen={isPanelVisible} 
                         onClose={() => setIsPanelVisible(false)} 

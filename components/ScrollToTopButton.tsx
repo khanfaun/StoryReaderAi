@@ -42,14 +42,14 @@ const ScrollToTopButton: React.FC<ScrollToTopButtonProps> = ({
   if (isReading) {
       if (isAudioPlayerActive) {
           // Khi mở Audio Player:
-          // Mobile: Player khá cao, cần đẩy lên nhiều (bottom-40)
-          // PC: Đẩy lên một chút để không đè footer (bottom-28)
-          positionClass = 'bottom-40 md:bottom-28';
+          // Mobile/Tablet Portrait: Player khá cao, cần đẩy lên nhiều (bottom-40)
+          // PC (Landscape): Đẩy lên một chút để không đè footer (bottom-28)
+          positionClass = 'bottom-40 xl:bottom-28';
       } else if (isBottomNavVisible) {
           // Khi mở thanh điều hướng thường:
-          // Mobile: bottom-24
-          // PC: bottom-20
-          positionClass = 'bottom-24 md:bottom-20';
+          // Mobile/Tablet Portrait: bottom-24
+          // PC (Landscape): bottom-20
+          positionClass = 'bottom-24 xl:bottom-20';
       }
   }
 
@@ -57,7 +57,7 @@ const ScrollToTopButton: React.FC<ScrollToTopButtonProps> = ({
     <button
       onClick={scrollToTop}
       className={`fixed ${positionClass} right-6 w-14 h-14 rounded-full flex items-center justify-center
-                  shadow-lg z-50 transition-all duration-300
+                  shadow-lg z-[60] transition-all duration-300
                   ${isVisible ? 'opacity-100 scale-100' : 'opacity-0 scale-0 pointer-events-none'}
                   bg-[var(--theme-bg-base)]/80 backdrop-blur-md ring-2 ring-[var(--theme-accent-primary)] text-[var(--theme-accent-primary)]
                   hover:bg-[var(--theme-accent-primary)] hover:text-white`}

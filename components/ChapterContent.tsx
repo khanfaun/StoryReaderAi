@@ -639,7 +639,7 @@ const ChapterContent: React.FC<ChapterContentProps> = ({
               <button 
                 onClick={() => setIsSettingsVisible(true)} 
                 disabled={isBusy && !isAnalyzing}
-                className="flex-shrink-0 md:hidden bg-[var(--theme-bg-surface)] brightness-125 hover:brightness-150 text-[var(--theme-text-primary)] p-2 rounded-lg transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed"
+                className="flex-shrink-0 xl:hidden bg-[var(--theme-bg-surface)] brightness-125 hover:brightness-150 text-[var(--theme-text-primary)] p-2 rounded-lg transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 <CogIcon className="w-6 h-6" />
               </button>
@@ -663,16 +663,16 @@ const ChapterContent: React.FC<ChapterContentProps> = ({
               <button 
                 onClick={onToggleStats} 
                 disabled={isBusy && !isAnalyzing}
-                className="flex-shrink-0 md:hidden text-white font-bold p-2 rounded-lg transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed border" 
+                className="flex-shrink-0 xl:hidden text-white font-bold p-2 rounded-lg transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed border" 
                 style={{ backgroundColor: '#8170ff', borderColor: '#8170ff' }}
                 aria-label="Thông tin nhân vật"
               >
                 <UserIcon className="h-6 w-6" />
               </button>
               
-              <div className="hidden md:block w-px h-6 bg-[var(--theme-border)] mx-1"></div>
+              <div className="hidden xl:block w-px h-6 bg-[var(--theme-border)] mx-1"></div>
 
-              <div className="hidden md:flex gap-2">
+              <div className="hidden xl:flex gap-2">
                   <TtsButton />
                   <div ref={autoScrollButtonRefTop} className="relative flex-shrink-0">
                     <button onClick={() => handleAutoScrollButtonClick('top')} className={`p-2 rounded-lg transition-all duration-300 ${isAutoScrolling ? 'bg-[var(--theme-accent-primary)] text-white' : 'bg-[var(--theme-bg-surface)] brightness-125 hover:brightness-150 text-[var(--theme-text-primary)]'}`}>
@@ -681,7 +681,7 @@ const ChapterContent: React.FC<ChapterContentProps> = ({
                   </div>
               </div>
               
-               <button onClick={() => setIsSettingsVisible(true)} disabled={isBusy && !isAnalyzing} className="flex-shrink-0 hidden md:block bg-[var(--theme-bg-surface)] brightness-125 hover:brightness-150 text-[var(--theme-text-primary)] p-2 rounded-lg transition-all duration-300 disabled:opacity-50">
+               <button onClick={() => setIsSettingsVisible(true)} disabled={isBusy && !isAnalyzing} className="flex-shrink-0 hidden xl:block bg-[var(--theme-bg-surface)] brightness-125 hover:brightness-150 text-[var(--theme-text-primary)] p-2 rounded-lg transition-all duration-300 disabled:opacity-50">
                <CogIcon className="w-6 h-6" />
                </button>
             </div>
@@ -705,10 +705,10 @@ const ChapterContent: React.FC<ChapterContentProps> = ({
         };
 
         return (
-            <div className="container mx-auto px-2 flex flex-col md:flex-row justify-between items-center gap-2">
-                <div className="flex items-center gap-1 sm:gap-2 w-full md:w-auto justify-center md:justify-start">
+            <div className="container mx-auto px-2 flex flex-col xl:flex-row justify-between items-center gap-2">
+                <div className="flex items-center gap-1 sm:gap-2 w-full xl:w-auto justify-center xl:justify-start">
                     {/* Settings Button (Mobile Left - Audio Mode) */}
-                    <div className="md:hidden flex gap-1">
+                    <div className="xl:hidden flex gap-1">
                         <button onClick={() => setIsSettingsVisible(true)} className="bg-[var(--theme-bg-surface)] brightness-125 hover:brightness-150 text-[var(--theme-text-primary)] p-2 rounded-lg transition-all duration-300" title="Cài đặt">
                             <CogIcon className="w-6 h-6" />
                         </button>
@@ -730,7 +730,7 @@ const ChapterContent: React.FC<ChapterContentProps> = ({
                     <button 
                         onClick={onToggleStats} 
                         disabled={isBusy && !isAnalyzing}
-                        className="md:hidden flex-shrink-0 text-white font-bold p-2 rounded-lg transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed border" 
+                        className="xl:hidden flex-shrink-0 text-white font-bold p-2 rounded-lg transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed border" 
                         style={{ backgroundColor: '#8170ff', borderColor: '#8170ff' }}
                         aria-label="Thông tin nhân vật"
                     >
@@ -892,7 +892,7 @@ const ChapterContent: React.FC<ChapterContentProps> = ({
                     </div>
                 </div>
 
-                <div className="hidden md:block">
+                <div className="hidden xl:block">
                     <button onClick={() => setIsSettingsVisible(true)} className="bg-[var(--theme-bg-surface)] brightness-125 hover:brightness-150 text-[var(--theme-text-primary)] p-2 rounded-lg transition-all duration-300" title="Cài đặt">
                         <CogIcon className="w-6 h-6" />
                     </button>
@@ -908,7 +908,7 @@ const ChapterContent: React.FC<ChapterContentProps> = ({
           <button 
             onClick={() => setIsSettingsVisible(true)} 
             disabled={isBusy && !isAnalyzing}
-            className="flex-shrink-0 md:hidden bg-[var(--theme-bg-surface)] brightness-125 hover:brightness-150 text-[var(--theme-text-primary)] p-2 rounded-lg transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed"
+            className="flex-shrink-0 xl:hidden bg-[var(--theme-bg-surface)] brightness-125 hover:brightness-150 text-[var(--theme-text-primary)] p-2 rounded-lg transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed"
           >
             <CogIcon className="w-6 h-6" />
           </button>
@@ -946,14 +946,14 @@ const ChapterContent: React.FC<ChapterContentProps> = ({
           <button 
             onClick={onToggleStats} 
             disabled={isBusy && !isAnalyzing}
-            className="flex-shrink-0 md:hidden text-white font-bold p-2 rounded-lg transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed border" 
+            className="flex-shrink-0 xl:hidden text-white font-bold p-2 rounded-lg transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed border" 
             style={{ backgroundColor: '#8170ff', borderColor: '#8170ff' }}
             aria-label="Thông tin nhân vật"
           >
             <UserIcon className="h-6 w-6" />
           </button>
 
-          {/* Tools Area - Only visible on PC/Tablet (md:flex), hidden on Mobile */}
+          {/* Tools Area - Only visible on Tablet/PC (md:flex), hidden on Mobile */}
           <div className="hidden md:flex items-center gap-2 pl-2 sm:pl-3">
              <button
                 onClick={handleTtsButtonClick}
@@ -985,7 +985,7 @@ const ChapterContent: React.FC<ChapterContentProps> = ({
            <button 
             onClick={() => setIsSettingsVisible(true)} 
             disabled={isBusy && !isAnalyzing}
-            className="flex-shrink-0 hidden md:block bg-[var(--theme-bg-surface)] brightness-125 hover:brightness-150 text-[var(--theme-text-primary)] p-2 rounded-lg transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed"
+            className="flex-shrink-0 hidden xl:block bg-[var(--theme-bg-surface)] brightness-125 hover:brightness-150 text-[var(--theme-text-primary)] p-2 rounded-lg transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed"
           >
             <CogIcon className="w-6 h-6" />
           </button>
@@ -1169,7 +1169,7 @@ const ChapterContent: React.FC<ChapterContentProps> = ({
 
       {popoverTarget && autoScrollPopover}
 
-      <div className={`fixed bottom-0 left-0 right-0 z-10 py-4 bg-[var(--theme-bg-base)]/95 backdrop-blur-lg border-t border-[var(--theme-border)] shadow-lg transition-transform duration-300 ${isNavBarVisible ? 'translate-y-0' : 'translate-y-full'}`}>
+      <div className={`fixed bottom-0 left-0 right-0 z-40 py-4 bg-[var(--theme-bg-base)]/95 backdrop-blur-lg border-t border-[var(--theme-border)] shadow-lg transition-transform duration-300 ${isNavBarVisible ? 'translate-y-0' : 'translate-y-full'}`}>
         {navButtons('bottom')}
       </div>
 
