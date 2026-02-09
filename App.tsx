@@ -110,9 +110,9 @@ const App: React.FC = () => {
   const [isHelpModalOpen, setIsHelpModalOpen] = useState(false);
   const [storageChoiceModal, setStorageChoiceModal] = useState<{ isOpen: boolean; story: Story | null }>({ isOpen: false, story: null });
   
-  // Google Drive User State
-  const [googleUser, setGoogleUser] = useState<GoogleUser | null>(null);
-  const previousUserRef = useRef<GoogleUser | null>(null);
+  // Google Drive User State - INITIALIZE FROM STORAGE IMMEDIATELY
+  const [googleUser, setGoogleUser] = useState<GoogleUser | null>(() => driveService.getUserFromStorage());
+  const previousUserRef = useRef<GoogleUser | null>(driveService.getUserFromStorage());
   
   const [manualImportState, setManualImportState] = useState<ManualImportState>({
       isOpen: false, url: '', message: '', type: 'chapter', source: ''

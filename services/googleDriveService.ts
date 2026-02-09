@@ -13,8 +13,6 @@ declare global {
 // ==========================================================
 
 const CLIENT_ID = '668650540476-6dkreulqvl7sffc6sv373t2pplob9hmt.apps.googleusercontent.com';
-
-// QUAN TRỌNG: Thêm quyền profile và email để lấy thông tin người dùng (Avatar, Tên)
 const SCOPES = 'https://www.googleapis.com/auth/drive.appdata https://www.googleapis.com/auth/userinfo.profile https://www.googleapis.com/auth/userinfo.email';
 const DISCOVERY_DOC = 'https://www.googleapis.com/discovery/v1/apis/drive/v3/rest';
 
@@ -22,7 +20,19 @@ let tokenClient: any;
 let gapiInited = false;
 let gisInited = false;
 let accessToken: string | null = null;
-let isInteractiveSignIn = false; // Cờ để kiểm tra xem có phải người dùng đang bấm nút đăng nhập không
+
+// Helper để lấy user từ storage ngay lập tức (Synchronous)
+export function getUserFromStorage(): GoogleUser | null {
+    const savedUser = localStorage.getItem('gdrive_user_cache');
+    if (savedUser) {
+        try {
+            return JSON.parse(savedUser);
+        } catch (e) {
+            return null;
+        }
+    }
+    return null;
+}
 
 // ==========================================================
 // INITIALIZATION
@@ -31,16 +41,20 @@ let isInteractiveSignIn = false; // Cờ để kiểm tra xem có phải ngườ
 export function initGoogleDrive(onUserChanged: (user: GoogleUser | null) => void) {
     console.log("[DriveService] Initializing...");
 
+    // 1. Kiểm tra cache ngay lập tức để cập nhật UI
+    const cachedUser = getUserFromStorage();
+    if (cachedUser) {
+        onUserChanged(cachedUser);
+    }
+
     const gapiLoaded = () => {
         window.gapi.load('client', async () => {
             await window.gapi.client.init({
                 discoveryDocs: [DISCOVERY_DOC],
             });
             gapiInited = true;
-            console.log("[DriveService] GAPI Client Loaded");
             
-            // Nếu đã có token trong localStorage (phiên cũ), thử khôi phục
-            checkAuth(onUserChanged);
+            // Check nếu có token cũ còn hạn (optional logic, usually handled by clicking login)
         });
     };
 
@@ -49,40 +63,26 @@ export function initGoogleDrive(onUserChanged: (user: GoogleUser | null) => void
             client_id: CLIENT_ID,
             scope: SCOPES,
             callback: (resp: any) => {
-                console.log("[DriveService] Token Callback Received", resp);
-                
                 if (resp.error !== undefined) {
-                    console.error("[DriveService] Auth Error:", resp);
-                    alert("Lỗi đăng nhập Google: " + resp.error);
                     throw (resp);
                 }
                 
-                // 1. Lưu Access Token
                 accessToken = resp.access_token;
                 
-                // 2. QUAN TRỌNG: Cập nhật token cho GAPI Client để dùng cho Drive API sau này
                 if (window.gapi && window.gapi.client) {
                     window.gapi.client.setToken(resp);
-                    console.log("[DriveService] GAPI Token Set");
                 }
 
-                // 3. Lấy thông tin người dùng ngay lập tức
+                // Fetch info mới nhất từ API và cập nhật
                 fetchUserInfo(onUserChanged);
             },
         });
         gisInited = true;
-        console.log("[DriveService] GIS Client Loaded");
-        checkAuth(onUserChanged);
     };
 
-    // Robust Script Loading Check
     const checkScriptLoad = () => {
-        if (window.gapi && !gapiInited) {
-            gapiLoaded();
-        }
-        if (window.google && !gisInited) {
-            gisLoaded();
-        }
+        if (window.gapi && !gapiInited) gapiLoaded();
+        if (window.google && !gisInited) gisLoaded();
         
         if ((!window.gapi || !window.google) || (!gapiInited || !gisInited)) {
             setTimeout(checkScriptLoad, 500);
@@ -92,21 +92,8 @@ export function initGoogleDrive(onUserChanged: (user: GoogleUser | null) => void
     checkScriptLoad();
 }
 
-function checkAuth(callback: (user: GoogleUser | null) => void) {
-    const savedUser = localStorage.getItem('gdrive_user_cache');
-    if (savedUser) {
-        try {
-            const user = JSON.parse(savedUser);
-            console.log("[DriveService] Restored user from cache", user);
-            callback(user);
-        } catch (e) {
-            localStorage.removeItem('gdrive_user_cache');
-        }
-    }
-}
-
 export function isUserLoggedIn(): boolean {
-    return !!accessToken;
+    return !!accessToken || !!getUserFromStorage();
 }
 
 // ==========================================================
@@ -115,43 +102,34 @@ export function isUserLoggedIn(): boolean {
 
 export function signIn() {
     if (!tokenClient) {
-        alert("Google Services chưa sẵn sàng. Vui lòng tải lại trang.");
+        alert("Google Services chưa sẵn sàng. Vui lòng thử lại sau 2 giây.");
         return;
     }
-    
-    console.log("[DriveService] Requesting Access Token...");
-    isInteractiveSignIn = true; // Đánh dấu đây là hành động đăng nhập chủ động
-    
-    // Luôn dùng 'consent' khi dev/unverified để đảm bảo popup hiện ra và token mới được cấp
-    // Điều này giúp vượt qua trạng thái "token cũ bị block"
     tokenClient.requestAccessToken({ prompt: 'consent' });
 }
 
 export function signOut(callback: () => void) {
-    const token = window.gapi.client.getToken();
-    if (token !== null) {
-        window.google.accounts.oauth2.revoke(token.access_token, () => {
-            window.gapi.client.setToken(null);
-            accessToken = null;
-            localStorage.removeItem('gdrive_user_cache');
-            callback();
-            console.log("[DriveService] Signed out.");
-        });
-    } else {
+    const token = window.gapi?.client?.getToken();
+    const clearLocal = () => {
         accessToken = null;
+        if (window.gapi?.client) window.gapi.client.setToken(null);
         localStorage.removeItem('gdrive_user_cache');
         callback();
+    };
+
+    if (token !== null && window.google) {
+        window.google.accounts.oauth2.revoke(token.access_token, () => {
+            clearLocal();
+        });
+    } else {
+        clearLocal();
     }
 }
 
 async function fetchUserInfo(callback: (user: GoogleUser | null) => void) {
     try {
-        if (!accessToken) {
-            console.warn("[DriveService] No access token to fetch info");
-            return;
-        }
+        if (!accessToken) return;
         
-        console.log("[DriveService] Fetching User Info...");
         const response = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
             headers: { Authorization: `Bearer ${accessToken}` }
         });
@@ -164,56 +142,35 @@ async function fetchUserInfo(callback: (user: GoogleUser | null) => void) {
                 imageUrl: data.picture
             };
             localStorage.setItem('gdrive_user_cache', JSON.stringify(user));
-            console.log("[DriveService] User Info Fetched Success:", user);
             callback(user);
-
-            // TỰ ĐỘNG RELOAD NẾU LÀ ĐĂNG NHẬP CHỦ ĐỘNG
-            if (isInteractiveSignIn) {
-                console.log("[DriveService] Interactive sign-in detected. Reloading page to apply changes...");
-                setTimeout(() => {
-                    window.location.reload();
-                }, 1000); // Đợi 1s để UI kịp hiện thông báo thành công (nếu có)
-            }
-
-        } else {
-            console.error("[DriveService] Failed to fetch user info. Status:", response.status);
-            if (response.status === 401 || response.status === 403) {
-                alert("Ứng dụng chưa được cấp quyền đọc thông tin. Hãy thử đăng nhập lại và chọn 'Tiếp tục' ở màn hình cảnh báo.");
-            }
         }
     } catch (e) {
-        console.error("[DriveService] Exception fetching user info", e);
-        alert("Lỗi kết nối khi lấy thông tin người dùng.");
+        console.error("Error fetching user info", e);
     }
 }
 
 // ==========================================================
-// DRIVE API OPERATIONS (AppData Folder)
+// DRIVE API OPERATIONS
 // ==========================================================
 
 export async function listFiles(): Promise<GoogleFile[]> {
-    if (!accessToken) throw new Error("Chưa đăng nhập Google Drive.");
+    if (!accessToken) throw new Error("Chưa xác thực Google Drive.");
     
-    try {
-        // Đảm bảo GAPI có token (phòng trường hợp accessToken có nhưng GAPI client chưa set)
-        if (window.gapi.client.getToken() === null) {
-             window.gapi.client.setToken({ access_token: accessToken });
-        }
-
-        const response = await window.gapi.client.drive.files.list({
-            spaces: 'appDataFolder',
-            fields: 'nextPageToken, files(id, name, mimeType, createdTime, modifiedTime)',
-            pageSize: 100,
-        });
-        return response.result.files || [];
-    } catch (e) {
-        console.error("[DriveService] List files error", e);
-        throw e;
+    // Đảm bảo GAPI client có token
+    if (window.gapi.client.getToken() === null) {
+         window.gapi.client.setToken({ access_token: accessToken });
     }
+
+    const response = await window.gapi.client.drive.files.list({
+        spaces: 'appDataFolder',
+        fields: 'nextPageToken, files(id, name, mimeType, createdTime, modifiedTime)',
+        pageSize: 100,
+    });
+    return response.result.files || [];
 }
 
 export async function uploadJsonFile(fileName: string, content: any, existingFileId?: string): Promise<string> {
-    if (!accessToken) throw new Error("Chưa đăng nhập Google Drive.");
+    if (!accessToken) throw new Error("Chưa xác thực Google Drive.");
 
     const fileContent = JSON.stringify(content);
     const file = new Blob([fileContent], { type: 'application/json' });
@@ -247,34 +204,25 @@ export async function uploadJsonFile(fileName: string, content: any, existingFil
 }
 
 export async function downloadFile(fileId: string): Promise<any> {
-    if (!accessToken) throw new Error("Chưa đăng nhập Google Drive.");
+    if (!accessToken) throw new Error("Chưa xác thực Google Drive.");
 
-    try {
-        if (window.gapi.client.getToken() === null) {
-             window.gapi.client.setToken({ access_token: accessToken });
-        }
-        
-        const response = await window.gapi.client.drive.files.get({
-            fileId: fileId,
-            alt: 'media',
-        });
-        return response.result;
-    } catch (e) {
-        console.error("[DriveService] Download error", e);
-        return null;
+    if (window.gapi.client.getToken() === null) {
+            window.gapi.client.setToken({ access_token: accessToken });
     }
+    
+    const response = await window.gapi.client.drive.files.get({
+        fileId: fileId,
+        alt: 'media',
+    });
+    return response.result;
 }
 
 export async function deleteFile(fileId: string): Promise<void> {
-    if (!accessToken) throw new Error("Chưa đăng nhập Google Drive.");
-    try {
-        if (window.gapi.client.getToken() === null) {
-             window.gapi.client.setToken({ access_token: accessToken });
-        }
-        await window.gapi.client.drive.files.delete({
-            fileId: fileId
-        });
-    } catch (e) {
-        console.error("[DriveService] Delete error", e);
+    if (!accessToken) throw new Error("Chưa xác thực Google Drive.");
+    if (window.gapi.client.getToken() === null) {
+            window.gapi.client.setToken({ access_token: accessToken });
     }
+    await window.gapi.client.drive.files.delete({
+        fileId: fileId
+    });
 }

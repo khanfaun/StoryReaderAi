@@ -181,7 +181,8 @@ const DownloadModal: React.FC<DownloadModalProps> = ({
 
   const confirmSignOut = () => {
       driveService.signOut(() => {
-          window.location.reload(); // Force reload to clear all states
+          // Buộc tải lại trang để xóa sạch dữ liệu phiên làm việc, đảm bảo an toàn và reset trạng thái UI
+          window.location.reload(); 
       });
       setIsSignOutConfirmOpen(false);
   };
