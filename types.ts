@@ -1,4 +1,3 @@
-
 export interface Chapter {
   title: string;
   url: string;
@@ -138,12 +137,4 @@ export interface DownloadConfig {
     ranges: { start: number; end: number }[];
     format: 'epub' | 'html';
     mergeCustom: boolean;
-}
-
-export interface GoogleFile {
-  id: string;
-  name: string;
-  mimeType: string;
-  createdTime?: string;
-  modifiedTime?: string;
 }

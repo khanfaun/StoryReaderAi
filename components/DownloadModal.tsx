@@ -1,11 +1,7 @@
-
 import React, { useEffect, useState, useRef } from 'react';
-import type { Story, CharacterStats, DownloadConfig, GoogleUser } from '../types';
-import { CloseIcon, PlusIcon, TrashIcon, DownloadIcon, CheckIcon, SpinnerIcon, UploadIcon, SparklesIcon, CloudIcon, SyncIcon } from './icons';
+import type { Story, CharacterStats, DownloadConfig } from '../types';
+import { CloseIcon, PlusIcon, TrashIcon, DownloadIcon, CheckIcon, SpinnerIcon, UploadIcon, SparklesIcon } from './icons';
 import { exportStoryData, importStoryData } from '../services/storyStateService';
-import * as driveService from '../services/googleDriveService';
-import { uploadStoryToDrive } from '../services/sync';
-import ConfirmationModal from './ConfirmationModal';
 
 interface Range {
     id: string;
@@ -19,12 +15,11 @@ interface DownloadModalProps {
   story: Story | null;
   onStartDownload: (config: DownloadConfig) => void;
   isBackgroundDownloading?: boolean;
-  onDataImported?: () => void;
-  googleUser: GoogleUser | null;
+  onDataImported?: () => void; // New prop to refresh data in App
 }
 
 type Preset = 'all' | '50' | '100' | 'custom';
-type ModalTab = 'ebook' | 'ai_data' | 'drive';
+type ModalTab = 'ebook' | 'ai_data';
 
 const DownloadModal: React.FC<DownloadModalProps> = ({ 
     isOpen, 
@@ -32,8 +27,7 @@ const DownloadModal: React.FC<DownloadModalProps> = ({
     story, 
     onStartDownload, 
     isBackgroundDownloading = false,
-    onDataImported,
-    googleUser 
+    onDataImported 
 }) => {
   const [activeTab, setActiveTab] = useState<ModalTab>('ebook');
   
@@ -45,16 +39,6 @@ const DownloadModal: React.FC<DownloadModalProps> = ({
   
   // AI Data State
   const fileInputRef = useRef<HTMLInputElement>(null);
-
-  // Drive State
-  const [isDriveProcessing, setIsDriveProcessing] = useState(false);
-  const [driveStatusMsg, setDriveStatusMsg] = useState('');
-  const [autoSync, setAutoSync] = useState(false);
-  const [isSignOutConfirmOpen, setIsSignOutConfirmOpen] = useState(false);
-  
-  // Login Feedback
-  const [loginSuccess, setLoginSuccess] = useState(false);
-  const prevUserRef = useRef<GoogleUser | null>(null);
   
   const totalChapters = story?.chapters?.length || 0;
 
@@ -65,27 +49,8 @@ const DownloadModal: React.FC<DownloadModalProps> = ({
         setMergeCustom(false);
         setActiveTab('ebook'); // Reset to default tab
         handlePresetChange('all', totalChapters); 
-        
-        // Reset message
-        setDriveStatusMsg('');
-        setLoginSuccess(false);
-        setIsSignOutConfirmOpen(false);
-        
-        // Load settings
-        const savedAutoSync = localStorage.getItem('settings_auto_sync') === 'true';
-        setAutoSync(savedAutoSync);
     }
   }, [isOpen, totalChapters]);
-
-  // Effect to detect successful login and show feedback
-  useEffect(() => {
-      // If previous was null and current is set -> Just logged in
-      if (!prevUserRef.current && googleUser) {
-          setLoginSuccess(true);
-          setTimeout(() => setLoginSuccess(false), 3000);
-      }
-      prevUserRef.current = googleUser;
-  }, [googleUser]);
 
   // --- EBOOK LOGIC ---
   const handlePresetChange = (newPreset: Preset, total: number = totalChapters) => {
@@ -170,458 +135,226 @@ const DownloadModal: React.FC<DownloadModalProps> = ({
       if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
-  // --- GOOGLE DRIVE LOGIC ---
-  const handleDriveSignIn = () => {
-      driveService.signIn();
-  };
-  
-  const handleDriveSignOut = () => {
-      setIsSignOutConfirmOpen(true);
-  };
-
-  const confirmSignOut = () => {
-      // 1. UI Feedback & Close Modal immediately
-      setIsSignOutConfirmOpen(false);
-      
-      // 2. Force Clear Local Storage
-      localStorage.removeItem('gdrive_user_cache');
-      
-      // 3. Fire-and-forget revoke (Don't await)
-      try {
-          driveService.signOut(() => {});
-      } catch (e) { console.error(e); }
-
-      // 4. FORCE RELOAD PAGE
-      window.location.reload();
-  };
-
-  const handleDriveUpload = async () => {
-      if (!story || !googleUser) return;
-      setIsDriveProcessing(true);
-      setDriveStatusMsg('Đang tải lên...');
-      try {
-          await uploadStoryToDrive(story);
-          setDriveStatusMsg('Đã lưu thành công!');
-          setTimeout(() => setDriveStatusMsg(''), 3000);
-      } catch (e) {
-          console.error(e);
-          setDriveStatusMsg(`Lỗi: ${(e as Error).message}`);
-      } finally {
-          setIsDriveProcessing(false);
-      }
-  };
-
-  const handleDriveImport = async () => {
-      if (!story || !googleUser) return;
-      setIsDriveProcessing(true);
-      setDriveStatusMsg('Đang tìm file trên Drive...');
-      
-      try {
-          const STORY_PREFIX = 'story_metadata_';
-          const fileName = `${STORY_PREFIX}${story.url.replace(/[^a-zA-Z0-9]/g, '_')}.json`;
-          
-          const files = await driveService.listFiles();
-          const targetFile = files.find(f => f.name === fileName);
-
-          if (!targetFile) {
-              setDriveStatusMsg('Không tìm thấy bản lưu nào của truyện này trên Drive.');
-              return;
-          }
-
-          setDriveStatusMsg('Đang tải về...');
-          const content = await driveService.downloadFile(targetFile.id);
-          
-          if (!content) {
-              throw new Error("File rỗng hoặc không tải được.");
-          }
-
-          // Construct a compatible format for importStoryData
-          const compatibleData = {
-              version: 2,
-              timestamp: new Date().toISOString(),
-              data: {
-                  storyStates: {
-                      [story.url]: {
-                          stats: content.aiState,
-                          readChapters: content.readChapters,
-                      }
-                  }
-              }
-          };
-
-          const blob = new Blob([JSON.stringify(compatibleData)], { type: 'application/json' });
-          const file = new File([blob], fileName, { type: 'application/json' });
-
-          setDriveStatusMsg('Đang nhập dữ liệu...');
-          await importStoryData(file, story, onDataImported);
-          setDriveStatusMsg('Đã đồng bộ từ Drive thành công!');
-          setTimeout(() => setDriveStatusMsg(''), 3000);
-
-      } catch (e) {
-          console.error(e);
-          setDriveStatusMsg(`Lỗi: ${(e as Error).message}`);
-      } finally {
-          setIsDriveProcessing(false);
-      }
-  };
-  
-  const toggleAutoSync = () => {
-      const newVal = !autoSync;
-      setAutoSync(newVal);
-      localStorage.setItem('settings_auto_sync', String(newVal));
-  };
-
   if (!isOpen) return null;
 
   return (
-    <>
-        <div className="fixed inset-0 bg-black bg-opacity-80 z-[200] flex justify-center items-center p-4 animate-fade-in">
-            <div className="bg-[var(--theme-bg-surface)] rounded-lg shadow-2xl w-full max-w-2xl border border-[var(--theme-border)] flex flex-col max-h-[90vh]">
-                <div className="flex justify-between items-center p-4 border-b border-[var(--theme-border)]">
-                    <h2 className="text-xl font-bold text-[var(--theme-text-primary)]">Tải xuống & Dữ liệu</h2>
-                    <button onClick={onClose} className="text-[var(--theme-text-secondary)] hover:text-[var(--theme-text-primary)]"><CloseIcon className="w-6 h-6" /></button>
-                </div>
+    <div className="fixed inset-0 bg-black bg-opacity-80 z-[200] flex justify-center items-center p-4 animate-fade-in">
+        <div className="bg-[var(--theme-bg-surface)] rounded-lg shadow-2xl w-full max-w-2xl border border-[var(--theme-border)] flex flex-col max-h-[90vh]">
+            <div className="flex justify-between items-center p-4 border-b border-[var(--theme-border)]">
+                <h2 className="text-xl font-bold text-[var(--theme-text-primary)]">Tải xuống & Dữ liệu</h2>
+                <button onClick={onClose} className="text-[var(--theme-text-secondary)] hover:text-[var(--theme-text-primary)]"><CloseIcon className="w-6 h-6" /></button>
+            </div>
+            
+            {/* TABS */}
+            <div className="flex border-b border-[var(--theme-border)]">
+                <button 
+                    className={`flex-1 py-3 text-sm font-bold transition-colors border-b-2 ${activeTab === 'ebook' ? 'text-[var(--theme-accent-primary)] border-[var(--theme-accent-primary)] bg-[var(--theme-bg-base)]' : 'text-[var(--theme-text-secondary)] border-transparent hover:text-[var(--theme-text-primary)]'}`}
+                    onClick={() => setActiveTab('ebook')}
+                >
+                    Tải truyện (Ebook/HTML)
+                </button>
+                <button 
+                    className={`flex-1 py-3 text-sm font-bold transition-colors border-b-2 ${activeTab === 'ai_data' ? 'text-[var(--theme-accent-primary)] border-[var(--theme-accent-primary)] bg-[var(--theme-bg-base)]' : 'text-[var(--theme-text-secondary)] border-transparent hover:text-[var(--theme-text-primary)]'}`}
+                    onClick={() => setActiveTab('ai_data')}
+                >
+                    Dữ liệu AI (JSON)
+                </button>
+            </div>
+            
+            <div className="p-6 overflow-y-auto space-y-6">
                 
-                {/* TABS */}
-                <div className="flex border-b border-[var(--theme-border)]">
-                    <button 
-                        className={`flex-1 py-3 text-sm font-bold transition-colors border-b-2 ${activeTab === 'ebook' ? 'text-[var(--theme-accent-primary)] border-[var(--theme-accent-primary)] bg-[var(--theme-bg-base)]' : 'text-[var(--theme-text-secondary)] border-transparent hover:text-[var(--theme-text-primary)]'}`}
-                        onClick={() => setActiveTab('ebook')}
-                    >
-                        Tải truyện (Ebook)
-                    </button>
-                    <button 
-                        className={`flex-1 py-3 text-sm font-bold transition-colors border-b-2 ${activeTab === 'ai_data' ? 'text-[var(--theme-accent-primary)] border-[var(--theme-accent-primary)] bg-[var(--theme-bg-base)]' : 'text-[var(--theme-text-secondary)] border-transparent hover:text-[var(--theme-text-primary)]'}`}
-                        onClick={() => setActiveTab('ai_data')}
-                    >
-                        Dữ liệu AI (Local)
-                    </button>
-                    <button 
-                        className={`flex-1 py-3 text-sm font-bold transition-colors border-b-2 ${activeTab === 'drive' ? 'text-blue-500 border-blue-500 bg-[var(--theme-bg-base)]' : 'text-[var(--theme-text-secondary)] border-transparent hover:text-blue-400'}`}
-                        onClick={() => setActiveTab('drive')}
-                    >
-                        Google Drive
-                    </button>
-                </div>
-                
-                <div className="p-6 overflow-y-auto space-y-6">
-                    
-                    {/* TAB CONTENT: EBOOK DOWNLOAD */}
-                    {activeTab === 'ebook' && (
-                        <div className="space-y-6 animate-fade-in">
-                            {/* Warning if background downloading */}
-                            {isBackgroundDownloading ? (
-                                <div className="p-4 bg-yellow-900/30 border border-yellow-700/50 rounded-lg flex items-center gap-3 animate-pulse">
-                                    <SpinnerIcon className="w-6 h-6 text-yellow-500 animate-spin" />
-                                    <div>
-                                        <h3 className="font-bold text-yellow-200 text-sm">Hệ thống đang tải dữ liệu...</h3>
-                                        <p className="text-xs text-yellow-100/80">
-                                            Vui lòng đợi quá trình đồng bộ hoàn tất (100%) trước khi xuất file để đảm bảo đầy đủ nội dung.
-                                        </p>
-                                    </div>
+                {/* TAB CONTENT: EBOOK DOWNLOAD */}
+                {activeTab === 'ebook' && (
+                    <div className="space-y-6 animate-fade-in">
+                        {/* Warning if background downloading */}
+                        {isBackgroundDownloading ? (
+                            <div className="p-4 bg-yellow-900/30 border border-yellow-700/50 rounded-lg flex items-center gap-3 animate-pulse">
+                                <SpinnerIcon className="w-6 h-6 text-yellow-500 animate-spin" />
+                                <div>
+                                    <h3 className="font-bold text-yellow-200 text-sm">Hệ thống đang tải dữ liệu...</h3>
+                                    <p className="text-xs text-yellow-100/80">
+                                        Vui lòng đợi quá trình đồng bộ hoàn tất (100%) trước khi xuất file để đảm bảo đầy đủ nội dung.
+                                    </p>
                                 </div>
-                            ) : (
-                                <div className="p-4 bg-blue-900/30 border border-blue-700/50 rounded-lg flex items-start gap-3">
-                                    <div className="p-2 bg-blue-800/50 rounded-full">
-                                        <CheckIcon className="w-5 h-5 text-blue-300" />
+                            </div>
+                        ) : (
+                            <div className="p-4 bg-blue-900/30 border border-blue-700/50 rounded-lg flex items-start gap-3">
+                                <div className="p-2 bg-blue-800/50 rounded-full">
+                                    <CheckIcon className="w-5 h-5 text-blue-300" />
+                                </div>
+                                <div>
+                                    <h3 className="font-bold text-blue-200 mb-1 text-sm">Dữ liệu đã sẵn sàng</h3>
+                                    <p className="text-xs text-blue-100/80 leading-relaxed">
+                                        Hệ thống sẽ sử dụng dữ liệu đã lưu trong trình duyệt để đóng gói file ngay lập tức.
+                                    </p>
+                                </div>
+                            </div>
+                        )}
+
+                        <div className={`space-y-6 transition-opacity duration-300 ${isBackgroundDownloading ? 'opacity-50 pointer-events-none' : 'opacity-100'}`}>
+                            {/* Preset Selection */}
+                            <div>
+                                <label className="block text-sm font-semibold text-[var(--theme-text-secondary)] mb-2">Chọn chương:</label>
+                                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                                    <button onClick={() => handlePresetChange('all')} className={`px-3 py-2 rounded-md text-xs font-bold border transition-colors ${preset === 'all' ? 'border-[var(--theme-accent-primary)] bg-[var(--theme-accent-primary)]/10 text-[var(--theme-accent-primary)]' : 'border-[var(--theme-border)] bg-[var(--theme-bg-base)] text-[var(--theme-text-secondary)]'}`}>
+                                        Tất cả ({totalChapters})
+                                    </button>
+                                    <button onClick={() => handlePresetChange('50')} className={`px-3 py-2 rounded-md text-xs font-bold border transition-colors ${preset === '50' ? 'border-[var(--theme-accent-primary)] bg-[var(--theme-accent-primary)]/10 text-[var(--theme-accent-primary)]' : 'border-[var(--theme-border)] bg-[var(--theme-bg-base)] text-[var(--theme-text-secondary)]'}`}>
+                                        50 chương/file
+                                    </button>
+                                    <button onClick={() => handlePresetChange('100')} className={`px-3 py-2 rounded-md text-xs font-bold border transition-colors ${preset === '100' ? 'border-[var(--theme-accent-primary)] bg-[var(--theme-accent-primary)]/10 text-[var(--theme-accent-primary)]' : 'border-[var(--theme-border)] bg-[var(--theme-bg-base)] text-[var(--theme-text-secondary)]'}`}>
+                                        100 chương/file
+                                    </button>
+                                    <button onClick={() => handlePresetChange('custom')} className={`px-3 py-2 rounded-md text-xs font-bold border transition-colors ${preset === 'custom' ? 'border-[var(--theme-accent-primary)] bg-[var(--theme-accent-primary)]/10 text-[var(--theme-accent-primary)]' : 'border-[var(--theme-border)] bg-[var(--theme-bg-base)] text-[var(--theme-text-secondary)]'}`}>
+                                        Tùy chỉnh
+                                    </button>
+                                </div>
+                            </div>
+
+                            {/* Range Editor (Only for Custom Download) */}
+                            {preset === 'custom' && (
+                                <div className="animate-fade-in">
+                                    <div className="flex justify-between items-center mb-2">
+                                        <div className="flex items-center gap-3">
+                                            <label className="text-xs font-medium text-[var(--theme-text-secondary)]">Khoảng chương:</label>
+                                            <div className="flex items-center gap-1.5">
+                                                <input 
+                                                    type="checkbox" 
+                                                    id="mergeCustom"
+                                                    checked={mergeCustom}
+                                                    onChange={(e) => setMergeCustom(e.target.checked)}
+                                                    className="w-3.5 h-3.5 accent-[var(--theme-accent-primary)]"
+                                                />
+                                                <label htmlFor="mergeCustom" className="text-xs text-[var(--theme-text-primary)] cursor-pointer select-none">
+                                                    Gộp thành 1 file
+                                                </label>
+                                            </div>
+                                        </div>
+                                        <button onClick={addRange} className="flex items-center gap-1 text-xs text-[var(--theme-accent-primary)] hover:underline font-bold">
+                                            <PlusIcon className="w-3 h-3" /> Thêm khoảng
+                                        </button>
                                     </div>
-                                    <div>
-                                        <h3 className="font-bold text-blue-200 mb-1 text-sm">Dữ liệu đã sẵn sàng</h3>
-                                        <p className="text-xs text-blue-100/80 leading-relaxed">
-                                            Hệ thống sẽ sử dụng dữ liệu đã lưu trong trình duyệt để đóng gói file ngay lập tức.
-                                        </p>
+                                    <div className="space-y-2 max-h-40 overflow-y-auto pr-2 custom-scrollbar">
+                                        {ranges.map((range, index) => (
+                                            <div key={range.id} className="flex items-center gap-2 bg-[var(--theme-bg-base)] p-2 rounded border border-[var(--theme-border)]">
+                                                <span className="text-xs font-mono text-[var(--theme-text-secondary)] w-5">{index + 1}.</span>
+                                                <div className="flex items-center gap-2 flex-1">
+                                                    <input 
+                                                        type="number" 
+                                                        value={range.start} 
+                                                        onChange={(e) => updateRange(range.id, 'start', e.target.value)}
+                                                        className="w-full bg-[var(--theme-bg-surface)] border border-[var(--theme-border)] rounded px-2 py-1 text-xs text-[var(--theme-text-primary)]"
+                                                        placeholder="Từ"
+                                                    />
+                                                    <span className="text-[var(--theme-text-secondary)]">-</span>
+                                                    <input 
+                                                        type="number" 
+                                                        value={range.end} 
+                                                        onChange={(e) => updateRange(range.id, 'end', e.target.value)}
+                                                        className="w-full bg-[var(--theme-bg-surface)] border border-[var(--theme-border)] rounded px-2 py-1 text-xs text-[var(--theme-text-primary)]"
+                                                        placeholder="Đến"
+                                                    />
+                                                </div>
+                                                <button onClick={() => removeRange(range.id)} className="p-1 text-slate-400 hover:text-rose-500 transition-colors" title="Xóa">
+                                                    <TrashIcon className="w-4 h-4" />
+                                                </button>
+                                            </div>
+                                        ))}
                                     </div>
                                 </div>
                             )}
 
-                            <div className={`space-y-6 transition-opacity duration-300 ${isBackgroundDownloading ? 'opacity-50 pointer-events-none' : 'opacity-100'}`}>
-                                {/* Preset Selection */}
-                                <div>
-                                    <label className="block text-sm font-semibold text-[var(--theme-text-secondary)] mb-2">Chọn chương:</label>
-                                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-                                        <button onClick={() => handlePresetChange('all')} className={`px-3 py-2 rounded-md text-xs font-bold border transition-colors ${preset === 'all' ? 'border-[var(--theme-accent-primary)] bg-[var(--theme-accent-primary)]/10 text-[var(--theme-accent-primary)]' : 'border-[var(--theme-border)] bg-[var(--theme-bg-base)] text-[var(--theme-text-secondary)]'}`}>
-                                            Tất cả ({totalChapters})
-                                        </button>
-                                        <button onClick={() => handlePresetChange('50')} className={`px-3 py-2 rounded-md text-xs font-bold border transition-colors ${preset === '50' ? 'border-[var(--theme-accent-primary)] bg-[var(--theme-accent-primary)]/10 text-[var(--theme-accent-primary)]' : 'border-[var(--theme-border)] bg-[var(--theme-bg-base)] text-[var(--theme-text-secondary)]'}`}>
-                                            50 chương/file
-                                        </button>
-                                        <button onClick={() => handlePresetChange('100')} className={`px-3 py-2 rounded-md text-xs font-bold border transition-colors ${preset === '100' ? 'border-[var(--theme-accent-primary)] bg-[var(--theme-accent-primary)]/10 text-[var(--theme-accent-primary)]' : 'border-[var(--theme-border)] bg-[var(--theme-bg-base)] text-[var(--theme-text-secondary)]'}`}>
-                                            100 chương/file
-                                        </button>
-                                        <button onClick={() => handlePresetChange('custom')} className={`px-3 py-2 rounded-md text-xs font-bold border transition-colors ${preset === 'custom' ? 'border-[var(--theme-accent-primary)] bg-[var(--theme-accent-primary)]/10 text-[var(--theme-accent-primary)]' : 'border-[var(--theme-border)] bg-[var(--theme-bg-base)] text-[var(--theme-text-secondary)]'}`}>
-                                            Tùy chỉnh
-                                        </button>
-                                    </div>
-                                </div>
+                            {/* Format Selection */}
+                            <div>
+                                <label className="block text-sm font-semibold text-[var(--theme-text-secondary)] mb-2">Định dạng file:</label>
+                                <select 
+                                    value={format} 
+                                    onChange={(e) => setFormat(e.target.value as 'epub' | 'html')}
+                                    className="w-full bg-[var(--theme-bg-base)] border border-[var(--theme-border)] rounded-md p-2 text-[var(--theme-text-primary)] focus:ring-[var(--theme-accent-primary)] text-sm"
+                                >
+                                    <option value="epub">EPUB (Khuyên dùng - Đọc trên mọi app)</option>
+                                    <option value="html">HTML (Để in sang PDF)</option>
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+                )}
 
-                                {/* Range Editor (Only for Custom Download) */}
-                                {preset === 'custom' && (
-                                    <div className="animate-fade-in">
-                                        <div className="flex justify-between items-center mb-2">
-                                            <div className="flex items-center gap-3">
-                                                <label className="text-xs font-medium text-[var(--theme-text-secondary)]">Khoảng chương:</label>
-                                                <div className="flex items-center gap-1.5">
-                                                    <input 
-                                                        type="checkbox" 
-                                                        id="mergeCustom"
-                                                        checked={mergeCustom}
-                                                        onChange={(e) => setMergeCustom(e.target.checked)}
-                                                        className="w-3.5 h-3.5 accent-[var(--theme-accent-primary)]"
-                                                    />
-                                                    <label htmlFor="mergeCustom" className="text-xs text-[var(--theme-text-primary)] cursor-pointer select-none">
-                                                        Gộp thành 1 file
-                                                    </label>
-                                                </div>
-                                            </div>
-                                            <button onClick={addRange} className="flex items-center gap-1 text-xs text-[var(--theme-accent-primary)] hover:underline font-bold">
-                                                <PlusIcon className="w-3 h-3" /> Thêm khoảng
-                                            </button>
-                                        </div>
-                                        <div className="space-y-2 max-h-40 overflow-y-auto pr-2 custom-scrollbar">
-                                            {ranges.map((range, index) => (
-                                                <div key={range.id} className="flex items-center gap-2 bg-[var(--theme-bg-base)] p-2 rounded border border-[var(--theme-border)]">
-                                                    <span className="text-xs font-mono text-[var(--theme-text-secondary)] w-5">{index + 1}.</span>
-                                                    <div className="flex items-center gap-2 flex-1">
-                                                        <input 
-                                                            type="number" 
-                                                            value={range.start} 
-                                                            onChange={(e) => updateRange(range.id, 'start', e.target.value)}
-                                                            className="w-full bg-[var(--theme-bg-surface)] border border-[var(--theme-border)] rounded px-2 py-1 text-xs text-[var(--theme-text-primary)]"
-                                                            placeholder="Từ"
-                                                        />
-                                                        <span className="text-[var(--theme-text-secondary)]">-</span>
-                                                        <input 
-                                                            type="number" 
-                                                            value={range.end} 
-                                                            onChange={(e) => updateRange(range.id, 'end', e.target.value)}
-                                                            className="w-full bg-[var(--theme-bg-surface)] border border-[var(--theme-border)] rounded px-2 py-1 text-xs text-[var(--theme-text-primary)]"
-                                                            placeholder="Đến"
-                                                        />
-                                                    </div>
-                                                    <button onClick={() => removeRange(range.id)} className="p-1 text-slate-400 hover:text-rose-500 transition-colors" title="Xóa">
-                                                        <TrashIcon className="w-4 h-4" />
-                                                    </button>
-                                                </div>
-                                            ))}
-                                        </div>
-                                    </div>
-                                )}
+                {/* TAB CONTENT: AI DATA IMPORT/EXPORT */}
+                {activeTab === 'ai_data' && (
+                    <div className="space-y-6 animate-fade-in">
+                        <div className="p-4 bg-purple-900/30 border border-purple-700/50 rounded-lg flex items-start gap-3">
+                            <div className="p-2 bg-purple-800/50 rounded-full">
+                                <SparklesIcon className="w-5 h-5 text-purple-300" />
+                            </div>
+                            <div>
+                                <h3 className="font-bold text-purple-200 mb-1 text-sm">Quản lý Dữ liệu Phân tích AI</h3>
+                                <p className="text-xs text-purple-100/80 leading-relaxed">
+                                    File JSON chứa toàn bộ dữ liệu phân tích và tiến độ đọc của truyện này. Dùng để sao lưu hoặc chuyển dữ liệu sang thiết bị khác.
+                                </p>
+                            </div>
+                        </div>
 
-                                {/* Format Selection */}
-                                <div>
-                                    <label className="block text-sm font-semibold text-[var(--theme-text-secondary)] mb-2">Định dạng file:</label>
-                                    <select 
-                                        value={format} 
-                                        onChange={(e) => setFormat(e.target.value as 'epub' | 'html')}
-                                        className="w-full bg-[var(--theme-bg-base)] border border-[var(--theme-border)] rounded-md p-2 text-[var(--theme-text-primary)] focus:ring-[var(--theme-accent-primary)] text-sm"
+                        <div className="space-y-4">
+                            {/* Export Section */}
+                            <div className="p-4 border border-[var(--theme-border)] rounded-lg bg-[var(--theme-bg-base)]">
+                                <h4 className="text-sm font-bold text-[var(--theme-text-primary)] mb-2">1. Tải về máy (Export)</h4>
+                                <p className="text-xs text-[var(--theme-text-secondary)] mb-3">Lưu trữ file .json chứa toàn bộ thông tin AI của truyện này (bao gồm cả phân tích từng chương).</p>
+                                <button 
+                                    onClick={handleExportData}
+                                    className="flex items-center gap-2 px-4 py-2 bg-slate-700 hover:bg-slate-600 text-white rounded-md text-sm font-semibold transition-colors"
+                                >
+                                    <DownloadIcon className="w-4 h-4" />
+                                    Tải file JSON
+                                </button>
+                            </div>
+
+                            {/* Import Section */}
+                            <div className="p-4 border border-[var(--theme-border)] rounded-lg bg-[var(--theme-bg-base)]">
+                                <h4 className="text-sm font-bold text-[var(--theme-text-primary)] mb-2">2. Nhập từ máy (Import)</h4>
+                                <p className="text-xs text-[var(--theme-text-secondary)] mb-3">Chọn file .json đã lưu để khôi phục dữ liệu AI cho truyện này.</p>
+                                <div className="flex gap-2">
+                                    <button 
+                                        onClick={() => fileInputRef.current?.click()}
+                                        className="flex items-center gap-2 px-4 py-2 bg-[var(--theme-accent-primary)] hover:brightness-110 text-white rounded-md text-sm font-semibold transition-colors"
                                     >
-                                        <option value="epub">EPUB (Khuyên dùng - Đọc trên mọi app)</option>
-                                        <option value="html">HTML (Để in sang PDF)</option>
-                                    </select>
+                                        <UploadIcon className="w-4 h-4" />
+                                        Chọn file và Nhập
+                                    </button>
+                                    <input 
+                                        type="file" 
+                                        ref={fileInputRef} 
+                                        onChange={handleImportData} 
+                                        accept=".json" 
+                                        className="hidden" 
+                                    />
                                 </div>
                             </div>
                         </div>
-                    )}
+                    </div>
+                )}
+            </div>
 
-                    {/* TAB CONTENT: AI DATA IMPORT/EXPORT (LOCAL) */}
-                    {activeTab === 'ai_data' && (
-                        <div className="space-y-6 animate-fade-in">
-                            <div className="p-4 bg-purple-900/30 border border-purple-700/50 rounded-lg flex items-start gap-3">
-                                <div className="p-2 bg-purple-800/50 rounded-full">
-                                    <SparklesIcon className="w-5 h-5 text-purple-300" />
-                                </div>
-                                <div>
-                                    <h3 className="font-bold text-purple-200 mb-1 text-sm">Quản lý Dữ liệu Phân tích AI</h3>
-                                    <p className="text-xs text-purple-100/80 leading-relaxed">
-                                        File JSON chứa toàn bộ dữ liệu phân tích và tiến độ đọc của truyện này. Dùng để sao lưu hoặc chuyển dữ liệu sang thiết bị khác (thủ công).
-                                    </p>
-                                </div>
-                            </div>
-
-                            <div className="space-y-4">
-                                {/* Export Section */}
-                                <div className="p-4 border border-[var(--theme-border)] rounded-lg bg-[var(--theme-bg-base)]">
-                                    <h4 className="text-sm font-bold text-[var(--theme-text-primary)] mb-2">1. Tải về máy (Export)</h4>
-                                    <p className="text-xs text-[var(--theme-text-secondary)] mb-3">Lưu trữ file .json chứa toàn bộ thông tin AI của truyện này.</p>
-                                    <button 
-                                        onClick={handleExportData}
-                                        className="flex items-center gap-2 px-4 py-2 bg-slate-700 hover:bg-slate-600 text-white rounded-md text-sm font-semibold transition-colors"
-                                    >
-                                        <DownloadIcon className="w-4 h-4" />
-                                        Tải file JSON
-                                    </button>
-                                </div>
-
-                                {/* Import Section */}
-                                <div className="p-4 border border-[var(--theme-border)] rounded-lg bg-[var(--theme-bg-base)]">
-                                    <h4 className="text-sm font-bold text-[var(--theme-text-primary)] mb-2">2. Nhập từ máy (Import)</h4>
-                                    <p className="text-xs text-[var(--theme-text-secondary)] mb-3">Chọn file .json đã lưu để khôi phục dữ liệu AI cho truyện này.</p>
-                                    <div className="flex gap-2">
-                                        <button 
-                                            onClick={() => fileInputRef.current?.click()}
-                                            className="flex items-center gap-2 px-4 py-2 bg-[var(--theme-accent-primary)] hover:brightness-110 text-white rounded-md text-sm font-semibold transition-colors"
-                                        >
-                                            <UploadIcon className="w-4 h-4" />
-                                            Chọn file và Nhập
-                                        </button>
-                                        <input 
-                                            type="file" 
-                                            ref={fileInputRef} 
-                                            onChange={handleImportData} 
-                                            accept=".json" 
-                                            className="hidden" 
-                                        />
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                    )}
-
-                    {/* TAB CONTENT: GOOGLE DRIVE */}
-                    {activeTab === 'drive' && (
-                        <div className="space-y-6 animate-fade-in">
-                            <div className="space-y-6">
-                                {/* User Info Card - Always visible */}
-                                <div className={`p-4 bg-[var(--theme-bg-base)] border border-[var(--theme-border)] rounded-lg transition-all ${!googleUser ? 'border-dashed border-slate-600' : ''}`}>
-                                    <div className="flex items-center justify-between mb-3">
-                                        <div className="flex items-center gap-3">
-                                            {googleUser?.imageUrl ? (
-                                                <img src={googleUser.imageUrl} alt="Avatar" className="w-10 h-10 rounded-full border-2 border-[var(--theme-accent-primary)]" />
-                                            ) : (
-                                                <div className={`w-10 h-10 rounded-full flex items-center justify-center text-white font-bold text-lg ${googleUser ? 'bg-blue-600' : 'bg-slate-600'}`}>
-                                                    {googleUser ? googleUser.name.charAt(0) : '?'}
-                                                </div>
-                                            )}
-                                            <div>
-                                                <p className="font-bold text-[var(--theme-text-primary)]">
-                                                    {googleUser ? googleUser.name : 'Chưa đăng nhập'}
-                                                </p>
-                                                <p className="text-xs text-[var(--theme-text-secondary)]">
-                                                    {googleUser ? googleUser.email : 'Đăng nhập để đồng bộ dữ liệu'}
-                                                </p>
-                                            </div>
-                                        </div>
-                                        {/* Status Badge & Toggle Button Group */}
-                                        <div className="flex flex-col items-end gap-2">
-                                            <span className={`text-[10px] font-bold px-2 py-1 rounded-full border flex items-center gap-1 ${googleUser ? 'bg-green-900/30 text-green-400 border-green-800' : 'bg-slate-700 text-slate-300 border-slate-600'}`}>
-                                                <span className={`w-2 h-2 rounded-full ${googleUser ? 'bg-green-500 animate-pulse' : 'bg-slate-400'}`}></span>
-                                                {googleUser ? 'Đã kết nối' : 'Chưa kết nối'}
-                                            </span>
-                                            
-                                            {/* Sign In / Sign Out Button */}
-                                            {googleUser ? (
-                                                <button 
-                                                    onClick={handleDriveSignOut}
-                                                    className="text-xs text-rose-400 hover:text-rose-300 hover:underline"
-                                                >
-                                                    Đăng xuất
-                                                </button>
-                                            ) : (
-                                                <button 
-                                                    onClick={handleDriveSignIn}
-                                                    className="text-xs font-bold text-[var(--theme-accent-primary)] hover:underline flex items-center gap-1"
-                                                >
-                                                    <svg className="w-3 h-3" viewBox="0 0 24 24" fill="currentColor"><path d="M12.0003 3C16.9709 3 21.0003 7.02944 21.0003 12C21.0003 16.9706 16.9709 21 12.0003 21C7.02974 21 3.00031 16.9706 3.00031 12C3.00031 7.02944 7.02974 3 12.0003 3ZM12.0003 16V13H8.00031V11H12.0003V8L17.0003 12L12.0003 16Z"/></svg>
-                                                    Đăng nhập ngay
-                                                </button>
-                                            )}
-                                        </div>
-                                    </div>
-                                    
-                                    {/* Auto Sync Toggle - Visible only when logged in */}
-                                    <div className={`flex items-center justify-between pt-3 border-t border-[var(--theme-border)] transition-opacity ${!googleUser ? 'opacity-50 pointer-events-none' : ''}`}>
-                                        <div className="flex items-center gap-2">
-                                            <button 
-                                                onClick={toggleAutoSync}
-                                                disabled={!googleUser}
-                                                className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors focus:outline-none ${autoSync ? 'bg-[var(--theme-accent-primary)]' : 'bg-gray-700'}`}
-                                            >
-                                                <span className={`inline-block h-3 w-3 transform rounded-full bg-white transition-transform ${autoSync ? 'translate-x-5' : 'translate-x-1'}`} />
-                                            </button>
-                                            <span className="text-xs text-[var(--theme-text-secondary)]">Tự động đồng bộ</span>
-                                        </div>
-                                    </div>
-                                </div>
-                                
-                                {loginSuccess && (
-                                    <div className="p-2 text-center text-sm bg-green-900/40 text-green-400 border border-green-700/50 rounded-lg animate-fade-in">
-                                        <div className="flex items-center justify-center gap-2">
-                                            <CheckIcon className="w-4 h-4" />
-                                            <span>Đăng nhập thành công!</span>
-                                        </div>
-                                    </div>
-                                )}
-
-                                {driveStatusMsg && (
-                                    <div className={`p-3 text-sm rounded-lg text-center ${driveStatusMsg.includes('Lỗi') ? 'bg-red-900/30 text-red-300' : 'bg-blue-900/30 text-blue-300'}`}>
-                                        {driveStatusMsg}
-                                    </div>
-                                )}
-
-                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                                    <button 
-                                        onClick={handleDriveUpload}
-                                        disabled={isDriveProcessing || !googleUser}
-                                        className={`flex flex-col items-center justify-center p-4 bg-blue-600/10 border border-blue-600/30 rounded-lg transition-all group ${!googleUser ? 'opacity-50 cursor-not-allowed grayscale' : 'hover:bg-blue-600/20 hover:border-blue-500 cursor-pointer'}`}
-                                    >
-                                        <div className="p-3 bg-blue-600 rounded-full text-white mb-2 group-hover:scale-110 transition-transform">
-                                            {isDriveProcessing ? <SpinnerIcon className="w-6 h-6 animate-spin"/> : <CloudIcon className="w-6 h-6" />}
-                                        </div>
-                                        <span className="font-bold text-blue-200 text-sm">Lưu lên Cloud</span>
-                                        <span className="text-[10px] text-blue-400/70 mt-1">Backup dữ liệu truyện này</span>
-                                    </button>
-
-                                    <button 
-                                        onClick={handleDriveImport}
-                                        disabled={isDriveProcessing || !googleUser}
-                                        className={`flex flex-col items-center justify-center p-4 bg-[var(--theme-accent-primary)]/10 border border-[var(--theme-accent-primary)]/30 rounded-lg transition-all group ${!googleUser ? 'opacity-50 cursor-not-allowed grayscale' : 'hover:bg-[var(--theme-accent-primary)]/20 hover:border-[var(--theme-accent-primary)] cursor-pointer'}`}
-                                    >
-                                        <div className="p-3 bg-[var(--theme-accent-primary)] rounded-full text-white mb-2 group-hover:scale-110 transition-transform">
-                                            {isDriveProcessing ? <SpinnerIcon className="w-6 h-6 animate-spin"/> : <DownloadIcon className="w-6 h-6" />}
-                                        </div>
-                                        <span className="font-bold text-[var(--theme-text-primary)] text-sm">Tải về máy</span>
-                                        <span className="text-[10px] text-[var(--theme-text-secondary)] mt-1">Khôi phục từ Cloud</span>
-                                    </button>
-                                </div>
-                            </div>
-                        </div>
-                    )}
-                </div>
-
-                <div className="p-4 bg-[var(--theme-bg-base)] rounded-b-lg border-t border-[var(--theme-border)] flex justify-end gap-3">
+            <div className="p-4 bg-[var(--theme-bg-base)] rounded-b-lg border-t border-[var(--theme-border)] flex justify-end gap-3">
+                <button 
+                    onClick={onClose} 
+                    className="px-4 py-2 rounded-md bg-slate-600 hover:bg-slate-500 text-white font-semibold transition-colors text-sm"
+                >
+                    Đóng
+                </button>
+                {activeTab === 'ebook' && (
                     <button 
-                        onClick={onClose} 
-                        className="px-4 py-2 rounded-md bg-slate-600 hover:bg-slate-500 text-white font-semibold transition-colors text-sm"
+                        onClick={handleConfirmDownload} 
+                        disabled={isBackgroundDownloading}
+                        className="flex items-center gap-2 px-6 py-2 rounded-md bg-[var(--theme-accent-primary)] hover:brightness-110 text-white font-bold transition-colors shadow-lg disabled:opacity-50 disabled:cursor-not-allowed"
                     >
-                        Đóng
+                        <DownloadIcon className="w-5 h-5" />
+                        Tải về máy
                     </button>
-                    {activeTab === 'ebook' && (
-                        <button 
-                            onClick={handleConfirmDownload} 
-                            disabled={isBackgroundDownloading}
-                            className="flex items-center gap-2 px-6 py-2 rounded-md bg-[var(--theme-accent-primary)] hover:brightness-110 text-white font-bold transition-colors shadow-lg disabled:opacity-50 disabled:cursor-not-allowed"
-                        >
-                            <DownloadIcon className="w-5 h-5" />
-                            Tải về máy
-                        </button>
-                    )}
-                </div>
+                )}
             </div>
         </div>
-        
-        {/* Sign Out Confirmation Modal */}
-        <ConfirmationModal
-            isOpen={isSignOutConfirmOpen}
-            onClose={() => setIsSignOutConfirmOpen(false)}
-            onConfirm={confirmSignOut}
-            title="Đăng xuất Google Drive"
-        >
-            <p>Bạn có chắc chắn muốn đăng xuất?</p>
-            <p className="text-xs text-[var(--theme-text-secondary)] mt-2">
-                Hệ thống sẽ tải lại trang để xóa dữ liệu phiên làm việc.
-            </p>
-        </ConfirmationModal>
-    </>
+    </div>
   );
 };
 

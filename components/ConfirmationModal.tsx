@@ -22,7 +22,7 @@ const ConfirmationModal: React.FC<ConfirmationModalProps> = ({ isOpen, onClose, 
 
   return createPortal(
     <div 
-      className="fixed inset-0 bg-black bg-opacity-75 z-[300] flex justify-center items-center p-4" 
+      className="fixed inset-0 bg-black bg-opacity-75 z-[150] flex justify-center items-center p-4" 
       onClick={onClose}
       role="dialog"
       aria-modal="true"

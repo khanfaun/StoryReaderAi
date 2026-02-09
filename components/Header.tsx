@@ -1,18 +1,15 @@
 
 import React from 'react';
-import { KeyIcon, BellIcon, CloudIcon } from './icons';
-import type { GoogleUser } from '../types';
+import { KeyIcon, BellIcon } from './icons';
 
 interface HeaderProps {
   onOpenApiKeySettings: () => void;
   onOpenUpdateModal: () => void;
-  onOpenSyncModal?: () => void;
   onGoHome: () => void;
   storyTitle?: string;
-  googleUser?: GoogleUser | null;
 }
 
-const Header: React.FC<HeaderProps> = ({ onOpenApiKeySettings, onOpenUpdateModal, onOpenSyncModal, onGoHome, storyTitle, googleUser }) => {
+const Header: React.FC<HeaderProps> = ({ onOpenApiKeySettings, onOpenUpdateModal, onGoHome, storyTitle }) => {
   return (
     <header className="bg-[var(--theme-bg-surface)] shadow-lg border-b border-[var(--theme-border)] relative z-50">
       <div className="container mx-auto px-4 py-4 flex justify-between items-center relative">
@@ -48,34 +45,6 @@ const Header: React.FC<HeaderProps> = ({ onOpenApiKeySettings, onOpenUpdateModal
           >
             <KeyIcon className="w-6 h-6" />
           </button>
-          {onOpenSyncModal && (
-            <button
-                onClick={onOpenSyncModal}
-                className="rounded-full transition-all duration-200 hover:opacity-80"
-                aria-label="Tài khoản Google Drive"
-                title={googleUser ? `Đã đăng nhập: ${googleUser.name}` : "Đăng nhập / Đồng bộ dữ liệu"}
-            >
-                {googleUser ? (
-                    <div className="p-0.5 border-2 border-[var(--theme-accent-primary)] rounded-full">
-                        {googleUser.imageUrl ? (
-                            <img 
-                                src={googleUser.imageUrl} 
-                                alt={googleUser.name} 
-                                className="w-8 h-8 rounded-full object-cover" 
-                            />
-                        ) : (
-                            <div className="w-8 h-8 rounded-full bg-blue-600 flex items-center justify-center text-white font-bold text-sm">
-                                {googleUser.name.charAt(0).toUpperCase()}
-                            </div>
-                        )}
-                    </div>
-                ) : (
-                    <div className="p-2 text-[var(--theme-text-secondary)] hover:bg-[var(--theme-border)] hover:text-[var(--theme-text-primary)] rounded-full">
-                        <CloudIcon className="w-6 h-6" />
-                    </div>
-                )}
-            </button>
-          )}
         </div>
       </div>
     </header>
