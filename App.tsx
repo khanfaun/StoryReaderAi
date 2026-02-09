@@ -1,6 +1,6 @@
 
 import React, { useState, useCallback, useEffect, useRef, useMemo } from 'react';
-import type { Story, Chapter, ReadingHistoryItem, ApiKeyInfo, DownloadConfig } from './types';
+import type { Story, Chapter, ReadingHistoryItem, ApiKeyInfo, DownloadConfig, GoogleUser } from './types';
 import { searchStory, getStoryDetails, getStoryFromUrl, parseHtml, parseStoryDetailsFromDoc } from './services/truyenfullService';
 import { validateApiKey } from './services/geminiService';
 import { getCachedChapter, setCachedChapter } from './services/cacheService';
@@ -12,8 +12,8 @@ import { parseEbookFile } from './services/ebookParser';
 import { useBackgroundDownload } from './hooks/useBackgroundDownload';
 import { useDownloader } from './hooks/useDownloader';
 import * as driveService from './services/googleDriveService';
-import { uploadStoryToDrive, checkAndLoadStoryFromDrive } from './services/sync'; // Import checkAndLoadStoryFromDrive
-import { saveStoryState } from './services/storyStateService'; // Import saveStoryState
+import { uploadStoryToDrive, checkAndLoadStoryFromDrive } from './services/sync'; 
+import { saveStoryState } from './services/storyStateService'; 
 
 import Header from './components/Header';
 import Footer from './components/Footer';
@@ -110,6 +110,9 @@ const App: React.FC = () => {
   const [isHelpModalOpen, setIsHelpModalOpen] = useState(false);
   const [storageChoiceModal, setStorageChoiceModal] = useState<{ isOpen: boolean; story: Story | null }>({ isOpen: false, story: null });
   
+  // Google Drive User State
+  const [googleUser, setGoogleUser] = useState<GoogleUser | null>(null);
+  
   const [manualImportState, setManualImportState] = useState<ManualImportState>({
       isOpen: false, url: '', message: '', type: 'chapter', source: ''
   });
@@ -197,6 +200,12 @@ const App: React.FC = () => {
   useEffect(() => {
     const loadInitialData = async () => {
       setIsLoading(true);
+      
+      // Initialize Drive Logic Global
+      driveService.initGoogleDrive((user) => {
+          setGoogleUser(user);
+      });
+
       await reloadDataFromStorage();
       
       const hasSeenUpdate = localStorage.getItem(UPDATE_MODAL_VERSION);
@@ -228,6 +237,10 @@ const App: React.FC = () => {
       return newUsageState;
     });
   }, []);
+
+  const handleTokenUsageUpdateWrapper = (usageData: { totalTokens?: number, ttsCharacters?: number }) => {
+      handleTokenUsageUpdate(usageData);
+  }
 
   const handleSelectStoryInternal = async (selectedStory: Story, forceFetch: boolean = false) => {
       setIsDataLoading(true);
@@ -658,6 +671,7 @@ const App: React.FC = () => {
                 onOpenSyncModal={() => setIsSyncModalOpen(true)} 
                 onGoHome={handleBackToMain} 
                 storyTitle={isReadingMode ? story.title : undefined}
+                googleUser={googleUser}
               />
               
               <StoryViewer 
@@ -687,7 +701,7 @@ const App: React.FC = () => {
                   
                   setIsBottomNavForReadingVisible={setIsBottomNavForReadingVisible}
                   isBottomNavForReadingVisible={isBottomNavForReadingVisible}
-                  onTokenUsageUpdate={handleTokenUsageUpdate}
+                  onTokenUsageUpdate={handleTokenUsageUpdateWrapper}
                   isApiKeyModalOpen={isApiKeyModalOpen}
                   setIsApiKeyModalOpen={setIsApiKeyModalOpen}
                   tokenUsage={tokenUsage}
@@ -716,11 +730,20 @@ const App: React.FC = () => {
               )}
 
               <StoryEditModal isOpen={isCreateStoryModalOpen} onClose={() => setIsCreateStoryModalOpen(false)} onSave={handleCreateStory} onParseEbook={parseEbookFile} />
-              <DownloadModal isOpen={isDownloadModalOpen} onClose={handleReadWithoutDownload} story={pendingStory || story} onStartDownload={handleStartDownloadWrapper} onDataImported={handleImportDataSuccess} />
+              
+              {/* Pass googleUser prop to DownloadModal */}
+              <DownloadModal 
+                  isOpen={isDownloadModalOpen} 
+                  onClose={handleReadWithoutDownload} 
+                  story={pendingStory || story} 
+                  onStartDownload={handleStartDownloadWrapper} 
+                  onDataImported={handleImportDataSuccess} 
+                  googleUser={googleUser}
+              />
               
               {/* Sync Modal available in reading view */}
               {isSyncModalOpen && (
-                  <SyncModal onClose={() => setIsSyncModalOpen(false)} user={null} />
+                  <SyncModal onClose={() => setIsSyncModalOpen(false)} user={googleUser} />
               )}
           </div>
       )
@@ -763,6 +786,7 @@ const App: React.FC = () => {
             onOpenUpdateModal={() => setIsUpdateModalOpen(true)} 
             onOpenSyncModal={() => setIsSyncModalOpen(true)}
             onGoHome={handleBackToMain} 
+            googleUser={googleUser}
         />
         <main className="max-w-screen-2xl mx-auto px-4 py-8 sm:py-12 flex-grow mb-16">
             <div className="mb-8 flex flex-col sm:flex-row gap-4 items-stretch sm:items-center">
@@ -883,12 +907,22 @@ const App: React.FC = () => {
       <ApiKeyModal isOpen={isApiKeyModalOpen} onClose={() => setIsApiKeyModalOpen(false)} onValidateKey={handleValidateKey} onDataChange={reloadDataFromStorage} tokenUsage={tokenUsage} />
       <ManualImportModal isOpen={manualImportState.isOpen} onClose={() => setManualImportState(prev => ({ ...prev, isOpen: false }))} urlToImport={manualImportState.url} message={manualImportState.message} onFileSelected={handleManualImportFile} />
       <StoryEditModal isOpen={isCreateStoryModalOpen} onClose={() => setIsCreateStoryModalOpen(false)} onSave={handleCreateStory} onParseEbook={parseEbookFile} />
-      <DownloadModal isOpen={isDownloadModalOpen} onClose={handleReadWithoutDownload} story={pendingStory || story} onStartDownload={handleStartDownloadWrapper} onDataImported={handleImportDataSuccess} />
+      
+      {/* Pass googleUser prop to DownloadModal */}
+      <DownloadModal 
+          isOpen={isDownloadModalOpen} 
+          onClose={handleReadWithoutDownload} 
+          story={pendingStory || story} 
+          onStartDownload={handleStartDownloadWrapper} 
+          onDataImported={handleImportDataSuccess} 
+          googleUser={googleUser}
+      />
+      
       <StorageChoiceModal isOpen={storageChoiceModal.isOpen} onClose={() => setStorageChoiceModal({ isOpen: false, story: null })} onChoice={handleStorageChoice} story={storageChoiceModal.story} />
       
-      {/* New Sync Modal - Use user=null initially, let component handle auth check */}
+      {/* Sync Modal available in reading view */}
       {isSyncModalOpen && (
-          <SyncModal onClose={() => setIsSyncModalOpen(false)} user={null} />
+          <SyncModal onClose={() => setIsSyncModalOpen(false)} user={googleUser} />
       )}
 
       <ConfirmationModal isOpen={deleteConfirmation.isOpen} onClose={() => setDeleteConfirmation({ isOpen: false })} onConfirm={confirmDeleteEbook} title="Xác nhận xóa">

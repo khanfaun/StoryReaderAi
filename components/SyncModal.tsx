@@ -1,38 +1,38 @@
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import * as driveService from '../services/googleDriveService';
 import { syncAllData } from '../services/sync';
-import { CloseIcon, SpinnerIcon } from './icons';
+import { CloseIcon, SpinnerIcon, CheckIcon } from './icons';
 import type { GoogleUser } from '../types';
 
 interface SyncModalProps {
   onClose: () => void;
-  // Note: user prop is no longer strictly needed from App if we manage it here, 
-  // but keeping signature similar for now.
   user: GoogleUser | null; 
 }
 
-const SyncModal: React.FC<SyncModalProps> = ({ onClose }) => {
-  const [user, setUser] = useState<GoogleUser | null>(null);
+const SyncModal: React.FC<SyncModalProps> = ({ onClose, user }) => {
   const [status, setStatus] = useState('');
   const [isWorking, setIsWorking] = useState(false);
+  const [loginSuccess, setLoginSuccess] = useState(false);
+  const prevUserRef = useRef<GoogleUser | null>(null);
 
+  // Detect login success to show feedback
   useEffect(() => {
-      // Init Drive Service on mount and check user
-      driveService.initGoogleDrive((u) => {
-          setUser(u);
-      });
-  }, []);
+      if (!prevUserRef.current && user) {
+          setLoginSuccess(true);
+          setTimeout(() => setLoginSuccess(false), 3000);
+      }
+      prevUserRef.current = user;
+  }, [user]);
 
   const handleSignIn = () => {
     driveService.signIn();
-    // The user state will be updated via the callback passed to initGoogleDrive
+    // App listener handles state update
   };
 
   const handleSignOut = () => {
     setIsWorking(true);
     driveService.signOut(() => {
-        setUser(null);
         setStatus("Đã đăng xuất.");
         setIsWorking(false);
     });
@@ -65,13 +65,22 @@ const SyncModal: React.FC<SyncModalProps> = ({ onClose }) => {
                   <img src={user.imageUrl} alt="User avatar" className="w-16 h-16 rounded-full mx-auto mb-4 border-2 border-[var(--theme-accent-primary)]" />
               ) : (
                   <div className="w-16 h-16 rounded-full mx-auto mb-4 bg-blue-500 flex items-center justify-center text-white text-2xl font-bold">
-                      {user.name.charAt(0)}
+                      {user.name.charAt(0).toUpperCase()}
                   </div>
               )}
               <p className="font-semibold text-lg text-[var(--theme-text-primary)]">{user.name}</p>
-              <p className="text-sm text-[var(--theme-text-secondary)] mb-6">{user.email}</p>
+              <p className="text-sm text-[var(--theme-text-secondary)] mb-4">{user.email}</p>
               
-              <div className="flex flex-col gap-3">
+              {loginSuccess && (
+                  <div className="mb-4 p-2 text-center text-sm bg-green-900/40 text-green-400 border border-green-700/50 rounded-lg animate-fade-in">
+                      <div className="flex items-center justify-center gap-2">
+                          <CheckIcon className="w-4 h-4" />
+                          <span>Đăng nhập thành công!</span>
+                      </div>
+                  </div>
+              )}
+              
+              <div className="flex flex-col gap-3 mt-4">
                 <button
                     onClick={handleSyncNow}
                     className="sync-modal-form__button sync-modal-form__button--primary"

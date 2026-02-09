@@ -19,6 +19,7 @@ interface DownloadModalProps {
   onStartDownload: (config: DownloadConfig) => void;
   isBackgroundDownloading?: boolean;
   onDataImported?: () => void; // New prop to refresh data in App
+  googleUser: GoogleUser | null; // Receive user from App
 }
 
 type Preset = 'all' | '50' | '100' | 'custom';
@@ -30,7 +31,8 @@ const DownloadModal: React.FC<DownloadModalProps> = ({
     story, 
     onStartDownload, 
     isBackgroundDownloading = false,
-    onDataImported 
+    onDataImported,
+    googleUser 
 }) => {
   const [activeTab, setActiveTab] = useState<ModalTab>('ebook');
   
@@ -44,9 +46,12 @@ const DownloadModal: React.FC<DownloadModalProps> = ({
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Drive State
-  const [driveUser, setDriveUser] = useState<GoogleUser | null>(null);
   const [isDriveProcessing, setIsDriveProcessing] = useState(false);
   const [driveStatusMsg, setDriveStatusMsg] = useState('');
+  
+  // Login Feedback
+  const [loginSuccess, setLoginSuccess] = useState(false);
+  const prevUserRef = useRef<GoogleUser | null>(null);
   
   const totalChapters = story?.chapters?.length || 0;
 
@@ -58,12 +63,21 @@ const DownloadModal: React.FC<DownloadModalProps> = ({
         setActiveTab('ebook'); // Reset to default tab
         handlePresetChange('all', totalChapters); 
         
-        // Initialize Drive check
-        driveService.initGoogleDrive((user) => {
-            setDriveUser(user);
-        });
+        // Reset message
+        setDriveStatusMsg('');
+        setLoginSuccess(false);
     }
   }, [isOpen, totalChapters]);
+
+  // Effect to detect successful login and show feedback
+  useEffect(() => {
+      // If previous was null and current is set -> Just logged in
+      if (!prevUserRef.current && googleUser) {
+          setLoginSuccess(true);
+          setTimeout(() => setLoginSuccess(false), 3000);
+      }
+      prevUserRef.current = googleUser;
+  }, [googleUser]);
 
   // --- EBOOK LOGIC ---
   const handlePresetChange = (newPreset: Preset, total: number = totalChapters) => {
@@ -154,7 +168,7 @@ const DownloadModal: React.FC<DownloadModalProps> = ({
   };
 
   const handleDriveUpload = async () => {
-      if (!story || !driveUser) return;
+      if (!story || !googleUser) return;
       setIsDriveProcessing(true);
       setDriveStatusMsg('Đang tải lên...');
       try {
@@ -170,7 +184,7 @@ const DownloadModal: React.FC<DownloadModalProps> = ({
   };
 
   const handleDriveImport = async () => {
-      if (!story || !driveUser) return;
+      if (!story || !googleUser) return;
       setIsDriveProcessing(true);
       setDriveStatusMsg('Đang tìm file trên Drive...');
       
@@ -439,7 +453,7 @@ const DownloadModal: React.FC<DownloadModalProps> = ({
                 {/* TAB CONTENT: GOOGLE DRIVE */}
                 {activeTab === 'drive' && (
                     <div className="space-y-6 animate-fade-in">
-                        {!driveUser ? (
+                        {!googleUser ? (
                             <div className="text-center py-8">
                                 <div className="p-4 bg-blue-900/20 border border-blue-700/50 rounded-lg mb-6 max-w-sm mx-auto">
                                     <CloudIcon className="w-12 h-12 text-blue-400 mx-auto mb-2" />
@@ -460,20 +474,29 @@ const DownloadModal: React.FC<DownloadModalProps> = ({
                             <div className="space-y-6">
                                 <div className="flex items-center justify-between p-3 bg-[var(--theme-bg-base)] border border-[var(--theme-border)] rounded-lg">
                                     <div className="flex items-center gap-3">
-                                        {driveUser.imageUrl ? (
-                                            <img src={driveUser.imageUrl} alt="Avatar" className="w-8 h-8 rounded-full" />
+                                        {googleUser.imageUrl ? (
+                                            <img src={googleUser.imageUrl} alt="Avatar" className="w-8 h-8 rounded-full" />
                                         ) : (
-                                            <div className="w-8 h-8 rounded-full bg-blue-500 flex items-center justify-center text-white font-bold">{driveUser.name.charAt(0)}</div>
+                                            <div className="w-8 h-8 rounded-full bg-blue-500 flex items-center justify-center text-white font-bold">{googleUser.name.charAt(0)}</div>
                                         )}
                                         <div>
-                                            <p className="text-sm font-semibold text-[var(--theme-text-primary)]">{driveUser.name}</p>
-                                            <p className="text-xs text-[var(--theme-text-secondary)]">{driveUser.email}</p>
+                                            <p className="text-sm font-semibold text-[var(--theme-text-primary)]">{googleUser.name}</p>
+                                            <p className="text-xs text-[var(--theme-text-secondary)]">{googleUser.email}</p>
                                         </div>
                                     </div>
                                     <div className="text-xs text-green-400 font-medium bg-green-900/20 px-2 py-1 rounded border border-green-800">
                                         Đã kết nối
                                     </div>
                                 </div>
+                                
+                                {loginSuccess && (
+                                    <div className="p-2 text-center text-sm bg-green-900/40 text-green-400 border border-green-700/50 rounded-lg animate-fade-in">
+                                        <div className="flex items-center justify-center gap-2">
+                                            <CheckIcon className="w-4 h-4" />
+                                            <span>Đăng nhập thành công!</span>
+                                        </div>
+                                    </div>
+                                )}
 
                                 {driveStatusMsg && (
                                     <div className={`p-3 text-sm rounded-lg text-center ${driveStatusMsg.includes('Lỗi') ? 'bg-red-900/30 text-red-300' : 'bg-blue-900/30 text-blue-300'}`}>
