@@ -174,6 +174,25 @@ export async function deleteChapterData(storyUrl: string, chapterUrl: string): P
 }
 
 /**
+ * Xóa toàn bộ nội dung chương đã cache của một truyện.
+ * Dùng cho tính năng "Tải lại từ đầu".
+ */
+export async function deleteAllStoryChapters(storyUrl: string): Promise<void> {
+    const db = await openDB();
+    const transaction = db.transaction(CHAPTER_STORE, 'readwrite');
+    const store = transaction.objectStore(CHAPTER_STORE);
+    
+    // Tạo range tìm kiếm tất cả record có storyUrl khớp
+    const range = IDBKeyRange.bound([storyUrl, ''], [storyUrl, '\uffff']);
+    const request = store.delete(range);
+
+    return new Promise((resolve, reject) => {
+        transaction.oncomplete = () => resolve();
+        transaction.onerror = () => reject(transaction.error);
+    });
+}
+
+/**
  * Lấy tất cả dữ liệu chương (bao gồm stats snapshot) của một truyện.
  * Dùng cho tính năng Xuất/Backup dữ liệu.
  */

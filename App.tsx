@@ -401,6 +401,32 @@ const App: React.FC = () => {
       setError("Đã hủy tải truyện.");
   };
 
+  // --- FEATURE: REDOWNLOAD STORY ---
+  const handleRedownloadStory = async (storyToReset: Story) => {
+      if (!storyToReset) return;
+      
+      // 1. Dừng các tiến trình tải ngầm
+      handleStopBackgroundDownload(storyToReset.url);
+      
+      // 2. Xóa Cache trong DB
+      try {
+          await dbService.deleteAllStoryChapters(storyToReset.url);
+          setCachedChapters(new Set()); // Reset visual cache tick
+          
+          // 3. Force Fetch metadata lại từ đầu
+          await handleSelectStoryInternal(storyToReset, true);
+          
+          // 4. Bắt đầu tải ngầm lại từ đầu
+          // Lấy story mới nhất từ state (hoặc object đã update) để đảm bảo có danh sách chương
+          // handleSelectStoryInternal đã update state `story`, nhưng để chắc chắn ta dùng callback
+          // hoặc đơn giản gọi lại fetcher với đối tượng hiện tại
+          runBackgroundContentFetcher(storyToReset, 0);
+          
+      } catch(e) {
+          setError(`Lỗi khi tải lại dữ liệu: ${(e as Error).message}`);
+      }
+  };
+
   const handleManualImportFile = async (file: File) => {
       try {
           const text = await file.text();
@@ -665,6 +691,7 @@ const App: React.FC = () => {
                   onStopDownload={handleStopBackgroundDownload}
                   onStartBackgroundDownload={handleStartBackgroundDownload}
                   onStartDownloadExport={handleStartDownloadWrapper}
+                  onRedownload={handleRedownloadStory} // Passed handler
                   
                   setIsBottomNavForReadingVisible={setIsBottomNavForReadingVisible}
                   isBottomNavForReadingVisible={isBottomNavForReadingVisible}
@@ -702,8 +729,7 @@ const App: React.FC = () => {
       )
   }
 
-  // Dashboard logic unchanged except for props passed to components
-  // ... (giữ nguyên phần render Dashboard) ...
+  // Dashboard logic unchanged
   const appContentClass = isApiKeyModalOpen || isUpdateModalOpen || isHelpModalOpen || manualImportState.isOpen || isCreateStoryModalOpen || isDownloadModalOpen || isSyncModalOpen ? 'blur-sm pointer-events-none' : '';
 
   return (

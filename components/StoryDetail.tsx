@@ -1,7 +1,7 @@
 
 import React, { useState } from 'react';
 import type { Story, Chapter, DownloadConfig } from '../types';
-import { EditIcon, TrashIcon, PlusIcon, CheckIcon, CloseIcon, SpinnerIcon, DownloadIcon, InfoIcon, PauseIcon, PlayIcon, StopIcon } from './icons';
+import { EditIcon, TrashIcon, PlusIcon, CheckIcon, CloseIcon, SpinnerIcon, DownloadIcon, InfoIcon, PauseIcon, PlayIcon, StopIcon, RefreshIcon } from './icons';
 import ConfirmationModal from './ConfirmationModal';
 import StoryEditModal from './StoryEditModal';
 import ChapterEditModal from './ChapterEditModal';
@@ -29,6 +29,7 @@ interface StoryDetailProps {
   onResumeDownload?: () => void;
   onStopDownload?: () => void;
   onStartBackgroundDownload?: () => void;
+  onRedownload?: () => void; // New prop for re-downloading
   
   // Queue Props
   isQueued?: boolean;
@@ -63,6 +64,7 @@ const StoryDetail: React.FC<StoryDetailProps> = ({
     onResumeDownload,
     onStopDownload,
     onStartBackgroundDownload,
+    onRedownload,
     isQueued = false,
     queuePosition = 0,
     cachedChapters,
@@ -78,6 +80,7 @@ const StoryDetail: React.FC<StoryDetailProps> = ({
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [isAddChapterModalOpen, setIsAddChapterModalOpen] = useState(false);
   const [confirmDeleteStory, setConfirmDeleteStory] = useState(false);
+  const [confirmRedownload, setConfirmRedownload] = useState(false);
   
   // Download states
   const [isDownloadModalOpen, setIsDownloadModalOpen] = useState(false);
@@ -422,6 +425,11 @@ const StoryDetail: React.FC<StoryDetailProps> = ({
                                       <PauseIcon className="w-5 h-5" />
                                   </button>
                               )}
+                              {onRedownload && (
+                                <button onClick={() => setConfirmRedownload(true)} className="p-1 hover:bg-blue-500/20 rounded text-blue-400" title="Tải lại từ đầu">
+                                    <RefreshIcon className="w-5 h-5" />
+                                </button>
+                              )}
                               <button onClick={onStopDownload} className="p-1 hover:bg-rose-500/20 rounded text-rose-400" title="Hủy tải xuống">
                                   <StopIcon className="w-5 h-5" />
                               </button>
@@ -441,16 +449,25 @@ const StoryDetail: React.FC<StoryDetailProps> = ({
                   </p>
               </div>
           ) : (
-              // SHOW START BUTTON IF NOT FULLY DOWNLOADED AND NOT QUEUED
+              // SHOW START BUTTONS IF NOT FULLY DOWNLOADED AND NOT QUEUED
               (story.chapters && story.chapters.length > 0 && downloadPercentage < 100 && story.source !== 'Local' && story.source !== 'Ebook' && !isBackgroundLoading && !isQueued) && (
-                  <div className="mb-6 flex justify-center">
+                  <div className="mb-6 flex justify-center gap-3">
                       <button 
                         onClick={onStartBackgroundDownload}
                         className="flex items-center gap-2 px-4 py-2 bg-emerald-900/40 hover:bg-emerald-900/60 border border-emerald-500/30 rounded-lg text-emerald-300 text-sm transition-colors"
                       >
                           <DownloadIcon className="w-4 h-4" />
-                          Tiếp tục tải các chương còn lại ({totalChapters} chương)
+                          Tiếp tục tải các chương còn lại
                       </button>
+                      {onRedownload && (
+                          <button 
+                            onClick={() => setConfirmRedownload(true)}
+                            className="flex items-center gap-2 px-4 py-2 bg-blue-900/40 hover:bg-blue-900/60 border border-blue-500/30 rounded-lg text-blue-300 text-sm transition-colors"
+                          >
+                              <RefreshIcon className="w-4 h-4" />
+                              Tải lại dữ liệu
+                          </button>
+                      )}
                   </div>
               )
           )}
@@ -597,6 +614,23 @@ const StoryDetail: React.FC<StoryDetailProps> = ({
       >
           <p>Bạn có chắc chắn muốn xóa toàn bộ truyện <strong className="text-[var(--theme-text-primary)]">{story.title}</strong>?</p>
           <p className="text-sm text-red-400 mt-2">Hành động này sẽ xóa vĩnh viễn truyện và tất cả nội dung chương đã tải.</p>
+      </ConfirmationModal>
+
+      {/* Confirmation Modal for Re-download */}
+      <ConfirmationModal
+        isOpen={confirmRedownload}
+        onClose={() => setConfirmRedownload(false)}
+        onConfirm={() => {
+            if (onRedownload) onRedownload();
+            setCurrentPage(1); // Reset trang về 1 khi tải lại
+            setConfirmRedownload(false);
+        }}
+        title="Tải lại dữ liệu"
+        confirmText="Tải lại & Xóa cũ"
+        confirmButtonClass="px-4 py-2 rounded-md bg-blue-600 hover:bg-blue-700 text-white font-semibold transition-colors"
+      >
+          <p>Bạn có chắc muốn <strong>XÓA TOÀN BỘ</strong> nội dung đã tải của truyện <strong className="text-[var(--theme-text-primary)]">{story.title}</strong> và tải lại từ đầu không?</p>
+          <p className="text-sm text-yellow-500 mt-2">Hành động này sẽ cập nhật lại danh sách chương mới nhất và tải lại nội dung toàn bộ truyện. Tiến độ đọc của bạn sẽ được giữ nguyên.</p>
       </ConfirmationModal>
 
       {/* Confirmation Modal for Chapter Deletion */}

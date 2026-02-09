@@ -47,6 +47,7 @@ interface StoryViewerProps {
   onStopDownload: (url: string) => void;
   onStartBackgroundDownload: (story: Story) => void;
   onStartDownloadExport: (config: DownloadConfig) => void;
+  onRedownload?: (story: Story) => void; // Added prop for redownload
   
   // Global UI Control
   setIsBottomNavForReadingVisible: (val: boolean) => void;
@@ -84,7 +85,7 @@ interface TtsState {
 const StoryViewer: React.FC<StoryViewerProps> = ({
     story, initialEbookInstance, settings, onSettingsChange, onBack,
     onUpdateStory, onDeleteStory, readChapters, onReadChapterUpdate, setReadingHistory,
-    backgroundDownloads, downloadQueue, cachedChapters, onPauseDownload, onResumeDownload, onStopDownload, onStartBackgroundDownload, onStartDownloadExport,
+    backgroundDownloads, downloadQueue, cachedChapters, onPauseDownload, onResumeDownload, onStopDownload, onStartBackgroundDownload, onStartDownloadExport, onRedownload,
     setIsBottomNavForReadingVisible, isBottomNavForReadingVisible, onTokenUsageUpdate,
     isApiKeyModalOpen, setIsApiKeyModalOpen, tokenUsage, onDataChange, onReadingModeChange,
     onSearch, isSearchLoading, onOpenHelpModal, onCreateStory
@@ -597,6 +598,7 @@ const StoryViewer: React.FC<StoryViewerProps> = ({
                 onResumeDownload={() => onResumeDownload(story.url)}
                 onStopDownload={() => onStopDownload(story.url)}
                 onStartBackgroundDownload={() => onStartBackgroundDownload(story)}
+                onRedownload={onRedownload ? () => onRedownload(story) : undefined}
                 onSearch={onSearch}
                 isSearchLoading={isSearchLoading}
                 onOpenHelpModal={onOpenHelpModal}
