@@ -689,7 +689,16 @@ const App: React.FC = () => {
               )}
 
               <StoryEditModal isOpen={isCreateStoryModalOpen} onClose={() => setIsCreateStoryModalOpen(false)} onSave={handleCreateStory} onParseEbook={parseEbookFile} />
-              <DownloadModal isOpen={isDownloadModalOpen} onClose={handleReadWithoutDownload} story={pendingStory || story} onStartDownload={handleStartDownloadWrapper} onDataImported={handleImportDataSuccess} />
+              <DownloadModal 
+                isOpen={isDownloadModalOpen} 
+                onClose={handleReadWithoutDownload} 
+                story={pendingStory || story} 
+                onStartDownload={handleStartDownloadWrapper} 
+                onDataImported={handleImportDataSuccess} 
+                user={googleUser}
+                onLogin={driveService.loginGoogle}
+                onLogout={() => setGoogleUser(null)}
+              />
           </div>
       )
   }
@@ -858,7 +867,16 @@ const App: React.FC = () => {
       <ApiKeyModal isOpen={isApiKeyModalOpen} onClose={() => setIsApiKeyModalOpen(false)} onValidateKey={handleValidateKey} onDataChange={reloadDataFromStorage} tokenUsage={tokenUsage} />
       <ManualImportModal isOpen={manualImportState.isOpen} onClose={() => setManualImportState(prev => ({ ...prev, isOpen: false }))} urlToImport={manualImportState.url} message={manualImportState.message} onFileSelected={handleManualImportFile} />
       <StoryEditModal isOpen={isCreateStoryModalOpen} onClose={() => setIsCreateStoryModalOpen(false)} onSave={handleCreateStory} onParseEbook={parseEbookFile} />
-      <DownloadModal isOpen={isDownloadModalOpen} onClose={handleReadWithoutDownload} story={pendingStory || story} onStartDownload={handleStartDownloadWrapper} onDataImported={handleImportDataSuccess} />
+      <DownloadModal 
+        isOpen={isDownloadModalOpen} 
+        onClose={handleReadWithoutDownload} 
+        story={pendingStory || story} 
+        onStartDownload={handleStartDownloadWrapper} 
+        onDataImported={handleImportDataSuccess} 
+        user={googleUser}
+        onLogin={driveService.loginGoogle}
+        onLogout={() => setGoogleUser(null)}
+      />
       <ConfirmationModal isOpen={deleteConfirmation.isOpen} onClose={() => setDeleteConfirmation({ isOpen: false })} onConfirm={confirmDeleteEbook} title="Xác nhận xóa">
         <p>Bạn có chắc chắn muốn xóa truyện <strong className="text-[var(--theme-text-primary)]">{deleteConfirmation.item?.title}</strong> {' '}vĩnh viễn không?</p>
         <p className="mt-2 text-sm text-rose-400">Hành động này không thể hoàn tác.</p>
