@@ -1,6 +1,6 @@
 
 import React, { useState, useCallback, useEffect, useRef, useMemo } from 'react';
-import type { Story, Chapter, ReadingHistoryItem, ApiKeyInfo, DownloadConfig, GoogleUser } from './types';
+import type { Story, Chapter, ReadingHistoryItem, ApiKeyInfo, DownloadConfig } from './types';
 import { searchStory, getStoryDetails, getStoryFromUrl, parseHtml, parseStoryDetailsFromDoc } from './services/truyenfullService';
 import { validateApiKey } from './services/geminiService';
 import { getCachedChapter, setCachedChapter } from './services/cacheService';
@@ -8,8 +8,6 @@ import { useReadingSettings } from './hooks/useReadingSettings';
 import { getReadingHistory, saveReadingHistory, updateReadingHistory } from './services/history';
 import * as dbService from './services/dbService';
 import * as apiKeyService from './services/apiKeyService';
-import * as authService from './services/authService';
-import * as cloudService from './services/cloudService';
 import { parseEbookFile } from './services/ebookParser';
 import { useBackgroundDownload } from './hooks/useBackgroundDownload';
 import { useDownloader } from './hooks/useDownloader';
@@ -28,7 +26,6 @@ import StoryEditModal from './components/StoryEditModal';
 import DownloadModal from './components/DownloadModal';
 import ConfirmationModal from './components/ConfirmationModal';
 import GlobalDownloadManager from './components/GlobalDownloadManager';
-import SyncModal from './components/SyncModal';
 import { PlusIcon, StopIcon, SpinnerIcon, CheckIcon, CloseIcon, UploadIcon, DownloadIcon } from './components/icons';
 
 // New Component for active story logic
@@ -51,18 +48,26 @@ interface ManualImportState {
 
 type SortOption = 'newest' | 'oldest' | 'az' | 'za';
 
+interface DownloadStatus {
+    isProcessing: boolean;
+    current: number;
+    total: number;
+    message: string;
+    isError?: boolean;
+}
+
 const UPDATE_MODAL_VERSION = 'update_modal_seen_v2'; 
 
 const App: React.FC = () => {
   const [searchResults, setSearchResults] = useState<Story[] | null>(null);
   const [localStories, setLocalStories] = useState<Story[]>([]);
   const [story, setStory] = useState<Story | null>(null);
-  const [user, setUser] = useState<GoogleUser | null>(null);
   
   const [isLoading, setIsLoading] = useState<boolean>(true); 
   const [isDataLoading, setIsDataLoading] = useState<boolean>(false); 
   const [error, setError] = useState<string | null>(null);
   
+  // Track Reading Mode to adjust UI (Header title, hide global download manager)
   const [isReadingMode, setIsReadingMode] = useState<boolean>(false);
   
   const [backgroundLoadingStories, setBackgroundLoadingStories] = useState<Set<string>>(new Set());
@@ -90,8 +95,7 @@ const App: React.FC = () => {
   const [ebookInstance, setEbookInstance] = useState<EbookHandler | null>(null);
 
   const [deleteConfirmation, setDeleteConfirmation] = useState<{ isOpen: boolean; item?: ReadingHistoryItem }>({ isOpen: false });
-  const [isApiKeyModalOpen, setIsApiKeyModalOpen] = useState<boolean>(false);
-  const [isSyncModalOpen, setIsSyncModalOpen] = useState<boolean>(false);
+  const [isApiKeyModalOpen, setIsApiKeyModalOpen] = useState<boolean>(!apiKeyService.hasApiKey());
   const [tokenUsage, setTokenUsage] = useState<apiKeyService.TokenUsage>(apiKeyService.getTokenUsage());
   
   const [isUpdateModalOpen, setIsUpdateModalOpen] = useState(false);
@@ -113,34 +117,6 @@ const App: React.FC = () => {
   const [filterTags, setFilterTags] = useState<string[]>([]);
   const [isTagDropdownOpen, setIsTagDropdownOpen] = useState(false);
   const tagDropdownRef = useRef<HTMLDivElement>(null);
-
-  // Auth Listener
-  useEffect(() => {
-      const unsubscribe = authService.onAuthChange(async (firebaseUser) => {
-          if (firebaseUser) {
-              const googleUser: GoogleUser = {
-                  name: firebaseUser.displayName || 'Người dùng',
-                  email: firebaseUser.email || '',
-                  imageUrl: firebaseUser.photoURL || '',
-              };
-              setUser(googleUser);
-              // Trigger initial sync
-              await handleCloudSync();
-          } else {
-              setUser(null);
-          }
-      });
-      return () => unsubscribe();
-  }, []);
-
-  const handleCloudSync = async () => {
-      // Pull Metadata from Cloud
-      const cloudStories = await cloudService.syncLibraryFromCloud();
-      if (cloudStories && cloudStories.length > 0) {
-          await reloadDataFromStorage();
-      }
-      return true;
-  };
 
   // Close dropdown logic
   useEffect(() => {
@@ -164,11 +140,15 @@ const App: React.FC = () => {
   };
   
   const handleImportDataSuccess = () => {
+      // Triggered after import via DownloadModal, just force reload to be safe
+      // In StoryViewer, onDataChange handles local refresh. 
+      // For App level, we might want to refresh history/local stories.
       reloadDataFromStorage();
   };
 
   const reloadDataFromStorage = useCallback(async () => {
     setIsDataLoading(true);
+    // Note: Don't clear story here to avoid flickering if called during reading
     const localHistory = getReadingHistory();
     const dbStories = await dbService.getAllStories();
     setLocalStories(dbStories);
@@ -203,9 +183,7 @@ const App: React.FC = () => {
         }
     }
     setTokenUsage(apiKeyService.getTokenUsage());
-    if (!apiKeyService.hasApiKey()) {
-        setIsApiKeyModalOpen(true);
-    }
+    setIsApiKeyModalOpen(!apiKeyService.hasApiKey());
     
     setIsDataLoading(false);
   }, [setSettings]);
@@ -256,23 +234,14 @@ const App: React.FC = () => {
 
           let fullStory = selectedStory;
           
-          // Hybrid Sync: Update chapter list from Cloud first
-          if (user && fullStory.source !== 'Ebook' && fullStory.source !== 'Local') {
-              try {
-                  fullStory = await cloudService.syncStoryChaptersFromCloud(fullStory);
-              } catch (cloudErr) {
-                  console.warn("Cloud sync failed, falling back to local/fetch", cloudErr);
-              }
-          }
-
-          const needsFetching = (!fullStory.chapters || fullStory.chapters.length === 0 || forceFetch) 
-                                && fullStory.source !== 'Local' && fullStory.source !== 'Ebook';
+          const needsFetching = (!selectedStory.chapters || selectedStory.chapters.length === 0 || forceFetch) 
+                                && selectedStory.source !== 'Local' && selectedStory.source !== 'Ebook';
           
           if (needsFetching) {
               if (loadingAbortRef.current) throw new Error("Đã hủy quá trình tải.");
-              setBackgroundLoadingStories(prev => new Set(prev).add(fullStory.url));
+              setBackgroundLoadingStories(prev => new Set(prev).add(selectedStory.url));
               
-              fullStory = await getStoryDetails(fullStory, 
+              fullStory = await getStoryDetails(selectedStory, 
                   async (updatedStory) => {
                       if (loadingAbortRef.current) return;
                       setStory(prev => {
@@ -282,9 +251,6 @@ const App: React.FC = () => {
                           return prev;
                       });
                       await dbService.saveStory(updatedStory);
-                      // Cloud Push (Metadata update)
-                      if (user) cloudService.pushStoryToCloud(updatedStory);
-
                       setLocalStories(prev => {
                           if (prev.some(s => s.url === updatedStory.url)) {
                               return prev.map(s => s.url === updatedStory.url ? updatedStory : s);
@@ -305,9 +271,6 @@ const App: React.FC = () => {
           if (loadingAbortRef.current) throw new Error("Đã hủy quá trình tải.");
 
           await dbService.saveStory(fullStory);
-          // Cloud Push (Initial full save)
-          if (user) cloudService.pushStoryToCloud(fullStory);
-
           setLocalStories(prev => {
               if (prev.some(s => s.url === fullStory.url)) {
                   return prev.map(s => s.url === fullStory.url ? fullStory : s);
@@ -315,6 +278,7 @@ const App: React.FC = () => {
               return [fullStory, ...prev];
           });
 
+          // Set story active
           setStory(fullStory);
           setSearchResults(null); 
 
@@ -362,8 +326,6 @@ const App: React.FC = () => {
           if (loadingAbortRef.current) return;
 
           await dbService.saveStory(fullStory);
-          if (user) cloudService.pushStoryToCloud(fullStory);
-
           setLocalStories(prev => [fullStory, ...prev.filter(s => s.url !== fullStory.url)]);
           
           if (fullStory.chapters && fullStory.chapters.length > 0) {
@@ -373,23 +335,15 @@ const App: React.FC = () => {
               await Promise.all(toLoad.map(async (c) => {
                    if (loadingAbortRef.current) return;
                    try {
-                      // 1. Local Cache
+                      // Check cache first to be safe
+                      // getCachedChapter logic handles DB read
                       const cached = await dbService.getChapterData(fullStory.url, c.url);
                       if (!cached) {
-                          // 2. Cloud Fetch (if needed)
-                          let content = '';
-                          if (user) {
-                              const cloudData = await cloudService.fetchChapterFromCloud(fullStory.url, c.url);
-                              if (cloudData) content = cloudData.content;
-                          }
-                          // 3. Web Fetch
-                          if (!content) {
-                              const { getChapterContent } = await import('./services/truyenfullService');
-                              content = await getChapterContent(c, fullStory.source);
-                              // Save Local & Push Cloud
-                              await setCachedChapter(fullStory.url, c.url, { content, stats: null });
-                              if (user) cloudService.pushChapterToCloud(fullStory.url, c.url, { content, stats: null });
-                          }
+                          // Note: getChapterContent needs to be imported or available. 
+                          // It is imported from truyenfullService
+                          const { getChapterContent } = await import('./services/truyenfullService');
+                          const content = await getChapterContent(c, fullStory.source);
+                          await setCachedChapter(fullStory.url, c.url, { content, stats: null });
                       }
                    } catch(e) { 
                        console.warn(`Failed to preload chapter ${c.title}`, e);
@@ -414,7 +368,7 @@ const App: React.FC = () => {
       } finally {
           setIsDataLoading(false);
       }
-  }, [runBackgroundContentFetcher, user]);
+  }, [runBackgroundContentFetcher]);
 
   const handleCancelLoading = () => {
       loadingAbortRef.current = true;
@@ -445,7 +399,6 @@ const App: React.FC = () => {
               };
               
               await dbService.saveStory(fullStory);
-              if (user) cloudService.pushStoryToCloud(fullStory);
 
               setStory(fullStory);
               const savedRead = localStorage.getItem(`readChapters_${fullStory.url}`);
@@ -493,8 +446,6 @@ const App: React.FC = () => {
      try {
          if (storyData.ebookFile) await dbService.saveEbook(newStory.url, storyData.ebookFile);
          await dbService.saveStory(newStory);
-         if (user && !isEbook) cloudService.pushStoryToCloud(newStory); // Only sync Local stories automatically
-
          setLocalStories(prev => [newStory, ...prev]);
          if (isEbook && storyData.ebookFile) {
              const zip = await JSZip.loadAsync(storyData.ebookFile);
@@ -515,8 +466,6 @@ const App: React.FC = () => {
   const handleUpdateStory = async (updatedStory: Story) => {
       try {
           await dbService.saveStory(updatedStory);
-          if (user) cloudService.pushStoryToCloud(updatedStory);
-
           setStory(updatedStory);
           setLocalStories(prev => prev.map(s => s.url === updatedStory.url ? updatedStory : s));
           
@@ -591,10 +540,12 @@ const App: React.FC = () => {
              if (storedStory) storyToLoad = storedStory; else { if (item.source === 'Local') throw new Error("Truyện này đã bị xóa."); storyToLoad = await getStoryFromUrl(item.url); }
         }
         if (storyToLoad) {
-            handleSelectStory(storyToLoad);
+            setStory(storyToLoad);
+            const savedRead = localStorage.getItem(`readChapters_${storyToLoad.url}`);
+            if (savedRead) setReadChapters(new Set(JSON.parse(savedRead)));
         }
     } catch (e) { setError(`Không thể khôi phục truyện: ${(e as Error).message}`); } finally { setIsDataLoading(false); }
-  }, [handleSelectStory]);
+  }, []);
 
   const filteredLibraryStories = useMemo(() => {
       let filtered = [...localStories];
@@ -637,9 +588,6 @@ const App: React.FC = () => {
                 onOpenUpdateModal={() => setIsUpdateModalOpen(true)} 
                 onGoHome={handleBackToMain} 
                 storyTitle={isReadingMode ? story.title : undefined}
-                user={user}
-                onLogin={() => setIsSyncModalOpen(true)}
-                onLogout={() => authService.signOutUser()}
               />
               
               <StoryViewer 
@@ -705,19 +653,39 @@ const App: React.FC = () => {
   }
 
   // Otherwise, render Library / Dashboard
-  const appContentClass = isApiKeyModalOpen || isUpdateModalOpen || isHelpModalOpen || manualImportState.isOpen || isCreateStoryModalOpen || isDownloadModalOpen || isSyncModalOpen ? 'blur-sm pointer-events-none' : '';
+  const appContentClass = isApiKeyModalOpen || isUpdateModalOpen || isHelpModalOpen || manualImportState.isOpen || isCreateStoryModalOpen || isDownloadModalOpen ? 'blur-sm pointer-events-none' : '';
 
   return (
     <div className="flex flex-col min-h-screen bg-[var(--theme-bg-base)] text-[var(--theme-text-primary)] font-sans transition-colors duration-300 relative">
+      {/* GLOBAL DOWNLOAD PROGRESS TOAST - REMOVED (Replaced by GlobalDownloadManager) */}
+      {downloadStatus.isProcessing && (
+          <div className="fixed bottom-14 left-4 z-[200] max-w-sm w-full bg-[var(--theme-bg-surface)] border border-[var(--theme-border)] rounded-lg shadow-2xl p-4 animate-fade-in-up">
+              <div className="flex justify-between items-center mb-2">
+                  <h4 className="font-bold text-[var(--theme-text-primary)] text-sm flex items-center gap-2">
+                      <SpinnerIcon className="w-4 h-4 animate-spin text-[var(--theme-accent-primary)]" />
+                      Đang xử lý tải xuống (EPUB)
+                  </h4>
+                  <button onClick={handleCancelDownload} className="text-rose-400 hover:text-rose-300 p-1 rounded-md hover:bg-rose-900/20" title="Hủy tải xuống">
+                      <StopIcon className="w-4 h-4" />
+                  </button>
+              </div>
+              <div className="w-full bg-[var(--theme-bg-base)] rounded-full h-2 mb-2 overflow-hidden">
+                  <div 
+                      className="bg-[var(--theme-accent-primary)] h-full transition-all duration-300 relative" 
+                      style={{ width: `${downloadStatus.total > 0 ? (downloadStatus.current / downloadStatus.total) * 100 : 0}%` }}
+                  >
+                      <div className="absolute inset-0 bg-white/20 animate-pulse"></div>
+                  </div>
+              </div>
+              <div className="flex justify-between text-xs text-[var(--theme-text-secondary)]">
+                  <span className="truncate max-w-[70%]">{downloadStatus.message}</span>
+                  <span>{Math.round(downloadStatus.total > 0 ? (downloadStatus.current / downloadStatus.total) * 100 : 0)}%</span>
+              </div>
+          </div>
+      )}
+
       <div className={`flex flex-col flex-grow ${appContentClass}`}>
-        <Header 
-            onOpenApiKeySettings={() => setIsApiKeyModalOpen(true)} 
-            onOpenUpdateModal={() => setIsUpdateModalOpen(true)} 
-            onGoHome={handleBackToMain}
-            user={user}
-            onLogin={() => setIsSyncModalOpen(true)}
-            onLogout={() => authService.signOutUser()}
-        />
+        <Header onOpenApiKeySettings={() => setIsApiKeyModalOpen(true)} onOpenUpdateModal={() => setIsUpdateModalOpen(true)} onGoHome={handleBackToMain} />
         <main className="max-w-screen-2xl mx-auto px-4 py-8 sm:py-12 flex-grow mb-16">
             <div className="mb-8 flex flex-col sm:flex-row gap-4 items-stretch sm:items-center">
                 <div className="flex-grow">
@@ -734,7 +702,7 @@ const App: React.FC = () => {
             {(isLoading || isDataLoading) ? (
                 <LoadingSpinner>
                     <div className="text-center mt-4 space-y-2">
-                        <h3 className="text-xl font-bold text-[var(--theme-accent-primary)]">Đang tải dữ liệu...</h3>
+                        <h3 className="text-xl font-bold text-[var(--theme-accent-primary)]">Đang khởi tạo...</h3>
                         <p className="text-sm text-[var(--theme-text-secondary)]">Vui lòng đợi trong giây lát</p>
                         {isDataLoading && (
                         <button 
@@ -835,7 +803,6 @@ const App: React.FC = () => {
       <UpdateModal isOpen={isUpdateModalOpen} onClose={handleCloseUpdateModal} />
       <HelpModal isOpen={isHelpModalOpen} onClose={() => setIsHelpModalOpen(false)} />
       <ApiKeyModal isOpen={isApiKeyModalOpen} onClose={() => setIsApiKeyModalOpen(false)} onValidateKey={handleValidateKey} onDataChange={reloadDataFromStorage} tokenUsage={tokenUsage} />
-      <SyncModal isOpen={isSyncModalOpen} onClose={() => setIsSyncModalOpen(false)} onSync={handleCloudSync} user={user} />
       <ManualImportModal isOpen={manualImportState.isOpen} onClose={() => setManualImportState(prev => ({ ...prev, isOpen: false }))} urlToImport={manualImportState.url} message={manualImportState.message} onFileSelected={handleManualImportFile} />
       <StoryEditModal isOpen={isCreateStoryModalOpen} onClose={() => setIsCreateStoryModalOpen(false)} onSave={handleCreateStory} onParseEbook={parseEbookFile} />
       <DownloadModal isOpen={isDownloadModalOpen} onClose={handleReadWithoutDownload} story={pendingStory || story} onStartDownload={handleStartDownloadWrapper} onDataImported={handleImportDataSuccess} />

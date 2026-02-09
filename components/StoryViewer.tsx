@@ -8,7 +8,6 @@ import { getStoryState, saveStoryState as saveStoryStateLocal, mergeChapterStats
 import { updateReadingHistory } from '../services/history';
 import * as dbService from '../services/dbService';
 import * as apiKeyService from '../services/apiKeyService';
-import * as cloudService from '../services/cloudService';
 import { splitChapterIntoChunks } from '../utils/textUtils';
 import { useTts } from '../hooks/useTts';
 
@@ -18,7 +17,7 @@ import LoadingSpinner from './LoadingSpinner';
 import CharacterPanel from './CharacterPanel';
 import ScrollToTopButton from './ScrollToTopButton';
 import CharacterPrimaryPanel from './CharacterPrimaryPanel';
-import ChatPanel from './ChatPanel'; 
+import ChatPanel from './ChatPanel'; // Có thể xóa import này nếu không dùng ChatPanel nữa
 import ApiKeyModal from './ApiKeyModal';
 import ManualImportModal from './ManualImportModal';
 
@@ -180,8 +179,6 @@ const StoryViewer: React.FC<StoryViewerProps> = ({
         
         try {
             await setCachedChapter(storyToLoad.url, chapterUrl, { content, stats: null });
-            // Push content to Cloud on successful load (Lazy Sync)
-            cloudService.pushChapterToCloud(storyToLoad.url, chapterUrl, { content, stats: null });
         } catch (e) {
             console.error("Failed to initial cache chapter", e);
         }
@@ -202,11 +199,7 @@ const StoryViewer: React.FC<StoryViewerProps> = ({
             
             setCumulativeStats(fullChapterState);
             persistStoryState(storyToLoad.url, fullChapterState);
-            
-            const chapterData = { content, stats: fullChapterState };
-            await setCachedChapter(storyToLoad.url, chapterUrl, chapterData);
-            cloudService.pushChapterToCloud(storyToLoad.url, chapterUrl, chapterData);
-
+            await setCachedChapter(storyToLoad.url, chapterUrl, { content, stats: fullChapterState });
         } catch (analysisError) {
             if (currentOpId !== operationIdRef.current) return;
             handleApiError(analysisError);
@@ -231,7 +224,6 @@ const StoryViewer: React.FC<StoryViewerProps> = ({
         onReadChapterUpdate(chapter.url);
         
         try {
-            // 1. Try Local Cache
             const cachedData = await getCachedChapter(storyToLoad.url, chapter.url);
             
             if (cachedData && cachedData.content) {
@@ -245,20 +237,6 @@ const StoryViewer: React.FC<StoryViewerProps> = ({
                 return;
             }
             
-            // 2. Try Cloud (If user logged in)
-            const cloudData = await cloudService.fetchChapterFromCloud(storyToLoad.url, chapter.url);
-            if (cloudData && cloudData.content) {
-                setChapterContent(cloudData.content);
-                if (cloudData.stats) {
-                    setCumulativeStats(cloudData.stats);
-                    setIsChapterLoading(false);
-                    return;
-                }
-                await processAndAnalyzeContent(storyToLoad, chapter.url, cloudData.content);
-                return;
-            }
-
-            // 3. Fallback to Source
             let content = "";
             if (storyToLoad.source === 'Ebook' && initialEbookInstance) {
                 const { zip } = initialEbookInstance;
@@ -329,9 +307,7 @@ const StoryViewer: React.FC<StoryViewerProps> = ({
         const chapter = story.chapters[selectedChapterIndex];
         setChapterContent(newContent);
         try {
-            const data = { content: newContent, stats: cumulativeStats };
-            await setCachedChapter(story.url, chapter.url, data);
-            cloudService.pushChapterToCloud(story.url, chapter.url, data);
+            await setCachedChapter(story.url, chapter.url, { content: newContent, stats: cumulativeStats });
         } catch (e) {
             setError("Không thể lưu nội dung chỉnh sửa.");
         }
@@ -369,9 +345,7 @@ const StoryViewer: React.FC<StoryViewerProps> = ({
                 setCumulativeStats(fullChapterState);
                 persistStoryState(story.url, fullChapterState);
                 if (selectedChapterIndex !== null && story.chapters) {
-                    const data = { content: chapterContent, stats: fullChapterState };
-                    await setCachedChapter(story.url, story.chapters[selectedChapterIndex].url, data);
-                    cloudService.pushChapterToCloud(story.url, story.chapters[selectedChapterIndex].url, data);
+                    await setCachedChapter(story.url, story.chapters[selectedChapterIndex].url, { content: chapterContent, stats: fullChapterState });
                 }
             }
         } catch (err) {
@@ -448,8 +422,6 @@ const StoryViewer: React.FC<StoryViewerProps> = ({
         try {
             await setCachedChapter(targetStory.url, newChapter.url, { content, stats: null });
             await dbService.saveStory(updatedStory);
-            cloudService.pushStoryToCloud(updatedStory);
-            cloudService.pushChapterToCloud(targetStory.url, newChapter.url, { content, stats: null });
             onUpdateStory(updatedStory);
         } catch (e) {
             setError(`Lỗi tạo chương: ${(e as Error).message}`);

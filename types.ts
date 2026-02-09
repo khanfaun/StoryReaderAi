@@ -1,4 +1,3 @@
-
 export interface Chapter {
   title: string;
   url: string;
@@ -14,7 +13,6 @@ export interface Story {
   chapters?: Chapter[];
   isSearchLink?: boolean; // Cờ để xác định đây là link tìm kiếm, không phải truyện
   createdAt?: number; // Timestamp khi truyện được thêm vào thư viện
-  updatedAt?: number; // Timestamp khi truyện được cập nhật lần cuối
   tags?: string[]; // Danh sách thể loại/nhãn (Ví dụ: Tiên Hiệp, Kiếm Hiệp)
 }
 
