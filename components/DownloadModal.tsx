@@ -1,7 +1,10 @@
+
 import React, { useEffect, useState, useRef } from 'react';
-import type { Story, CharacterStats, DownloadConfig } from '../types';
-import { CloseIcon, PlusIcon, TrashIcon, DownloadIcon, CheckIcon, SpinnerIcon, UploadIcon, SparklesIcon } from './icons';
+import type { Story, CharacterStats, DownloadConfig, GoogleUser } from '../types';
+import { CloseIcon, PlusIcon, TrashIcon, DownloadIcon, CheckIcon, SpinnerIcon, UploadIcon, SparklesIcon, CloudIcon } from './icons';
 import { exportStoryData, importStoryData } from '../services/storyStateService';
+import * as driveService from '../services/googleDriveService';
+import { uploadStoryToDrive } from '../services/sync';
 
 interface Range {
     id: string;
@@ -19,7 +22,7 @@ interface DownloadModalProps {
 }
 
 type Preset = 'all' | '50' | '100' | 'custom';
-type ModalTab = 'ebook' | 'ai_data';
+type ModalTab = 'ebook' | 'ai_data' | 'drive';
 
 const DownloadModal: React.FC<DownloadModalProps> = ({ 
     isOpen, 
@@ -39,6 +42,11 @@ const DownloadModal: React.FC<DownloadModalProps> = ({
   
   // AI Data State
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Drive State
+  const [driveUser, setDriveUser] = useState<GoogleUser | null>(null);
+  const [isDriveProcessing, setIsDriveProcessing] = useState(false);
+  const [driveStatusMsg, setDriveStatusMsg] = useState('');
   
   const totalChapters = story?.chapters?.length || 0;
 
@@ -49,6 +57,11 @@ const DownloadModal: React.FC<DownloadModalProps> = ({
         setMergeCustom(false);
         setActiveTab('ebook'); // Reset to default tab
         handlePresetChange('all', totalChapters); 
+        
+        // Initialize Drive check
+        driveService.initGoogleDrive((user) => {
+            setDriveUser(user);
+        });
     }
   }, [isOpen, totalChapters]);
 
@@ -135,6 +148,89 @@ const DownloadModal: React.FC<DownloadModalProps> = ({
       if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
+  // --- GOOGLE DRIVE LOGIC ---
+  const handleDriveSignIn = () => {
+      driveService.signIn();
+  };
+
+  const handleDriveUpload = async () => {
+      if (!story || !driveUser) return;
+      setIsDriveProcessing(true);
+      setDriveStatusMsg('Đang tải lên...');
+      try {
+          await uploadStoryToDrive(story);
+          setDriveStatusMsg('Đã tải lên thành công!');
+          setTimeout(() => setDriveStatusMsg(''), 3000);
+      } catch (e) {
+          console.error(e);
+          setDriveStatusMsg(`Lỗi: ${(e as Error).message}`);
+      } finally {
+          setIsDriveProcessing(false);
+      }
+  };
+
+  const handleDriveImport = async () => {
+      if (!story || !driveUser) return;
+      setIsDriveProcessing(true);
+      setDriveStatusMsg('Đang tìm file trên Drive...');
+      
+      try {
+          const STORY_PREFIX = 'story_metadata_';
+          // Sanitize naming logic same as sync.ts
+          const fileName = `${STORY_PREFIX}${story.url.replace(/[^a-zA-Z0-9]/g, '_')}.json`;
+          
+          const files = await driveService.listFiles();
+          const targetFile = files.find(f => f.name === fileName);
+
+          if (!targetFile) {
+              setDriveStatusMsg('Không tìm thấy bản lưu nào của truyện này trên Drive.');
+              return;
+          }
+
+          setDriveStatusMsg('Đang tải về...');
+          const content = await driveService.downloadFile(targetFile.id);
+          
+          if (!content) {
+              throw new Error("File rỗng hoặc không tải được.");
+          }
+
+          // Convert JSON content back to File object to reuse importStoryData logic
+          // Note: The structure from Drive (via sync.ts) might need adaptation if importStoryData expects the 'export' format.
+          // Check sync.ts: payload = { story, aiState, readChapters, lastModified }
+          // Check storyStateService.ts: importStoryData expects { version, data: { storyStates: ... } } OR legacy format.
+          
+          // Construct a compatible format for importStoryData
+          // We wrap the cloud payload into the structure importStoryData expects
+          const compatibleData = {
+              version: 2,
+              timestamp: new Date().toISOString(),
+              data: {
+                  storyStates: {
+                      [story.url]: {
+                          stats: content.aiState,
+                          readChapters: content.readChapters,
+                          // cachedChapters: content.cachedChapters // If we start syncing cache to drive
+                      }
+                  }
+              }
+          };
+
+          const blob = new Blob([JSON.stringify(compatibleData)], { type: 'application/json' });
+          const file = new File([blob], fileName, { type: 'application/json' });
+
+          setDriveStatusMsg('Đang nhập dữ liệu...');
+          await importStoryData(file, story, onDataImported);
+          setDriveStatusMsg('Đã đồng bộ từ Drive thành công!');
+          setTimeout(() => setDriveStatusMsg(''), 3000);
+
+      } catch (e) {
+          console.error(e);
+          setDriveStatusMsg(`Lỗi: ${(e as Error).message}`);
+      } finally {
+          setIsDriveProcessing(false);
+      }
+  };
+
   if (!isOpen) return null;
 
   return (
@@ -151,13 +247,19 @@ const DownloadModal: React.FC<DownloadModalProps> = ({
                     className={`flex-1 py-3 text-sm font-bold transition-colors border-b-2 ${activeTab === 'ebook' ? 'text-[var(--theme-accent-primary)] border-[var(--theme-accent-primary)] bg-[var(--theme-bg-base)]' : 'text-[var(--theme-text-secondary)] border-transparent hover:text-[var(--theme-text-primary)]'}`}
                     onClick={() => setActiveTab('ebook')}
                 >
-                    Tải truyện (Ebook/HTML)
+                    Tải truyện (Ebook)
                 </button>
                 <button 
                     className={`flex-1 py-3 text-sm font-bold transition-colors border-b-2 ${activeTab === 'ai_data' ? 'text-[var(--theme-accent-primary)] border-[var(--theme-accent-primary)] bg-[var(--theme-bg-base)]' : 'text-[var(--theme-text-secondary)] border-transparent hover:text-[var(--theme-text-primary)]'}`}
                     onClick={() => setActiveTab('ai_data')}
                 >
-                    Dữ liệu AI (JSON)
+                    Dữ liệu AI (Local)
+                </button>
+                <button 
+                    className={`flex-1 py-3 text-sm font-bold transition-colors border-b-2 ${activeTab === 'drive' ? 'text-blue-500 border-blue-500 bg-[var(--theme-bg-base)]' : 'text-[var(--theme-text-secondary)] border-transparent hover:text-blue-400'}`}
+                    onClick={() => setActiveTab('drive')}
+                >
+                    Google Drive
                 </button>
             </div>
             
@@ -280,7 +382,7 @@ const DownloadModal: React.FC<DownloadModalProps> = ({
                     </div>
                 )}
 
-                {/* TAB CONTENT: AI DATA IMPORT/EXPORT */}
+                {/* TAB CONTENT: AI DATA IMPORT/EXPORT (LOCAL) */}
                 {activeTab === 'ai_data' && (
                     <div className="space-y-6 animate-fade-in">
                         <div className="p-4 bg-purple-900/30 border border-purple-700/50 rounded-lg flex items-start gap-3">
@@ -290,7 +392,7 @@ const DownloadModal: React.FC<DownloadModalProps> = ({
                             <div>
                                 <h3 className="font-bold text-purple-200 mb-1 text-sm">Quản lý Dữ liệu Phân tích AI</h3>
                                 <p className="text-xs text-purple-100/80 leading-relaxed">
-                                    File JSON chứa toàn bộ dữ liệu phân tích và tiến độ đọc của truyện này. Dùng để sao lưu hoặc chuyển dữ liệu sang thiết bị khác.
+                                    File JSON chứa toàn bộ dữ liệu phân tích và tiến độ đọc của truyện này. Dùng để sao lưu hoặc chuyển dữ liệu sang thiết bị khác (thủ công).
                                 </p>
                             </div>
                         </div>
@@ -299,7 +401,7 @@ const DownloadModal: React.FC<DownloadModalProps> = ({
                             {/* Export Section */}
                             <div className="p-4 border border-[var(--theme-border)] rounded-lg bg-[var(--theme-bg-base)]">
                                 <h4 className="text-sm font-bold text-[var(--theme-text-primary)] mb-2">1. Tải về máy (Export)</h4>
-                                <p className="text-xs text-[var(--theme-text-secondary)] mb-3">Lưu trữ file .json chứa toàn bộ thông tin AI của truyện này (bao gồm cả phân tích từng chương).</p>
+                                <p className="text-xs text-[var(--theme-text-secondary)] mb-3">Lưu trữ file .json chứa toàn bộ thông tin AI của truyện này.</p>
                                 <button 
                                     onClick={handleExportData}
                                     className="flex items-center gap-2 px-4 py-2 bg-slate-700 hover:bg-slate-600 text-white rounded-md text-sm font-semibold transition-colors"
@@ -331,6 +433,83 @@ const DownloadModal: React.FC<DownloadModalProps> = ({
                                 </div>
                             </div>
                         </div>
+                    </div>
+                )}
+
+                {/* TAB CONTENT: GOOGLE DRIVE */}
+                {activeTab === 'drive' && (
+                    <div className="space-y-6 animate-fade-in">
+                        {!driveUser ? (
+                            <div className="text-center py-8">
+                                <div className="p-4 bg-blue-900/20 border border-blue-700/50 rounded-lg mb-6 max-w-sm mx-auto">
+                                    <CloudIcon className="w-12 h-12 text-blue-400 mx-auto mb-2" />
+                                    <p className="text-sm text-blue-200 mb-2 font-semibold">Đồng bộ Google Drive</p>
+                                    <p className="text-xs text-[var(--theme-text-secondary)]">
+                                        Đăng nhập để sao lưu và khôi phục dữ liệu truyện này từ Google Drive của bạn.
+                                    </p>
+                                </div>
+                                <button
+                                    onClick={handleDriveSignIn}
+                                    className="bg-white hover:bg-gray-100 text-gray-800 font-bold py-3 px-6 rounded-lg inline-flex items-center justify-center gap-3 transition-colors duration-300 border border-gray-300"
+                                >
+                                    <svg className="w-5 h-5" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg"><g clipPath="url(#clip0_17_40)"><path fill="#4285F4" d="M43.611 20.083H42V20H24V28H35.303C33.6747 33.148 29.2287 37.001 24 37C17.373 37 12 31.627 12 25C12 18.373 17.373 13 24 13C26.96 13 29.56 14.14 31.63 15.87L37.18 10.32C33.4725 6.94524 28.9375 5.00195 24 5C13.464 5 5 13.464 5 24C5 34.536 13.464 43 24 43C34.536 43 43 34.536 43 24C43 22.663 42.871 21.35 42.611 20.083V20.083Z"></path><path fill="#EA4335" d="M31.63 15.87L24 22.88L37.18 10.32C33.4725 6.94524 28.9375 5.00195 24 5V13C26.96 13 29.56 14.14 31.63 15.87Z"></path><path fill="#34A853" d="M24 43C28.9375 42.998 33.4725 41.0548 37.18 37.68L31.63 32.13C29.56 33.86 26.96 35 24 35C21.04 35 18.44 33.86 16.37 32.13L10.82 37.68C14.5275 41.0548 19.0625 42.998 24 43V43Z"></path><path fill="#FBBC05" d="M42.611 20.083H24V28H35.303C34.51 30.245 33.16 32.068 31.63 32.13L37.18 37.68C40.6552 34.4172 42.6625 30.0125 42.962 25.083C43.001 24.524 43 23.5 43 23C43 22.663 42.871 21.35 42.611 20.083V20.083Z"></path></g><defs><clipPath id="clip0_17_40"><rect width="48" height="48" fill="white"></rect></clipPath></defs></svg>
+                                    <span>Đăng nhập Google</span>
+                                </button>
+                            </div>
+                        ) : (
+                            <div className="space-y-6">
+                                <div className="flex items-center justify-between p-3 bg-[var(--theme-bg-base)] border border-[var(--theme-border)] rounded-lg">
+                                    <div className="flex items-center gap-3">
+                                        {driveUser.imageUrl ? (
+                                            <img src={driveUser.imageUrl} alt="Avatar" className="w-8 h-8 rounded-full" />
+                                        ) : (
+                                            <div className="w-8 h-8 rounded-full bg-blue-500 flex items-center justify-center text-white font-bold">{driveUser.name.charAt(0)}</div>
+                                        )}
+                                        <div>
+                                            <p className="text-sm font-semibold text-[var(--theme-text-primary)]">{driveUser.name}</p>
+                                            <p className="text-xs text-[var(--theme-text-secondary)]">{driveUser.email}</p>
+                                        </div>
+                                    </div>
+                                    <div className="text-xs text-green-400 font-medium bg-green-900/20 px-2 py-1 rounded border border-green-800">
+                                        Đã kết nối
+                                    </div>
+                                </div>
+
+                                {driveStatusMsg && (
+                                    <div className={`p-3 text-sm rounded-lg text-center ${driveStatusMsg.includes('Lỗi') ? 'bg-red-900/30 text-red-300' : 'bg-blue-900/30 text-blue-300'}`}>
+                                        {driveStatusMsg}
+                                    </div>
+                                )}
+
+                                <div className="grid gap-4">
+                                    <div className="p-4 border border-[var(--theme-border)] rounded-lg bg-[var(--theme-bg-base)]">
+                                        <h4 className="text-sm font-bold text-[var(--theme-text-primary)] mb-2">1. Sao lưu lên Drive (Upload)</h4>
+                                        <p className="text-xs text-[var(--theme-text-secondary)] mb-3">Tải dữ liệu phân tích, tiến độ đọc của truyện này lên Cloud.</p>
+                                        <button 
+                                            onClick={handleDriveUpload}
+                                            disabled={isDriveProcessing}
+                                            className="flex items-center gap-2 px-4 py-2 bg-blue-700 hover:bg-blue-600 text-white rounded-md text-sm font-semibold transition-colors w-full justify-center disabled:opacity-50 disabled:cursor-wait"
+                                        >
+                                            {isDriveProcessing ? <SpinnerIcon className="w-4 h-4 animate-spin"/> : <CloudIcon className="w-4 h-4" />}
+                                            {isDriveProcessing ? 'Đang xử lý...' : 'Tải lên Drive'}
+                                        </button>
+                                    </div>
+
+                                    <div className="p-4 border border-[var(--theme-border)] rounded-lg bg-[var(--theme-bg-base)]">
+                                        <h4 className="text-sm font-bold text-[var(--theme-text-primary)] mb-2">2. Khôi phục từ Drive (Import)</h4>
+                                        <p className="text-xs text-[var(--theme-text-secondary)] mb-3">Tìm bản sao lưu của truyện này trên Drive và tải về máy.</p>
+                                        <button 
+                                            onClick={handleDriveImport}
+                                            disabled={isDriveProcessing}
+                                            className="flex items-center gap-2 px-4 py-2 bg-[var(--theme-accent-primary)] hover:brightness-110 text-white rounded-md text-sm font-semibold transition-colors w-full justify-center disabled:opacity-50 disabled:cursor-wait"
+                                        >
+                                            {isDriveProcessing ? <SpinnerIcon className="w-4 h-4 animate-spin"/> : <DownloadIcon className="w-4 h-4" />}
+                                            {isDriveProcessing ? 'Đang xử lý...' : 'Tải về từ Drive'}
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
                     </div>
                 )}
             </div>

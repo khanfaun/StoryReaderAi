@@ -11,6 +11,9 @@ import * as apiKeyService from './services/apiKeyService';
 import { parseEbookFile } from './services/ebookParser';
 import { useBackgroundDownload } from './hooks/useBackgroundDownload';
 import { useDownloader } from './hooks/useDownloader';
+import * as driveService from './services/googleDriveService';
+import { uploadStoryToDrive, checkAndLoadStoryFromDrive } from './services/sync'; // Import checkAndLoadStoryFromDrive
+import { saveStoryState } from './services/storyStateService'; // Import saveStoryState
 
 import Header from './components/Header';
 import Footer from './components/Footer';
@@ -26,7 +29,11 @@ import StoryEditModal from './components/StoryEditModal';
 import DownloadModal from './components/DownloadModal';
 import ConfirmationModal from './components/ConfirmationModal';
 import GlobalDownloadManager from './components/GlobalDownloadManager';
+import StorageChoiceModal from './components/StorageChoiceModal';
 import { PlusIcon, StopIcon, SpinnerIcon, CheckIcon, CloseIcon, UploadIcon, DownloadIcon } from './components/icons';
+
+// Sync Modal (New)
+import SyncModal from './components/SyncModal';
 
 // New Component for active story logic
 import StoryViewer from './components/StoryViewer';
@@ -99,7 +106,9 @@ const App: React.FC = () => {
   const [tokenUsage, setTokenUsage] = useState<apiKeyService.TokenUsage>(apiKeyService.getTokenUsage());
   
   const [isUpdateModalOpen, setIsUpdateModalOpen] = useState(false);
+  const [isSyncModalOpen, setIsSyncModalOpen] = useState(false); // Sync Modal State
   const [isHelpModalOpen, setIsHelpModalOpen] = useState(false);
+  const [storageChoiceModal, setStorageChoiceModal] = useState<{ isOpen: boolean; story: Story | null }>({ isOpen: false, story: null });
   
   const [manualImportState, setManualImportState] = useState<ManualImportState>({
       isOpen: false, url: '', message: '', type: 'chapter', source: ''
@@ -140,15 +149,11 @@ const App: React.FC = () => {
   };
   
   const handleImportDataSuccess = () => {
-      // Triggered after import via DownloadModal, just force reload to be safe
-      // In StoryViewer, onDataChange handles local refresh. 
-      // For App level, we might want to refresh history/local stories.
       reloadDataFromStorage();
   };
 
   const reloadDataFromStorage = useCallback(async () => {
     setIsDataLoading(true);
-    // Note: Don't clear story here to avoid flickering if called during reading
     const localHistory = getReadingHistory();
     const dbStories = await dbService.getAllStories();
     setLocalStories(dbStories);
@@ -303,6 +308,7 @@ const App: React.FC = () => {
   };
 
   const handleSelectStory = useCallback(async (selectedStory: Story) => {
+      // 1. Nếu là truyện Offline hoặc đã có trong thư viện -> Mở bình thường
       if (selectedStory.source === 'Ebook' || selectedStory.source === 'Local') {
           handleSelectStoryInternal(selectedStory);
           return;
@@ -317,58 +323,122 @@ const App: React.FC = () => {
            return;
       }
 
+      // 2. TỰ ĐỘNG KIỂM TRA DRIVE TRƯỚC KHI FETCH TỪ WEB
+      if (driveService.isUserLoggedIn()) {
+          setIsDataLoading(true);
+          try {
+              // Thử tìm và tải từ Drive trước
+              const cloudData = await checkAndLoadStoryFromDrive(selectedStory.url);
+              if (cloudData && cloudData.story) {
+                  // Found on Drive! Restore and Open directly.
+                  await dbService.saveStory(cloudData.story);
+                  if (cloudData.aiState) {
+                      saveStoryState(cloudData.story.url, cloudData.aiState);
+                  }
+                  if (cloudData.readChapters) {
+                      localStorage.setItem(`readChapters_${cloudData.story.url}`, JSON.stringify(cloudData.readChapters));
+                  }
+                  
+                  // Update UI list
+                  setLocalStories(prev => [cloudData.story, ...prev.filter(s => s.url !== cloudData.story.url)]);
+                  
+                  // Open
+                  handleSelectStoryInternal(cloudData.story);
+                  
+                  // Inform user slightly? Optional.
+                  return; // Exit early, skipping web fetch and choice modal
+              }
+          } catch (e) {
+              console.warn("Auto-sync from Drive failed, falling back to web fetch", e);
+          }
+          // If not found or error, continue to fetch from Web
+      }
+
+      // 3. Truyện mới (không có Local, không có Drive) -> Tải thông tin từ Web
       setIsDataLoading(true); 
       loadingAbortRef.current = false;
       try {
           if (loadingAbortRef.current) return;
+          
+          // Fetch Metadata
           let fullStory = await getStoryDetails(selectedStory, undefined, () => {});
           
           if (loadingAbortRef.current) return;
 
-          await dbService.saveStory(fullStory);
-          setLocalStories(prev => [fullStory, ...prev.filter(s => s.url !== fullStory.url)]);
-          
-          if (fullStory.chapters && fullStory.chapters.length > 0) {
-              const preloadCount = Math.min(fullStory.chapters.length, 10);
-              const toLoad = fullStory.chapters.slice(0, preloadCount);
-              
-              await Promise.all(toLoad.map(async (c) => {
-                   if (loadingAbortRef.current) return;
-                   try {
-                      // Check cache first to be safe
-                      // getCachedChapter logic handles DB read
-                      const cached = await dbService.getChapterData(fullStory.url, c.url);
-                      if (!cached) {
-                          // Note: getChapterContent needs to be imported or available. 
-                          // It is imported from truyenfullService
-                          const { getChapterContent } = await import('./services/truyenfullService');
-                          const content = await getChapterContent(c, fullStory.source);
-                          await setCachedChapter(fullStory.url, c.url, { content, stats: null });
-                      }
-                   } catch(e) { 
-                       console.warn(`Failed to preload chapter ${c.title}`, e);
-                   }
-              }));
-              
-              if (loadingAbortRef.current) return;
-
-              handleSelectStoryInternal(fullStory); 
-              
-              if (fullStory.chapters.length > 10) {
-                  runBackgroundContentFetcher(fullStory, 10);
-              }
-          } else {
-              handleSelectStoryInternal(fullStory);
+          // 4. CHECK LOGIN & ASK STORAGE CHOICE (Only for new online stories)
+          if (driveService.isUserLoggedIn()) {
+              setPendingStory(fullStory);
+              setStorageChoiceModal({ isOpen: true, story: fullStory });
+              setIsDataLoading(false);
+              return; 
           }
+
+          // 5. Nếu chưa đăng nhập, lưu local như bình thường
+          await proceedWithStorySetup(fullStory, false);
 
       } catch (e) {
           if (!loadingAbortRef.current) {
             setError(`Lỗi khởi tạo truyện: ${(e as Error).message}`);
           }
-      } finally {
           setIsDataLoading(false);
       }
   }, [runBackgroundContentFetcher]);
+
+  // Logic chung để lưu truyện vào DB/Drive sau khi fetch xong metadata
+  const proceedWithStorySetup = async (fullStory: Story, saveToDrive: boolean) => {
+        try {
+            await dbService.saveStory(fullStory);
+            setLocalStories(prev => [fullStory, ...prev.filter(s => s.url !== fullStory.url)]);
+            
+            // Upload to Drive immediately if requested
+            if (saveToDrive) {
+                uploadStoryToDrive(fullStory).catch(err => {
+                    console.warn("Lỗi upload truyện mới lên Drive:", err);
+                    // Không chặn luồng đọc, chỉ log warning
+                });
+            }
+
+            if (fullStory.chapters && fullStory.chapters.length > 0) {
+                const preloadCount = Math.min(fullStory.chapters.length, 10);
+                const toLoad = fullStory.chapters.slice(0, preloadCount);
+                
+                await Promise.all(toLoad.map(async (c) => {
+                    if (loadingAbortRef.current) return;
+                    try {
+                        const cached = await dbService.getChapterData(fullStory.url, c.url);
+                        if (!cached) {
+                            const { getChapterContent } = await import('./services/truyenfullService');
+                            const content = await getChapterContent(c, fullStory.source);
+                            await setCachedChapter(fullStory.url, c.url, { content, stats: null });
+                        }
+                    } catch(e) { 
+                        console.warn(`Failed to preload chapter ${c.title}`, e);
+                    }
+                }));
+                
+                if (loadingAbortRef.current) return;
+
+                handleSelectStoryInternal(fullStory); 
+                
+                if (fullStory.chapters.length > 10) {
+                    runBackgroundContentFetcher(fullStory, 10);
+                }
+            } else {
+                handleSelectStoryInternal(fullStory);
+            }
+        } finally {
+            setIsDataLoading(false);
+        }
+  };
+
+  const handleStorageChoice = async (choice: 'local' | 'drive') => {
+      setStorageChoiceModal({ isOpen: false, story: null });
+      if (pendingStory) {
+          setIsDataLoading(true);
+          await proceedWithStorySetup(pendingStory, choice === 'drive');
+          setPendingStory(null);
+      }
+  };
 
   const handleCancelLoading = () => {
       loadingAbortRef.current = true;
@@ -579,13 +649,13 @@ const App: React.FC = () => {
 
   // Main Render Logic
   
-  // If a story is selected, delegate to StoryViewer
   if (story) {
       return (
           <div className="flex flex-col min-h-screen bg-[var(--theme-bg-base)] text-[var(--theme-text-primary)] font-sans transition-colors duration-300 relative">
               <Header 
                 onOpenApiKeySettings={() => setIsApiKeyModalOpen(true)} 
-                onOpenUpdateModal={() => setIsUpdateModalOpen(true)} 
+                onOpenUpdateModal={() => setIsUpdateModalOpen(true)}
+                onOpenSyncModal={() => setIsSyncModalOpen(true)} 
                 onGoHome={handleBackToMain} 
                 storyTitle={isReadingMode ? story.title : undefined}
               />
@@ -631,7 +701,6 @@ const App: React.FC = () => {
                   onCreateStory={() => setIsCreateStoryModalOpen(true)}
               />
               
-              {/* GLOBAL DOWNLOAD MANAGER (Hidden when Reading) */}
               {!isReadingMode && (
                   <GlobalDownloadManager 
                       activeDownloads={backgroundDownloads}
@@ -648,18 +717,22 @@ const App: React.FC = () => {
 
               <StoryEditModal isOpen={isCreateStoryModalOpen} onClose={() => setIsCreateStoryModalOpen(false)} onSave={handleCreateStory} onParseEbook={parseEbookFile} />
               <DownloadModal isOpen={isDownloadModalOpen} onClose={handleReadWithoutDownload} story={pendingStory || story} onStartDownload={handleStartDownloadWrapper} onDataImported={handleImportDataSuccess} />
+              
+              {/* Sync Modal available in reading view */}
+              {isSyncModalOpen && (
+                  <SyncModal onClose={() => setIsSyncModalOpen(false)} user={null} />
+              )}
           </div>
       )
   }
 
-  // Otherwise, render Library / Dashboard
-  const appContentClass = isApiKeyModalOpen || isUpdateModalOpen || isHelpModalOpen || manualImportState.isOpen || isCreateStoryModalOpen || isDownloadModalOpen ? 'blur-sm pointer-events-none' : '';
+  const appContentClass = isApiKeyModalOpen || isUpdateModalOpen || isHelpModalOpen || manualImportState.isOpen || isCreateStoryModalOpen || isDownloadModalOpen || isSyncModalOpen || storageChoiceModal.isOpen ? 'blur-sm pointer-events-none' : '';
 
   return (
     <div className="flex flex-col min-h-screen bg-[var(--theme-bg-base)] text-[var(--theme-text-primary)] font-sans transition-colors duration-300 relative">
-      {/* GLOBAL DOWNLOAD PROGRESS TOAST - REMOVED (Replaced by GlobalDownloadManager) */}
+      
       {downloadStatus.isProcessing && (
-          <div className="fixed bottom-14 left-4 z-[200] max-w-sm w-full bg-[var(--theme-bg-surface)] border border-[var(--theme-border)] rounded-lg shadow-2xl p-4 animate-fade-in-up">
+          <div className="fixed bottom-20 left-4 z-[200] max-w-sm w-full bg-[var(--theme-bg-surface)] border border-[var(--theme-border)] rounded-lg shadow-2xl p-4 animate-fade-in-up">
               <div className="flex justify-between items-center mb-2">
                   <h4 className="font-bold text-[var(--theme-text-primary)] text-sm flex items-center gap-2">
                       <SpinnerIcon className="w-4 h-4 animate-spin text-[var(--theme-accent-primary)]" />
@@ -685,7 +758,12 @@ const App: React.FC = () => {
       )}
 
       <div className={`flex flex-col flex-grow ${appContentClass}`}>
-        <Header onOpenApiKeySettings={() => setIsApiKeyModalOpen(true)} onOpenUpdateModal={() => setIsUpdateModalOpen(true)} onGoHome={handleBackToMain} />
+        <Header 
+            onOpenApiKeySettings={() => setIsApiKeyModalOpen(true)} 
+            onOpenUpdateModal={() => setIsUpdateModalOpen(true)} 
+            onOpenSyncModal={() => setIsSyncModalOpen(true)}
+            onGoHome={handleBackToMain} 
+        />
         <main className="max-w-screen-2xl mx-auto px-4 py-8 sm:py-12 flex-grow mb-16">
             <div className="mb-8 flex flex-col sm:flex-row gap-4 items-stretch sm:items-center">
                 <div className="flex-grow">
@@ -806,6 +884,13 @@ const App: React.FC = () => {
       <ManualImportModal isOpen={manualImportState.isOpen} onClose={() => setManualImportState(prev => ({ ...prev, isOpen: false }))} urlToImport={manualImportState.url} message={manualImportState.message} onFileSelected={handleManualImportFile} />
       <StoryEditModal isOpen={isCreateStoryModalOpen} onClose={() => setIsCreateStoryModalOpen(false)} onSave={handleCreateStory} onParseEbook={parseEbookFile} />
       <DownloadModal isOpen={isDownloadModalOpen} onClose={handleReadWithoutDownload} story={pendingStory || story} onStartDownload={handleStartDownloadWrapper} onDataImported={handleImportDataSuccess} />
+      <StorageChoiceModal isOpen={storageChoiceModal.isOpen} onClose={() => setStorageChoiceModal({ isOpen: false, story: null })} onChoice={handleStorageChoice} story={storageChoiceModal.story} />
+      
+      {/* New Sync Modal - Use user=null initially, let component handle auth check */}
+      {isSyncModalOpen && (
+          <SyncModal onClose={() => setIsSyncModalOpen(false)} user={null} />
+      )}
+
       <ConfirmationModal isOpen={deleteConfirmation.isOpen} onClose={() => setDeleteConfirmation({ isOpen: false })} onConfirm={confirmDeleteEbook} title="Xác nhận xóa">
         <p>Bạn có chắc chắn muốn xóa truyện <strong className="text-[var(--theme-text-primary)]">{deleteConfirmation.item?.title}</strong> {' '}vĩnh viễn không?</p>
         <p className="mt-2 text-sm text-rose-400">Hành động này không thể hoàn tác.</p>

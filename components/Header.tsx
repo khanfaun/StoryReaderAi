@@ -1,15 +1,16 @@
 
 import React from 'react';
-import { KeyIcon, BellIcon } from './icons';
+import { KeyIcon, BellIcon, CloudIcon } from './icons';
 
 interface HeaderProps {
   onOpenApiKeySettings: () => void;
   onOpenUpdateModal: () => void;
+  onOpenSyncModal?: () => void; // Optional prop for now to avoid breaking changes if not passed immediately
   onGoHome: () => void;
   storyTitle?: string;
 }
 
-const Header: React.FC<HeaderProps> = ({ onOpenApiKeySettings, onOpenUpdateModal, onGoHome, storyTitle }) => {
+const Header: React.FC<HeaderProps> = ({ onOpenApiKeySettings, onOpenUpdateModal, onOpenSyncModal, onGoHome, storyTitle }) => {
   return (
     <header className="bg-[var(--theme-bg-surface)] shadow-lg border-b border-[var(--theme-border)] relative z-50">
       <div className="container mx-auto px-4 py-4 flex justify-between items-center relative">
@@ -45,6 +46,16 @@ const Header: React.FC<HeaderProps> = ({ onOpenApiKeySettings, onOpenUpdateModal
           >
             <KeyIcon className="w-6 h-6" />
           </button>
+          {onOpenSyncModal && (
+            <button
+                onClick={onOpenSyncModal}
+                className="p-2 rounded-full text-[var(--theme-text-secondary)] hover:bg-[var(--theme-border)] hover:text-[var(--theme-text-primary)] transition-colors duration-200"
+                aria-label="Đồng bộ Google Drive"
+                title="Đăng nhập / Đồng bộ dữ liệu"
+            >
+                <CloudIcon className="w-6 h-6" />
+            </button>
+          )}
         </div>
       </div>
     </header>
