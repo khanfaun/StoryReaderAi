@@ -1,4 +1,4 @@
-import type { Story, CachedChapter, CharacterStats } from '../types';
+import type { Story, CachedChapter, CharacterStats, GoogleUser } from '../types';
 
 // Declare globals for Google APIs
 declare global {
@@ -14,7 +14,8 @@ declare global {
 // Cập nhật Client ID mới
 const CLIENT_ID = '668650540476-6dkreulqvl7sffc6sv373t2pplob9hmt.apps.googleusercontent.com'; 
 
-const SCOPES = 'https://www.googleapis.com/auth/drive.file';
+// Thêm scope userinfo.profile để lấy ảnh đại diện
+const SCOPES = 'https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/userinfo.profile';
 const APP_FOLDER_NAME = 'TruyenReader_Data';
 
 let tokenClient: any;
@@ -96,6 +97,30 @@ export const handleSignOut = () => {
 };
 
 export const isSignedIn = () => !!accessToken;
+
+// --- USER INFO ---
+export const getUserProfile = async (): Promise<GoogleUser | null> => {
+    if (!isSignedIn()) return null;
+    try {
+        const response = await fetch('https://www.googleapis.com/oauth2/v1/userinfo?alt=json', {
+            headers: {
+                'Authorization': `Bearer ${accessToken}`
+            }
+        });
+        if (response.ok) {
+            const data = await response.json();
+            return {
+                name: data.name,
+                email: data.email || 'Google User',
+                imageUrl: data.picture
+            };
+        }
+        return null;
+    } catch (e) {
+        console.error("Failed to fetch user profile", e);
+        return null;
+    }
+};
 
 // --- DRIVE OPERATIONS ---
 

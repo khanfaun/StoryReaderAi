@@ -25,7 +25,13 @@ const SyncModal: React.FC<SyncModalProps> = ({ isOpen, onClose, onSync, user }) 
       // Sau khi auth thành công, trigger sync
       setStatus('Đăng nhập thành công! Đang đồng bộ danh sách truyện...');
       await onSync();
-      setStatus('Đồng bộ hoàn tất!');
+      setStatus('Đồng bộ hoàn tất! Cửa sổ sẽ đóng...');
+      
+      // Delay một chút để người dùng đọc thông báo rồi đóng
+      setTimeout(() => {
+          onClose();
+      }, 1000);
+      
     } catch (error: any) {
         console.error("Drive login error", error);
         setStatus('Đăng nhập thất bại hoặc bị hủy.');
@@ -48,7 +54,8 @@ const SyncModal: React.FC<SyncModalProps> = ({ isOpen, onClose, onSync, user }) 
     setStatus('Đang quét và đồng bộ danh sách truyện...');
     const success = await onSync();
     if (success) {
-      setStatus('Đồng bộ thành công!');
+      setStatus('Đồng bộ thành công! Cửa sổ sẽ đóng...');
+      setTimeout(() => onClose(), 800);
     } else {
       setStatus('Đồng bộ thất bại. Vui lòng thử lại.');
     }
@@ -78,11 +85,17 @@ const SyncModal: React.FC<SyncModalProps> = ({ isOpen, onClose, onSync, user }) 
         <div className="p-6">
           {isSignedIn() ? (
             <div className="text-center">
-              <div className="w-16 h-16 rounded-full mx-auto mb-4 bg-green-100 flex items-center justify-center border-2 border-green-500">
-                  <DownloadIcon className="w-8 h-8 text-green-600" />
+              <div className="w-16 h-16 rounded-full mx-auto mb-4 bg-green-100 flex items-center justify-center border-2 border-green-500 overflow-hidden">
+                  {user?.imageUrl ? (
+                      <img src={user.imageUrl} alt={user.name} className="w-full h-full object-cover" />
+                  ) : (
+                      <DownloadIcon className="w-8 h-8 text-green-600" />
+                  )}
               </div>
               <p className="font-semibold text-lg text-[var(--theme-text-primary)]">Đã kết nối Drive</p>
-              <p className="text-sm text-[var(--theme-text-secondary)] mb-6">Tài khoản Google đang hoạt động</p>
+              <p className="text-sm text-[var(--theme-text-secondary)] mb-6">
+                  {user?.name || 'Tài khoản Google'}
+              </p>
               
               <div className="flex flex-col gap-3">
                 <button

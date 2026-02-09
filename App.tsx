@@ -159,6 +159,10 @@ const App: React.FC = () => {
         if (driveService.isSignedIn()) {
             const { stories: mergedStories } = await driveService.syncManifest(dbStories);
             setLocalStories(mergedStories);
+            
+            // Also try to restore user profile silently
+            const userProfile = await driveService.getUserProfile();
+            if (userProfile) setUser(userProfile);
         }
     } catch (e) {
         console.warn("Auto-sync failed or skipped:", e);
@@ -547,9 +551,15 @@ const App: React.FC = () => {
       try {
           const { stories } = await driveService.syncManifest(localStories);
           setLocalStories(stories);
-          if (driveService.isSignedIn()) {
-              setUser({ name: 'Google User', email: 'Connected', imageUrl: '' }); // Simplified user
+          
+          // Fetch real user profile info
+          const userProfile = await driveService.getUserProfile();
+          if (userProfile) {
+              setUser(userProfile);
+          } else if (driveService.isSignedIn()) {
+              setUser({ name: 'Google User', email: 'Connected', imageUrl: '' }); // Fallback
           }
+          
           return true;
       } catch (e) {
           console.error("Sync failed:", e);
@@ -599,6 +609,7 @@ const App: React.FC = () => {
                 onOpenSyncModal={() => setIsSyncModalOpen(true)}
                 onGoHome={handleBackToMain} 
                 storyTitle={isReadingMode ? story.title : undefined}
+                user={user} // Pass user to Header
               />
               
               <StoryViewer 
@@ -703,6 +714,7 @@ const App: React.FC = () => {
             onOpenUpdateModal={() => setIsUpdateModalOpen(true)} 
             onOpenSyncModal={() => setIsSyncModalOpen(true)}
             onGoHome={handleBackToMain} 
+            user={user} // Pass user to Header
         />
         <main className="max-w-screen-2xl mx-auto px-4 py-8 sm:py-12 flex-grow mb-16">
             <div className="mb-8 flex flex-col sm:flex-row gap-4 items-stretch sm:items-center">
