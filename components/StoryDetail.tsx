@@ -85,9 +85,6 @@ const StoryDetail: React.FC<StoryDetailProps> = ({
   // Download states
   const [isDownloadModalOpen, setIsDownloadModalOpen] = useState(false);
 
-  // Info Alert State
-  const [showInfoAlert, setShowInfoAlert] = useState(true);
-
   // State riêng để xóa chương bằng Modal
   const [chapterToDelete, setChapterToDelete] = useState<{ chapter: Chapter } | null>(null);
   
@@ -256,30 +253,6 @@ const StoryDetail: React.FC<StoryDetailProps> = ({
               <PlusIcon className="w-5 h-5" /> <span className="whitespace-nowrap">Tạo truyện mới</span>
           </button>
       </div>
-
-      {/* PERSISTENT INFO ALERT */}
-      {showInfoAlert && (story.source !== 'Local' && story.source !== 'Ebook') && (
-          <div className="mb-6 bg-indigo-900/20 border border-indigo-500/30 rounded-lg p-4 flex items-start gap-3 relative animate-fade-in shadow-inner">
-              <div className="flex-shrink-0 mt-0.5 text-indigo-400">
-                  <InfoIcon className="w-5 h-5" />
-              </div>
-              <div className="flex-grow pr-6">
-                  <h3 className="text-sm font-bold text-indigo-200 mb-1 flex items-center gap-2">
-                      ⚡ Chế độ Đọc Nhanh & Đồng bộ Ngầm
-                  </h3>
-                  <p className="text-xs sm:text-sm text-indigo-100/80 leading-relaxed">
-                      Hệ thống đã tải sẵn 10 chương đầu để bạn đọc ngay lập tức. Toàn bộ các chương còn lại đang được <strong className="text-indigo-300">tự động tải ngầm</strong> và lưu trữ an toàn vào trình duyệt (Offline). Bạn có thể xuất file Ebook về máy cá nhân bất cứ lúc nào thông qua nút "Tải truyện".
-                  </p>
-              </div>
-              <button 
-                  onClick={() => setShowInfoAlert(false)} 
-                  className="absolute top-2 right-2 text-indigo-400/50 hover:text-indigo-300 p-1 hover:bg-indigo-800/30 rounded-full transition-colors"
-                  title="Đóng thông báo"
-              >
-                  <CloseIcon className="w-4 h-4" />
-              </button>
-          </div>
-      )}
 
       <div className="flex justify-between items-center mb-6 flex-wrap gap-2">
         <button

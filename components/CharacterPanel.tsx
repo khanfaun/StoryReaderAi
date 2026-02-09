@@ -687,7 +687,7 @@ const CharacterPanel: React.FC<CharacterPanelProps> = ({
                                         </svg>
                                     )}
                                 </div>
-                                <div className="flex-grow">
+                                <div className="flex-1 min-w-0">
                                     <InfoItemDisplay
                                         item={npc}
                                         onEdit={() => handleOpenModal('npcs', npc)}
@@ -1037,14 +1037,14 @@ const TreeNode: React.FC<{
         <div className="flex flex-col">
             <div className="flex items-center relative h-10">
                 <TreeBranch level={level + 1} isLast={isLast} parentIsLast={parentIsLast} />
-                <div className="flex items-center ml-1 group">
-                  <div className={`px-3 py-1 rounded-md text-sm font-medium ${isCurrent ? 'bg-[var(--theme-accent-secondary)] text-slate-900 ring-2 ring-offset-2 ring-offset-[var(--theme-bg-surface)] ring-[var(--theme-accent-secondary)]' : 'bg-[var(--theme-bg-base)]'}`}>
+                <div className="flex items-center ml-1 group flex-1 min-w-0">
+                  <div className={`px-3 py-1 rounded-md text-sm font-medium truncate max-w-full ${isCurrent ? 'bg-[var(--theme-accent-secondary)] text-slate-900 ring-2 ring-offset-2 ring-offset-[var(--theme-bg-surface)] ring-[var(--theme-accent-secondary)]' : 'bg-[var(--theme-bg-base)]'}`}>
                       <EntityTooltip entity={node} noUnderline>{node.ten}</EntityTooltip>
                   </div>
                   {isCurrent && (
-                      <div className="ml-2 w-3 h-3 rounded-full bg-[var(--theme-accent-secondary)] animate-pulse" title="Vị trí hiện tại"></div>
+                      <div className="ml-2 w-3 h-3 rounded-full bg-[var(--theme-accent-secondary)] animate-pulse shrink-0" title="Vị trí hiện tại"></div>
                   )}
-                  <div className="ml-2 hidden group-hover:flex items-center gap-1">
+                  <div className="ml-2 hidden group-hover:flex items-center gap-1 shrink-0">
                       <button
                         onClick={(e) => { e.stopPropagation(); onEdit('diaDiem', node); }}
                         className="p-1.5 text-slate-300 hover:text-cyan-400 rounded-full transition-colors bg-slate-700/90"

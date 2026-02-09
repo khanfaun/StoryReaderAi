@@ -1,3 +1,4 @@
+
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { EditIcon, TrashIcon } from './icons';
@@ -27,7 +28,23 @@ const InfoItemDisplay: React.FC<InfoItemDisplayProps> = ({ item, onEdit, onDelet
   const buttonRef = useRef<HTMLButtonElement>(null);
   const popoverRef = useRef<HTMLDivElement>(null);
 
-  const isInactive = ['dead', 'used', 'lost', 'destroyed'].includes(item.status || '');
+  // Logic xác định trạng thái "bị loại bỏ" nhưng vẫn hiển thị
+  const status = item.status?.toLowerCase() || '';
+  const isInactive = ['dead', 'used', 'lost', 'destroyed', 'completed'].includes(status);
+  
+  // Màu sắc và Style đặc biệt cho các trạng thái
+  let statusStyleClass = '';
+  let statusText = '';
+
+  if (isInactive) {
+      statusStyleClass = 'bg-[var(--theme-bg-base)] text-[var(--theme-text-secondary)] border-[var(--theme-border)] decoration-slate-500 line-through decoration-2 opacity-70';
+      if (status === 'dead') statusText = '(Đã chết)';
+      else if (status === 'used') statusText = '(Đã dùng)';
+      else if (status === 'lost') statusText = '(Đã mất)';
+      else if (status === 'destroyed') statusText = '(Đã hủy)';
+  } else {
+      statusStyleClass = 'bg-[var(--theme-text-primary)] border-[var(--theme-text-primary)] text-[var(--theme-bg-surface)] hover:brightness-90 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-[var(--theme-bg-surface)] focus:ring-[var(--theme-accent-secondary)]';
+  }
 
   const updatePopoverPosition = useCallback(() => {
     if (!isPopoverVisible || !buttonRef.current || !popoverRef.current) return;
@@ -92,11 +109,16 @@ const InfoItemDisplay: React.FC<InfoItemDisplayProps> = ({ item, onEdit, onDelet
     <div
       ref={popoverRef}
       style={popoverStyle}
-      className="w-64 p-3 bg-[var(--theme-bg-base)] rounded-lg shadow-2xl border border-[var(--theme-border)] text-sm text-[var(--theme-text-primary)] animate-fade-in-up"
+      className="w-64 p-3 bg-[var(--theme-bg-base)] rounded-lg shadow-2xl border border-[var(--theme-border)] text-sm text-[var(--theme-text-primary)] animate-fade-in-up z-[200]"
       role="tooltip"
     >
-      <p className="font-bold text-[var(--theme-accent-primary)] mb-1 break-words">{item.ten}</p>
-      <p className="break-words">{item.moTa}</p>
+      <div className="flex justify-between items-start gap-2">
+          <p className={`font-bold text-[var(--theme-accent-primary)] mb-1 break-words ${isInactive ? 'line-through decoration-slate-500 decoration-2 opacity-80' : ''}`}>
+              {item.ten}
+          </p>
+          {isInactive && <span className="text-[10px] uppercase font-bold text-rose-400 bg-rose-900/30 px-1 rounded">{status}</span>}
+      </div>
+      <p className="break-words text-justify">{item.moTa}</p>
       {item.capDo && <p className="text-sm mt-2 text-[var(--theme-text-secondary)]"><strong>Cấp độ:</strong> {item.capDo}</p>}
       {item.diaDiemCha && <p className="text-sm text-[var(--theme-text-secondary)]"><strong>Thuộc:</strong> {item.diaDiemCha}</p>}
       <div 
@@ -112,21 +134,18 @@ const InfoItemDisplay: React.FC<InfoItemDisplayProps> = ({ item, onEdit, onDelet
       <button
         ref={buttonRef}
         onClick={() => setIsPopoverVisible(!isPopoverVisible)}
-        className={`w-full text-left px-4 py-2 rounded-md text-sm font-medium transition-all duration-200 border
-                    ${isInactive 
-                      ? 'bg-[var(--theme-text-primary)]/10 text-[var(--theme-text-primary)]/50 border-[var(--theme-text-primary)]/30 line-through cursor-default'
-                      : 'bg-[var(--theme-text-primary)] border-[var(--theme-text-primary)] text-[var(--theme-bg-surface)] hover:brightness-90 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-[var(--theme-bg-surface)] focus:ring-[var(--theme-accent-secondary)]'
-                    }`}
+        className={`w-full text-left px-4 py-2 rounded-md text-sm font-medium transition-all duration-200 border flex justify-between items-center ${statusStyleClass}`}
         aria-haspopup="true"
         aria-expanded={isPopoverVisible}
       >
-        {item.ten}
+        <span className="truncate flex-1 min-w-0" title={item.ten}>{item.ten}</span>
+        {statusText && <span className="text-[10px] ml-2 italic opacity-80 flex-shrink-0">{statusText}</span>}
       </button>
       {popoverContent}
-       <div className="absolute top-1/2 -translate-y-1/2 right-2 hidden group-hover:flex items-center gap-1 bg-[var(--theme-text-primary)]/90 rounded-full px-1 py-0.5">
+       <div className="absolute top-1/2 -translate-y-1/2 right-2 hidden group-hover:flex items-center gap-1 bg-[var(--theme-bg-surface)] shadow-md rounded-full px-1 py-0.5 border border-[var(--theme-border)]">
           <button
             onClick={(e) => { e.stopPropagation(); onEdit(); }}
-            className="p-1.5 text-[var(--theme-bg-surface)] hover:text-cyan-400 rounded-full transition-colors"
+            className="p-1.5 text-[var(--theme-text-secondary)] hover:text-cyan-400 rounded-full transition-colors"
             aria-label={`Sửa ${item.ten}`}
             title="Sửa"
           >
@@ -134,9 +153,9 @@ const InfoItemDisplay: React.FC<InfoItemDisplayProps> = ({ item, onEdit, onDelet
           </button>
           <button
             onClick={(e) => { e.stopPropagation(); onDelete(); }}
-            className="p-1.5 text-[var(--theme-bg-surface)] hover:text-rose-500 rounded-full transition-colors"
+            className="p-1.5 text-[var(--theme-text-secondary)] hover:text-rose-500 rounded-full transition-colors"
             aria-label={`Xóa ${item.ten}`}
-            title="Xóa"
+            title="Xóa vĩnh viễn"
           >
             <TrashIcon className="w-4 h-4" />
           </button>

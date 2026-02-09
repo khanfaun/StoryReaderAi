@@ -364,6 +364,11 @@ const App: React.FC = () => {
           
           window.scrollTo(0, 0);
 
+          // TỰ ĐỘNG TẢI NGẦM TOÀN BỘ (Nếu không phải Local/Ebook)
+          if (fullStory.chapters && fullStory.chapters.length > 0 && fullStory.source !== 'Local' && fullStory.source !== 'Ebook') {
+              runBackgroundContentFetcher(fullStory, 0);
+          }
+
       } catch (e) {
           if (!loadingAbortRef.current) {
             setError(`Lỗi tải thông tin truyện: ${(e as Error).message}`);
@@ -384,9 +389,9 @@ const App: React.FC = () => {
       
       if (existingStory) {
            handleSelectStoryInternal(existingStory);
-           // Nêu local có, check xem có cần fetch thêm không (ví dụ ít chương quá)
-           if (existingStory.chapters && existingStory.chapters.length > 10 && existingStory.source !== 'Local' && existingStory.source !== 'Ebook') {
-               runBackgroundContentFetcher(existingStory, 10);
+           // Nếu local có, và là truyện Web, luôn kiểm tra/tải tiếp các chương còn thiếu
+           if (existingStory.chapters && existingStory.chapters.length > 0 && existingStory.source !== 'Local' && existingStory.source !== 'Ebook') {
+               runBackgroundContentFetcher(existingStory, 0);
            }
            return;
       }

@@ -165,7 +165,21 @@ const StoryViewer: React.FC<StoryViewerProps> = ({
     const handleStatsChange = useCallback((newStats: CharacterStats) => {
         setCumulativeStats(newStats);
         persistStoryState(story.url, newStats);
-    }, [story.url, persistStoryState]);
+        
+        // SỬA ĐỔI QUAN TRỌNG: Lưu trực tiếp vào Cache DB của chương hiện tại (Snapshot)
+        // Khi người dùng sửa tay, dữ liệu này sẽ ghi đè snapshot cũ
+        if (selectedChapterIndex !== null && story.chapters && story.chapters[selectedChapterIndex]) {
+            const currentChapterUrl = story.chapters[selectedChapterIndex].url;
+            // Cần content để lưu lại
+            if (chapterContent) {
+                setCachedChapter(story.url, currentChapterUrl, { content: chapterContent, stats: newStats }).catch(console.error);
+                // Sync Drive nếu cần
+                if (syncService.isAuthenticated()) {
+                    syncService.saveChapterContentToDrive(story.url, currentChapterUrl, { content: chapterContent, stats: newStats }).catch(console.error);
+                }
+            }
+        }
+    }, [story.url, persistStoryState, selectedChapterIndex, story.chapters, chapterContent]);
 
     const handleApiError = useCallback((error: unknown) => {
         const errorMessage = error instanceof Error ? error.message : "Đã xảy ra lỗi không xác định.";
@@ -214,6 +228,7 @@ const StoryViewer: React.FC<StoryViewerProps> = ({
         setIsAnalyzing(true);
         try {
             // SỬA ĐỔI: Sử dụng baseStats được truyền vào (từ chương trước) thay vì state hiện tại
+            // Điều này đảm bảo phân tích dựa trên snapshot quá khứ chứ không phải tương lai
             const baseStats = overrideBaseStats !== undefined ? (overrideBaseStats || {}) : (cumulativeStats || {});
             
             const { data: deltaStats, usage } = await analyzeChapterForCharacterStats(content, baseStats);
@@ -266,13 +281,17 @@ const StoryViewer: React.FC<StoryViewerProps> = ({
             
             if (cachedData && cachedData.content) {
                 setChapterContent(cachedData.content);
+                // SỬA ĐỔI: Nguyên tắc Snapshot
+                // Nếu Cache ĐÃ CÓ stats -> Dùng luôn, KHÔNG phân tích lại, KHÔNG merge với cái gì khác.
+                // Đây là dữ liệu "đã chốt" của chương này.
                 if (cachedData.stats) {
                     setCumulativeStats(cachedData.stats);
                     setIsChapterLoading(false); 
                     return; 
                 }
                 
-                // SỬA ĐỔI: Nếu không có stats của chương này, tìm stats của chương trước để làm cơ sở
+                // Nếu chưa có stats, tìm stats của chương LIỀN TRƯỚC để làm context
+                // (Chứ không lấy cumulativeStats toàn cục - có thể là của tương lai)
                 let prevStats = null;
                 if (chapterIndex > 0) {
                     const prevChapUrl = storyToLoad.chapters[chapterIndex - 1].url;
@@ -282,8 +301,7 @@ const StoryViewer: React.FC<StoryViewerProps> = ({
                     }
                 }
                 
-                // Nếu là chương đầu tiên hoặc không tìm thấy stats chương trước, dùng object rỗng hoặc global state (cân nhắc)
-                // Ở đây dùng prevStats || {} để đảm bảo tính cô lập
+                // Phân tích mới dựa trên context cũ
                 await processAndAnalyzeContent(storyToLoad, chapter.url, cachedData.content, prevStats);
                 return;
             }
@@ -297,6 +315,7 @@ const StoryViewer: React.FC<StoryViewerProps> = ({
                         setChapterContent(driveData.content);
                         // Lưu lại vào Local Cache để lần sau đọc nhanh hơn
                         await setCachedChapter(storyToLoad.url, chapter.url, driveData);
+                        
                         if (driveData.stats) {
                             setCumulativeStats(driveData.stats);
                             setIsChapterLoading(false);

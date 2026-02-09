@@ -107,7 +107,7 @@ export const validateApiKey = async (apiKey: string): Promise<void> => {
 
   try {
     await validationClient.models.generateContent({
-        model: "gemini-3-flash-preview",
+        model: "gemini-2.5-flash", // Use fast model for validation
         contents: 'Validate',
         config: {
             thinkingConfig: { thinkingBudget: 0 },
@@ -134,7 +134,7 @@ const infoItemArraySchema = {
     properties: {
       ten: { type: Type.STRING, description: "Tên của mục. Ngắn gọn, chính xác." },
       moTa: { type: Type.STRING, description: "Mô tả ngắn gọn về công dụng, nguồn gốc hoặc đặc điểm." },
-      status: { type: Type.STRING, description: "Trạng thái: 'active' nếu còn, 'used' nếu dùng hết, 'lost' nếu mất." },
+      status: { type: Type.STRING, description: "Trạng thái: 'active' (còn dùng/còn sống), 'used' (đã dùng hết), 'lost' (bị mất), 'dead' (đã chết), 'destroyed' (bị hủy)." },
     },
     required: ["ten", "moTa"]
   }
@@ -252,27 +252,20 @@ const characterStatsSchema = { type: Type.OBJECT, properties: { ...primaryCharac
 
 const BASE_PROMPT = `Bạn là một trợ lý quản lý trạng thái thế giới (World State Manager) cho một trò chơi nhập vai dựa trên tiểu thuyết.
 
-**NHIỆM VỤ:**
-Dựa trên "DỮ LIỆU CŨ" (thông tin từ các chương trước) và "NỘI DUNG CHƯƠNG MỚI", hãy tạo ra một **BẢN GHI TRẠNG THÁI HOÀN CHỈNH (FULL SNAPSHOT)**.
+**NHIỆM VỤ CỐT LÕI:**
+Dựa trên "DỮ LIỆU CŨ" (thể hiện trạng thái tích lũy của 5 chương trước đó) và "NỘI DUNG CHƯƠNG MỚI", hãy cập nhật trạng thái thế giới.
 
-**QUY TẮC CỐT LÕI (TUÂN THỦ TUYỆT ĐỐI):**
-1.  **KHÔNG ĐƯỢC TRẢ VỀ MẢNG RỖNG:** Nếu "DỮ LIỆU CŨ" có danh sách vật phẩm, NPC, hay kỹ năng, bạn **PHẢI SAO CHÉP** lại chúng vào kết quả đầu ra, trừ khi chúng bị phá hủy hoặc chết trong chương mới. Tuyệt đối không được trả về \`"balo": []\` nếu nhân vật đang có đồ.
-2.  **CẬP NHẬT THÔNG MINH:**
-    *   **Thêm mới:** Nếu chương mới có vật phẩm/NPC mới -> Thêm vào danh sách.
-    *   **Cập nhật:** Nếu NPC cũ thay đổi trạng thái (ví dụ: bị thương, chết, đổi phe) -> Cập nhật mục đó trong danh sách.
-    *   **Giữ nguyên:** Nếu một mục không được nhắc đến trong chương mới -> **BẮT BUỘC PHẢI GIỮ NGUYÊN** từ dữ liệu cũ.
-3.  **DỮ LIỆU SẠCH:** Không đưa lời dẫn, suy luận vào giá trị JSON.
-4.  **TẤT CẢ CÁC TRƯỜNG:** Bạn phải điền đầy đủ tất cả các trường: \`trangThai\`, \`canhGioi\`, \`heThongCanhGioi\`, \`balo\`, \`congPhap\`, \`trangBi\`, \`npcs\`, \`theLuc\`, \`diaDiem\`, \`viTriHienTai\`.
+**QUY TẮC TUYỆT ĐỐI VỀ DỮ LIỆU (KHÔNG ĐƯỢC LÀM SAI):**
+1.  **KHÔNG ĐƯỢC XÓA BỎ MỤC CŨ:** Nếu một NPC, Vật phẩm, hay Thế lực đã có trong "DỮ LIỆU CŨ" nhưng không xuất hiện trong chương mới -> **BẮT BUỘC PHẢI GIỮ NGUYÊN** trong danh sách trả về (Copy y nguyên).
+2.  **XỬ LÝ THAY ĐỔI TRẠNG THÁI (GẠCH NGANG):**
+    *   Nếu Nhân vật CHẾT: Đổi \`status\` thành \`'dead'\`.
+    *   Nếu Vật phẩm bị DÙNG HẾT / MẤT / TẶNG: Đổi \`status\` thành \`'used'\` hoặc \`'lost'\`.
+    *   Nếu Thế lực/Địa điểm bị PHÁ HỦY: Đổi \`status\` thành \`'destroyed'\`.
+    *   **TUYỆT ĐỐI KHÔNG XÓA** object đó khỏi mảng JSON. Chúng tôi cần giữ lại để hiển thị gạch ngang cho người dùng.
+3.  **THÊM MỚI:** Nếu có nhân vật/vật phẩm mới xuất hiện -> Thêm vào danh sách với \`status: 'active'\`.
+4.  **CẬP NHẬT:** Nếu thông tin thay đổi (ví dụ: lên cấp, bị thương) -> Cập nhật \`moTa\` và giữ nguyên ID.
 
-**THANG ĐO MÔ TẢ QUAN HỆ:**
-*   **Cấp 6 (Xanh Lá):** \`sư đồ\`, \`phu thê\`, \`tri kỷ\`, \`huynh đệ kết nghĩa\`, \`gia tộc thân cận\`, \`sống chết có nhau\`.
-*   **Cấp 5 (Xanh Ngọc):** \`đồng minh\`, \`bằng hữu\`, \`đồng môn\`, \`thân hữu\`, \`giúp đỡ\`, \`cảm kích\`.
-*   **Cấp 4 (Vàng):** \`giao dịch\`, \`hợp tác tạm thời\`, \`quen biết sơ\`, \`người qua đường\`, \`trung lập\`.
-*   **Cấp 3 (Cam):** \`đối thủ cạnh tranh\`, \`coi thường\`, \`chán ghét\`, \`xung đột lợi ích\`, \`gây sự\`.
-*   **Cấp 2 (Đỏ Hồng):** \`kẻ thù\`, \`đối địch\`, \`phản bội\`, \`hãm hại\`, \`âm mưu\`, \`ghen ghét\`.
-*   **Cấp 1 (Đỏ Sẫm):** \`huyết hải thâm thù\`, \`truy sát đến cùng\`, \`sinh tử đại địch\`, \`diệt tộc\`.
-
-**DỮ LIỆU CŨ (PREVIOUS STATE):**
+**DỮ LIỆU CŨ (PREVIOUS 5 CHAPTERS SNAPSHOT):**
 \`\`\`json
 {previousStats}
 \`\`\`
@@ -280,8 +273,8 @@ Dựa trên "DỮ LIỆU CŨ" (thông tin từ các chương trước) và "NỘ
 **NỘI DUNG CHƯƠNG MỚI:**
 "{chapterContent}"`;
 
-// Use 'gemini-3-flash-preview' for robust data extraction and speed
-const ANALYSIS_MODEL = "gemini-3-flash-preview"; 
+// Use 'gemini-2.5-flash' for MAXIMUM SPEED and EFFICIENCY
+const ANALYSIS_MODEL = "gemini-2.5-flash"; 
 
 async function executeAnalysis(prompt: string, schema: any, onKeySwitched?: () => void): Promise<{ data: any; usage: { totalTokens: number } }> {
     const { data: response, usage } = await executeApiCallWithRetry(async (client) => {
@@ -291,7 +284,7 @@ async function executeAnalysis(prompt: string, schema: any, onKeySwitched?: () =
             config: {
                 responseMimeType: "application/json",
                 responseSchema: schema,
-                // thinkingConfig: { thinkingBudget: 2048 } // Not needed for Flash extraction
+                // thinkingConfig: { thinkingBudget: 0 } // Disable thinking for pure extraction speed
             },
         });
         const usageMetadata = genResponse.usageMetadata || { totalTokenCount: 0 };
@@ -307,7 +300,7 @@ async function executeAnalysis(prompt: string, schema: any, onKeySwitched?: () =
 
 
 export const analyzeChapterForPrimaryCharacter = async (chapterContent: string, previousStats: CharacterStats | null, onKeySwitched?: () => void): Promise<{ data: Partial<CharacterStats> | null, usage: { totalTokens: number }}> => {
-    const taskPrompt = `**NHIỆM VỤ CỤ THỂ:**\nHãy trả về trạng thái **ĐẦY ĐỦ** của nhân vật chính sau chương này. Bao gồm cả các thông tin cũ (nếu còn hiệu lực) và thông tin mới cập nhật. Đảm bảo các trường balo, congPhap, trangBi chứa toàn bộ danh sách items hiện có.`;
+    const taskPrompt = `**NHIỆM VỤ CỤ THỂ:**\nHãy trả về trạng thái **ĐẦY ĐỦ** của nhân vật chính. Nhớ kỹ: Nếu vật phẩm bị dùng, hãy đánh dấu status='used', ĐỪNG XÓA NÓ.`;
     const fullPrompt = BASE_PROMPT
         .replace('{previousStats}', JSON.stringify(previousStats ?? {}, null, 2))
         .replace('{chapterContent}', chapterContent.substring(0, 30000)) + `\n\n${taskPrompt}`;
@@ -315,7 +308,7 @@ export const analyzeChapterForPrimaryCharacter = async (chapterContent: string, 
 };
 
 export const analyzeChapterForWorldInfo = async (chapterContent: string, previousStats: CharacterStats | null, onKeySwitched?: () => void): Promise<{ data: Partial<CharacterStats> | null, usage: { totalTokens: number }}> => {
-    const taskPrompt = `**NHIỆM VỤ CỤ THỂ:**\nHãy trả về danh sách **ĐẦY ĐỦ** các nhân vật phụ (NPCs), thế lực và địa điểm sau chương này. Bạn phải liệt kê lại cả những NPC cũ đã xuất hiện trong "Dữ Liệu Cũ" trừ khi họ đã chết hoặc biến mất hoàn toàn.`;
+    const taskPrompt = `**NHIỆM VỤ CỤ THỂ:**\nHãy trả về danh sách **ĐẦY ĐỦ** NPC và Thế lực. Nhớ kỹ: Nếu NPC chết, hãy đánh dấu status='dead', ĐỪNG XÓA NPC KHỎI DANH SÁCH.`;
     const fullPrompt = BASE_PROMPT
         .replace('{previousStats}', JSON.stringify(previousStats ?? {}, null, 2))
         .replace('{chapterContent}', chapterContent.substring(0, 30000)) + `\n\n${taskPrompt}`;
@@ -323,13 +316,12 @@ export const analyzeChapterForWorldInfo = async (chapterContent: string, previou
 };
 
 export const analyzeChapterForCharacterStats = async (chapterContent: string, previousStats: CharacterStats | null, onKeySwitched?: () => void): Promise<{ data: CharacterStats | null, usage: { totalTokens: number }}> => {
-    const taskPrompt = `**NHIỆM VỤ CỤ THỂ:**\nHãy đóng vai một cơ sở dữ liệu sống. Trả về một bản ghi JSON chứa **TOÀN BỘ** thông tin nhân vật và thế giới tính đến hết chương này.
+    const taskPrompt = `**NHIỆM VỤ CỤ THỂ:**\nHãy đóng vai một cơ sở dữ liệu sống. Trả về bản ghi JSON chứa **TOÀN BỘ** thông tin.
     
-    1. **Balo/Inventory:** Kết hợp vật phẩm cũ và mới. Đừng bỏ sót vật phẩm cũ.
-    2. **NPCs:** Giữ lại NPC cũ quan trọng, cập nhật trạng thái nếu có, thêm NPC mới.
-    3. **Địa điểm/Thế lực:** Tương tự, duy trì danh sách đầy đủ.
-    
-    Mục tiêu: Người dùng nhìn vào file JSON này phải biết được toàn bộ tài sản, quan hệ và kiến thức của nhân vật mà không cần đọc lại các chương trước.`;
+    Quy tắc quan trọng nhất: **SOFT DELETE**.
+    - Vật phẩm cũ: Phải giữ lại. Nếu dùng rồi -> status: 'used'.
+    - NPC cũ: Phải giữ lại. Nếu chết -> status: 'dead'.
+    - Chỉ thêm mới hoặc cập nhật mô tả. Không được tự ý xóa bất kỳ mục nào có trong Dữ Liệu Cũ.`;
     
      const fullPrompt = BASE_PROMPT
         .replace('{previousStats}', JSON.stringify(previousStats ?? {}, null, 2))
@@ -350,13 +342,13 @@ export const analyzeChapterForCharacterStats = async (chapterContent: string, pr
 export const chatWithChapterContent = async (prompt: string, chapterContent: string, storyTitle: string, onKeySwitched?: () => void): Promise<{ text: string, usage: { totalTokens: number }}> => {
     const { data: response, usage } = await executeApiCallWithRetry(async (client) => {
         const genResponse = await client.models.generateContent({
-            model: "gemini-3-flash-preview", // Flash is sufficient for simple chat
+            model: "gemini-2.5-flash", // Use 2.5 Flash for faster chat
             contents: `**Bối cảnh:** Bạn là một trợ lý AI hữu ích, đang thảo luận về cuốn sách "${storyTitle}".
             **Nhiệm vụ:** Trả lời câu hỏi của người dùng chỉ dựa vào nội dung được cung cấp từ chương truyện hiện tại. Nếu câu trả lời không có trong văn bản, hãy nói rằng bạn không tìm thấy thông tin trong đoạn trích này.
 
             **Nội dung chương:**
             ---
-            ${chapterContent.substring(0, 15000)}
+            ${chapterContent.substring(0, 20000)}
             ---
 
             **Câu hỏi của người dùng:** "${prompt}"
@@ -377,7 +369,7 @@ export const chatWithEbook = async (prompt: string, zipInstance: any, chapterLis
     const { data: chapterSelectionResponse, usage: usage1 } = await executeApiCallWithRetry(async (client) => {
         const chapterListText = chapterList.map((c, i) => `${i + 1}. Tiêu đề: "${c.title}", Tên file: "${c.url}"`).join('\n');
         const genResponse = await client.models.generateContent({
-            model: "gemini-3-flash-preview",
+            model: "gemini-2.5-flash",
             contents: `Người dùng đang hỏi câu này về một cuốn sách: "${prompt}".
             
             Dựa vào danh sách chương dưới đây, hãy xác định những chương có khả năng chứa câu trả lời nhất.
@@ -441,7 +433,7 @@ export const chatWithEbook = async (prompt: string, zipInstance: any, chapterLis
 
     const { data: finalAnswerResponse, usage: usage2 } = await executeApiCallWithRetry(async (client) => {
         const genResponse = await client.models.generateContent({
-            model: "gemini-3-flash-preview",
+            model: "gemini-2.5-flash",
             contents: `**Nhiệm vụ:** Trả lời câu hỏi của người dùng một cách ngắn gọn và súc tích, chỉ dựa vào nội dung được cung cấp dưới đây. Nếu câu trả lời không có trong văn bản, hãy nói rằng bạn không tìm thấy thông tin trong đoạn trích này.
             
             **Nội dung được cung cấp:**
@@ -465,7 +457,6 @@ export const chatWithEbook = async (prompt: string, zipInstance: any, chapterLis
 
 export const rewriteChapterContent = async (content: string, onKeySwitched?: () => void): Promise<{ text: string, usage: { totalTokens: number } }> => {
     // For rewriting/creative tasks, Flash is usually sufficient and much faster/cheaper.
-    // If quality is poor, user can request to upgrade this too.
     const prompt = `Bạn là một biên tập viên tiểu thuyết chuyên nghiệp và một dịch giả đại tài.
 Nhiệm vụ của bạn là viết lại (biên tập lại) đoạn văn bản dưới đây thành tiếng Việt trôi chảy, tự nhiên, và dễ hiểu, phù hợp với văn phong truyện tiểu thuyết.
 
@@ -486,7 +477,7 @@ ${content.substring(0, 20000)}
 
     const { data: response, usage } = await executeApiCallWithRetry(async (client) => {
         const genResponse = await client.models.generateContent({
-            model: "gemini-3-flash-preview",
+            model: "gemini-2.5-flash",
             contents: prompt,
         });
         const usageMetadata = genResponse.usageMetadata || { totalTokenCount: 0 };
