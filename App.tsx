@@ -753,6 +753,10 @@ const App: React.FC = () => {
               <StoryEditModal isOpen={isCreateStoryModalOpen} onClose={() => setIsCreateStoryModalOpen(false)} onSave={handleCreateStory} onParseEbook={parseEbookFile} />
               <DownloadModal isOpen={isDownloadModalOpen} onClose={handleReadWithoutDownload} story={pendingStory || story} onStartDownload={handleStartDownloadWrapper} onDataImported={handleImportDataSuccess} />
               {isSyncModalOpen && <SyncModal onClose={() => setIsSyncModalOpen(false)} />}
+              
+              {/* Fix: Added missing UpdateModal and HelpModal in Story Mode */}
+              <UpdateModal isOpen={isUpdateModalOpen} onClose={handleCloseUpdateModal} />
+              <HelpModal isOpen={isHelpModalOpen} onClose={() => setIsHelpModalOpen(false)} />
           </div>
       )
   }
