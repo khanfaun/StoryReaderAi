@@ -1,7 +1,7 @@
 
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import type { Story, Chapter, DownloadConfig } from '../types';
-import { EditIcon, TrashIcon, PlusIcon, CheckIcon, CloseIcon, SpinnerIcon, DownloadIcon, InfoIcon, PauseIcon, PlayIcon, StopIcon, RefreshIcon } from './icons';
+import { EditIcon, TrashIcon, PlusIcon, CheckIcon, CloseIcon, SpinnerIcon, DownloadIcon, InfoIcon, PauseIcon, PlayIcon, StopIcon, RefreshIcon, SortIcon } from './icons';
 import ConfirmationModal from './ConfirmationModal';
 import StoryEditModal from './StoryEditModal';
 import ChapterEditModal from './ChapterEditModal';
@@ -75,7 +75,7 @@ const StoryDetail: React.FC<StoryDetailProps> = ({
 }) => {
   // Pagination state
   const [currentPage, setCurrentPage] = useState(1);
-  const chaptersPerPage = 100; // Hiển thị 100 chương mỗi trang
+  const chaptersPerPage = 20; // Giảm xuống 20 chương mỗi trang
 
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [isAddChapterModalOpen, setIsAddChapterModalOpen] = useState(false);
@@ -89,24 +89,42 @@ const StoryDetail: React.FC<StoryDetailProps> = ({
   const [showInfoAlert, setShowInfoAlert] = useState(true);
 
   // State riêng để xóa chương bằng Modal
-  const [chapterToDelete, setChapterToDelete] = useState<{ index: number, chapter: Chapter } | null>(null);
+  const [chapterToDelete, setChapterToDelete] = useState<{ chapter: Chapter } | null>(null);
   
-  // State để theo dõi chương đang được chỉnh sửa tên
-  const [editingChapterIndex, setEditingChapterIndex] = useState<number | null>(null);
+  // State để theo dõi chương đang được chỉnh sửa tên (Lưu theo URL gốc để tránh lỗi khi sort)
+  const [editingChapterUrl, setEditingChapterUrl] = useState<string | null>(null);
   const [editingChapterTitle, setEditingChapterTitle] = useState('');
 
-  // Pagination logic
+  // Sort State
+  const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc');
+
+  // Pagination & Sorting logic
   const totalChapters = story.chapters?.length ?? 0;
   const totalPages = Math.ceil(totalChapters / chaptersPerPage);
+  
+  const sortedChapters = useMemo(() => {
+      if (!story.chapters) return [];
+      const chaps = [...story.chapters];
+      if (sortOrder === 'desc') {
+          chaps.reverse();
+      }
+      return chaps;
+  }, [story.chapters, sortOrder]);
+
   const indexOfLastChapter = currentPage * chaptersPerPage;
   const indexOfFirstChapter = indexOfLastChapter - chaptersPerPage;
-  const currentChapters = story.chapters?.slice(indexOfFirstChapter, indexOfLastChapter) ?? [];
+  const currentChapters = sortedChapters.slice(indexOfFirstChapter, indexOfLastChapter);
   
   const handlePageChange = (pageNumber: number) => {
     const newPage = Math.max(1, Math.min(pageNumber, totalPages));
     setCurrentPage(newPage);
     // Reset editing chapter if changing page
-    setEditingChapterIndex(null);
+    setEditingChapterUrl(null);
+  };
+
+  const toggleSort = () => {
+      setSortOrder(prev => prev === 'asc' ? 'desc' : 'asc');
+      setCurrentPage(1); // Reset về trang 1 khi đổi chiều sắp xếp
   };
 
   const handleUpdateMetadata = (formData: Partial<Story>) => {
@@ -118,57 +136,62 @@ const StoryDetail: React.FC<StoryDetailProps> = ({
   };
 
   // Mở Modal xác nhận xóa chương
-  const handleRequestDeleteChapter = (indexOnPage: number, e: React.MouseEvent) => {
+  const handleRequestDeleteChapter = (chapter: Chapter, e: React.MouseEvent) => {
       e.stopPropagation();
-      const actualIndex = indexOfFirstChapter + indexOnPage;
-      const chapter = story.chapters![actualIndex];
-      setChapterToDelete({ index: actualIndex, chapter });
+      setChapterToDelete({ chapter });
   };
 
   const handleConfirmDeleteChapter = async () => {
-      if (!chapterToDelete) return;
+      if (!chapterToDelete || !story.chapters) return;
       
-      const { index, chapter } = chapterToDelete;
-      const newChapters = [...(story.chapters || [])];
-      newChapters.splice(index, 1);
+      const { chapter } = chapterToDelete;
+      // Tìm index thực tế trong mảng gốc (vì mảng hiển thị có thể đã bị sort)
+      const realIndex = story.chapters.findIndex(c => c.url === chapter.url);
       
-      const updatedStory = { ...story, chapters: newChapters };
-      
-      if (onUpdateStory) onUpdateStory(updatedStory); 
-      
-      if (onDeleteChapterContent) {
-          await onDeleteChapterContent(story.url, chapter.url);
+      if (realIndex > -1) {
+          const newChapters = [...story.chapters];
+          newChapters.splice(realIndex, 1);
+          
+          const updatedStory = { ...story, chapters: newChapters };
+          
+          if (onUpdateStory) onUpdateStory(updatedStory); 
+          
+          if (onDeleteChapterContent) {
+              await onDeleteChapterContent(story.url, chapter.url);
+          }
       }
       
       setChapterToDelete(null);
   };
 
   // Inline Chapter Editing Logic (Rename)
-  const handleStartEditChapter = (indexOnPage: number, chapter: Chapter, e: React.MouseEvent) => {
+  const handleStartEditChapter = (chapter: Chapter, e: React.MouseEvent) => {
       e.stopPropagation();
-      const actualIndex = indexOfFirstChapter + indexOnPage;
-      setEditingChapterIndex(actualIndex);
+      setEditingChapterUrl(chapter.url);
       setEditingChapterTitle(chapter.title);
   };
 
   const handleSaveEditChapter = (e: React.MouseEvent) => {
       e.stopPropagation();
-      if (editingChapterIndex === null) return;
+      if (!editingChapterUrl || !story.chapters) return;
 
-      const newChapters = [...(story.chapters || [])]; 
-      newChapters[editingChapterIndex] = { ...newChapters[editingChapterIndex], title: editingChapterTitle };
-      
-      const updatedStory = { ...story, chapters: newChapters };
-      
-      if (onUpdateStory) onUpdateStory(updatedStory);
+      const realIndex = story.chapters.findIndex(c => c.url === editingChapterUrl);
+      if (realIndex > -1) {
+          const newChapters = [...story.chapters]; 
+          newChapters[realIndex] = { ...newChapters[realIndex], title: editingChapterTitle };
+          
+          const updatedStory = { ...story, chapters: newChapters };
+          
+          if (onUpdateStory) onUpdateStory(updatedStory);
+      }
 
-      setEditingChapterIndex(null);
+      setEditingChapterUrl(null);
       setEditingChapterTitle('');
   };
 
   const handleCancelEditChapter = (e: React.MouseEvent) => {
       e.stopPropagation();
-      setEditingChapterIndex(null);
+      setEditingChapterUrl(null);
       setEditingChapterTitle('');
   };
 
@@ -179,10 +202,15 @@ const StoryDetail: React.FC<StoryDetailProps> = ({
   const handleConfirmAddChapter = async (title: string, content: string) => {
       if (onCreateChapter) {
           await onCreateChapter(story, title, content);
-          // Move to last page to see new chapter
-          const newTotalChapters = (story.chapters?.length || 0) + 1;
-          const newTotalPages = Math.ceil(newTotalChapters / chaptersPerPage);
-          setCurrentPage(newTotalPages);
+          // Move to last page to see new chapter if inserting at end (default)
+          // Nếu đang sort desc, chương mới (thường ở cuối mảng gốc) sẽ hiện ở đầu trang 1
+          if (sortOrder === 'asc') {
+              const newTotalChapters = (story.chapters?.length || 0) + 1;
+              const newTotalPages = Math.ceil(newTotalChapters / chaptersPerPage);
+              setCurrentPage(newTotalPages);
+          } else {
+              setCurrentPage(1);
+          }
       }
   };
 
@@ -355,11 +383,21 @@ const StoryDetail: React.FC<StoryDetailProps> = ({
           <div className="flex justify-between items-center border-b-2 border-[var(--theme-border)] pb-2 mb-4">
               <div className="flex items-center gap-4">
                   <h3 className="text-xl sm:text-2xl font-semibold text-[var(--theme-text-primary)]">Danh sách chương ({totalChapters})</h3>
-                  {onCreateChapter && (
-                      <button onClick={handleAddChapterClick} className="flex items-center gap-1 text-sm bg-[var(--theme-accent-primary)] text-white px-3 py-1 rounded hover:brightness-110 transition-colors">
-                          <PlusIcon className="w-4 h-4" /> <span className="hidden sm:inline">Thêm chương</span>
+                  <div className="flex gap-2">
+                      <button 
+                        onClick={toggleSort}
+                        className="flex items-center gap-1 text-sm bg-[var(--theme-bg-base)] border border-[var(--theme-border)] text-[var(--theme-text-secondary)] px-3 py-1 rounded hover:bg-[var(--theme-border)] transition-colors"
+                        title={sortOrder === 'asc' ? 'Sắp xếp: Cũ nhất trước' : 'Sắp xếp: Mới nhất trước'}
+                      >
+                          <SortIcon className="w-4 h-4" />
+                          <span className="hidden sm:inline">{sortOrder === 'asc' ? 'Cũ nhất' : 'Mới nhất'}</span>
                       </button>
-                  )}
+                      {onCreateChapter && (
+                          <button onClick={handleAddChapterClick} className="flex items-center gap-1 text-sm bg-[var(--theme-accent-primary)] text-white px-3 py-1 rounded hover:brightness-110 transition-colors">
+                              <PlusIcon className="w-4 h-4" /> <span className="hidden sm:inline">Thêm chương</span>
+                          </button>
+                      )}
+                  </div>
               </div>
           </div>
 
@@ -474,9 +512,8 @@ const StoryDetail: React.FC<StoryDetailProps> = ({
           
           {/* Chapter list */}
           <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
-          {currentChapters.map((chapter, index) => {
-              const actualIndex = indexOfFirstChapter + index;
-              const isEditingThis = editingChapterIndex === actualIndex;
+          {currentChapters.map((chapter) => {
+              const isEditingThis = editingChapterUrl === chapter.url;
 
               if (isEditingThis) {
                   return (
@@ -545,14 +582,14 @@ const StoryDetail: React.FC<StoryDetailProps> = ({
                   {/* Action Buttons - Always visible on hover */}
                   <div className="flex items-center gap-1 px-2 border-l border-[var(--theme-border)]/50 hidden group-hover:flex">
                       <button
-                          onClick={(e) => handleStartEditChapter(index, chapter, e)}
+                          onClick={(e) => handleStartEditChapter(chapter, e)}
                           className="p-1.5 text-slate-400 hover:text-[var(--theme-accent-primary)] rounded-full hover:bg-[var(--theme-bg-base)] transition-colors"
                           title="Sửa tên chương"
                       >
                           <EditIcon className="w-4 h-4" />
                       </button>
                       <button
-                          onClick={(e) => handleRequestDeleteChapter(index, e)}
+                          onClick={(e) => handleRequestDeleteChapter(chapter, e)}
                           className="p-1.5 text-slate-400 hover:text-red-500 rounded-full hover:bg-[var(--theme-bg-base)] transition-colors"
                           title="Xóa chương"
                       >

@@ -31,9 +31,11 @@ const CharacterPrimaryPanel: React.FC<CharacterPrimaryPanelProps> = ({ stats, is
   };
 
   const handleSaveEntity = (entityData: any) => {
-    if (!stats || !modalState.type) return;
+    // Cho phép lưu ngay cả khi stats là null (khởi tạo mới)
+    if (!modalState.type) return;
 
-    const newStats = JSON.parse(JSON.stringify(stats)); // Deep copy to ensure immutability
+    // Nếu stats null thì khởi tạo object rỗng, ngược lại deep copy
+    const newStats = stats ? JSON.parse(JSON.stringify(stats)) : {};
     const type = modalState.type;
 
     if (type === 'tuChat') {
@@ -93,21 +95,15 @@ const CharacterPrimaryPanel: React.FC<CharacterPrimaryPanelProps> = ({ stats, is
   };
 
   const renderContent = () => {
-     const hasAnyData = stats && (
-        stats.trangThai || stats.canhGioi || stats.heThongCanhGioi?.length ||
-        stats.balo?.length || stats.congPhap?.length || stats.trangBi?.length
-    );
-      
-    if (!hasAnyData) {
-        if (isAnalyzing) {
-             return (
-                <div className="flex flex-col items-center justify-center h-48">
-                <LoadingSpinner />
-                <p className="text-[var(--theme-accent-primary)] mt-2">Đang phân tích chương...</p>
-                </div>
-            );
-        }
-      return <p className="text-center text-[var(--theme-text-secondary)] p-6">Chưa có dữ liệu nhân vật.</p>;
+    // Đã loại bỏ logic kiểm tra !hasAnyData để luôn hiển thị giao diện nhập liệu
+    
+    if (isAnalyzing) {
+         return (
+            <div className="flex flex-col items-center justify-center h-48">
+            <LoadingSpinner />
+            <p className="text-[var(--theme-accent-primary)] mt-2">Đang phân tích chương...</p>
+            </div>
+        );
     }
 
     const renderInfoList = (title: string, items: any[] | undefined, type: EntityType) => {
@@ -126,7 +122,7 @@ const CharacterPrimaryPanel: React.FC<CharacterPrimaryPanelProps> = ({ stats, is
                     </button>
                 </div>
                 {list.length === 0 ? (
-                    <p className="text-[var(--theme-text-secondary)] italic">Chưa có thông tin về {title.toLowerCase()}.</p>
+                    <p className="text-[var(--theme-text-secondary)] italic text-sm">Chưa có thông tin. Nhấn "Thêm" để nhập tay.</p>
                 ) : (
                     <div className="flex flex-col gap-2">
                         {list.map((item, index) => {
@@ -165,7 +161,7 @@ const CharacterPrimaryPanel: React.FC<CharacterPrimaryPanelProps> = ({ stats, is
                 </button>
             </div>
             <div className="space-y-4">
-                {status && <p className="text-lg"><strong>Tên:</strong> {status.ten || 'N/A'}</p>}
+                <p className="text-lg"><strong>Tên:</strong> {status?.ten || 'Chưa cập nhật'}</p>
                  <p className="text-lg">
                     <strong>Cảnh giới:</strong> 
                     <span className="text-2xl ml-2 text-[var(--theme-accent-secondary)] font-semibold">{stats?.canhGioi || 'Chưa rõ'}</span>

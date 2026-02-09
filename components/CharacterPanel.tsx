@@ -375,9 +375,10 @@ const CharacterPanel: React.FC<CharacterPanelProps> = ({
   };
 
   const handleSaveEntity = (entityData: any) => {
-    if (!stats || !modalState.type) return;
+    if (!modalState.type) return;
 
-    const newStats = JSON.parse(JSON.stringify(stats)); // Deep copy for immutability
+    // Khởi tạo stats mới nếu hiện tại null
+    const newStats = stats ? JSON.parse(JSON.stringify(stats)) : {};
     const type = modalState.type;
 
     if (type === 'heThongCanhGioi') {
@@ -523,11 +524,7 @@ const CharacterPanel: React.FC<CharacterPanelProps> = ({
 
 
   const renderContent = () => {
-     const hasAnyData = stats && (
-        stats.trangThai || stats.canhGioi || stats.heThongCanhGioi?.length ||
-        stats.balo?.length || stats.congPhap?.length || stats.trangBi?.length ||
-        stats.npcs?.length || stats.theLuc?.length || stats.diaDiem?.length || allRelations.length
-    );
+    // Logic kiểm tra !hasAnyData đã được loại bỏ để luôn hiển thị
     
     if (activeTab === 'chat') {
         return (
@@ -579,16 +576,21 @@ const CharacterPanel: React.FC<CharacterPanelProps> = ({
         );
     }
     
-    if (!hasAnyData && activeTab !== 'data' && activeTab !== 'chat') {
-        if (isAnalyzing) {
-            return (
+    // Nếu đang phân tích thì hiển thị spinner, nhưng không chặn hoàn toàn nếu muốn xem tab khác
+    if (isAnalyzing && activeTab !== 'data' && activeTab !== 'chat') {
+        // Có thể hiển thị loading nhỏ ở góc, hoặc để người dùng vẫn thao tác
+        // Ở đây ta giữ loading nếu không có dữ liệu gì cả để tránh rối
+        const hasSomeData = stats && (
+            stats.trangThai || stats.canhGioi || stats.balo?.length || stats.npcs?.length
+        );
+        if (!hasSomeData) {
+             return (
                 <div className="flex flex-col items-center justify-center h-48">
                     <LoadingSpinner />
                     <p className="text-[var(--theme-accent-primary)] mt-2">Đang phân tích chương...</p>
                 </div>
             );
         }
-      return <p className="text-center text-[var(--theme-text-secondary)] p-6">Chưa có dữ liệu. Hãy đọc một chương để bắt đầu phân tích.</p>;
     }
 
     const renderInfoList = (title: string, items: any[] | undefined, type: EntityType) => {
@@ -607,7 +609,7 @@ const CharacterPanel: React.FC<CharacterPanelProps> = ({
                     </button>
                 </div>
                 {list.length === 0 ? (
-                    <p className="text-[var(--theme-text-secondary)] italic">Chưa có thông tin về {title.toLowerCase()}.</p>
+                    <p className="text-[var(--theme-text-secondary)] italic text-sm">Chưa có thông tin. Nhấn "Thêm" để nhập tay.</p>
                 ) : (
                      <div className="flex flex-col gap-2">
                         {list.map((item, index) => {
@@ -638,7 +640,7 @@ const CharacterPanel: React.FC<CharacterPanelProps> = ({
           <div>
             <h3 className="text-xl font-bold text-[var(--theme-accent-primary)] mb-4">Trạng Thái & Cảnh Giới</h3>
             <div className="space-y-4">
-                {r && <p className="text-lg"><strong>Tên:</strong> {r.ten || 'N/A'}</p>}
+                <p className="text-lg"><strong>Tên:</strong> {r?.ten || 'Chưa cập nhật'}</p>
                  <p className="text-lg">
                     <strong>Cảnh giới:</strong> 
                     <span className="text-2xl ml-2 text-[var(--theme-accent-secondary)] font-semibold">{stats?.canhGioi || 'Chưa rõ'}</span>
@@ -673,7 +675,7 @@ const CharacterPanel: React.FC<CharacterPanelProps> = ({
                     </button>
                 </div>
                 {npcs.length === 0 ? (
-                    <p className="text-[var(--theme-text-secondary)] italic">Chưa có thông tin về nhân vật phụ.</p>
+                    <p className="text-[var(--theme-text-secondary)] italic text-sm">Chưa có thông tin. Nhấn "Thêm" để nhập tay.</p>
                 ) : (
                      <div className="flex flex-col gap-2">
                         {npcs.map((npc) => (
@@ -734,7 +736,7 @@ const CharacterPanel: React.FC<CharacterPanelProps> = ({
                     onDelete={handleRequestDelete}
                   />
               ) : (
-                 <p className="text-[var(--theme-text-secondary)] italic">Chưa có thông tin về địa điểm.</p>
+                 <p className="text-[var(--theme-text-secondary)] italic text-sm">Chưa có thông tin. Nhấn "Thêm" để nhập tay.</p>
               )}
             </div>
         );
