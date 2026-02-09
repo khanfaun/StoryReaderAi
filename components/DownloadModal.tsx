@@ -19,8 +19,8 @@ interface DownloadModalProps {
   story: Story | null;
   onStartDownload: (config: DownloadConfig) => void;
   isBackgroundDownloading?: boolean;
-  onDataImported?: () => void; // New prop to refresh data in App
-  googleUser: GoogleUser | null; // Receive user from App
+  onDataImported?: () => void;
+  googleUser: GoogleUser | null;
 }
 
 type Preset = 'all' | '50' | '100' | 'custom';
@@ -180,20 +180,18 @@ const DownloadModal: React.FC<DownloadModalProps> = ({
   };
 
   const confirmSignOut = () => {
-      // 1. Đóng modal ngay lập tức
+      // 1. UI Feedback & Close Modal immediately
       setIsSignOutConfirmOpen(false);
-
-      // 2. Xóa dữ liệu local ngay lập tức (không chờ callback)
+      
+      // 2. Force Clear Local Storage
       localStorage.removeItem('gdrive_user_cache');
       
-      // 3. Gọi service revoke token (Fire and forget - không quan tâm kết quả)
+      // 3. Fire-and-forget revoke (Don't await)
       try {
-          driveService.signOut(() => {}); 
-      } catch (e) {
-          console.warn("Revoke token warning:", e);
-      }
+          driveService.signOut(() => {});
+      } catch (e) { console.error(e); }
 
-      // 4. Force Reload trang ngay lập tức để reset toàn bộ state
+      // 4. FORCE RELOAD PAGE
       window.location.reload();
   };
 
@@ -483,7 +481,7 @@ const DownloadModal: React.FC<DownloadModalProps> = ({
                     {activeTab === 'drive' && (
                         <div className="space-y-6 animate-fade-in">
                             <div className="space-y-6">
-                                {/* User Info Card - Always visible but styled based on login status */}
+                                {/* User Info Card - Always visible */}
                                 <div className={`p-4 bg-[var(--theme-bg-base)] border border-[var(--theme-border)] rounded-lg transition-all ${!googleUser ? 'border-dashed border-slate-600' : ''}`}>
                                     <div className="flex items-center justify-between mb-3">
                                         <div className="flex items-center gap-3">
@@ -530,19 +528,19 @@ const DownloadModal: React.FC<DownloadModalProps> = ({
                                         </div>
                                     </div>
                                     
-                                    {googleUser && (
-                                        <div className="flex items-center justify-between pt-3 border-t border-[var(--theme-border)]">
-                                            <div className="flex items-center gap-2">
-                                                <button 
-                                                    onClick={toggleAutoSync}
-                                                    className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors focus:outline-none ${autoSync ? 'bg-[var(--theme-accent-primary)]' : 'bg-gray-700'}`}
-                                                >
-                                                    <span className={`inline-block h-3 w-3 transform rounded-full bg-white transition-transform ${autoSync ? 'translate-x-5' : 'translate-x-1'}`} />
-                                                </button>
-                                                <span className="text-xs text-[var(--theme-text-secondary)]">Tự động đồng bộ</span>
-                                            </div>
+                                    {/* Auto Sync Toggle - Visible only when logged in */}
+                                    <div className={`flex items-center justify-between pt-3 border-t border-[var(--theme-border)] transition-opacity ${!googleUser ? 'opacity-50 pointer-events-none' : ''}`}>
+                                        <div className="flex items-center gap-2">
+                                            <button 
+                                                onClick={toggleAutoSync}
+                                                disabled={!googleUser}
+                                                className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors focus:outline-none ${autoSync ? 'bg-[var(--theme-accent-primary)]' : 'bg-gray-700'}`}
+                                            >
+                                                <span className={`inline-block h-3 w-3 transform rounded-full bg-white transition-transform ${autoSync ? 'translate-x-5' : 'translate-x-1'}`} />
+                                            </button>
+                                            <span className="text-xs text-[var(--theme-text-secondary)]">Tự động đồng bộ</span>
                                         </div>
-                                    )}
+                                    </div>
                                 </div>
                                 
                                 {loginSuccess && (

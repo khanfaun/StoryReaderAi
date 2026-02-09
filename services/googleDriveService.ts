@@ -21,6 +21,10 @@ let gapiInited = false;
 let gisInited = false;
 let accessToken: string | null = null;
 
+// BIẾN TOÀN CỤC ĐỂ LƯU CALLBACK MỚI NHẤT TỪ REACT
+// Giải quyết vấn đề Closure: Luôn trỏ đến hàm setState mới nhất của App
+let currentUserChangeListener: ((user: GoogleUser | null) => void) | null = null;
+
 // Helper để lấy user từ storage ngay lập tức (Synchronous)
 export function getUserFromStorage(): GoogleUser | null {
     const savedUser = localStorage.getItem('gdrive_user_cache');
@@ -39,12 +43,22 @@ export function getUserFromStorage(): GoogleUser | null {
 // ==========================================================
 
 export function initGoogleDrive(onUserChanged: (user: GoogleUser | null) => void) {
-    console.log("[DriveService] Initializing...");
+    // 1. CẬP NHẬT LISTENER NGAY LẬP TỨC
+    // Bất kể scripts đã load xong chưa, ta luôn cập nhật hàm callback này
+    // để khi có sự kiện (đăng nhập xong), nó gọi đúng hàm của lần render hiện tại.
+    currentUserChangeListener = onUserChanged;
+    
+    console.log("[DriveService] Listener updated.");
 
-    // 1. Kiểm tra cache ngay lập tức để cập nhật UI
+    // 2. Kiểm tra cache và báo lại cho UI ngay
     const cachedUser = getUserFromStorage();
     if (cachedUser) {
         onUserChanged(cachedUser);
+    }
+
+    // 3. Nếu thư viện đã init xong từ lần trước, không cần init lại
+    if (gapiInited && gisInited) {
+        return;
     }
 
     const gapiLoaded = () => {
@@ -53,8 +67,6 @@ export function initGoogleDrive(onUserChanged: (user: GoogleUser | null) => void
                 discoveryDocs: [DISCOVERY_DOC],
             });
             gapiInited = true;
-            
-            // Check nếu có token cũ còn hạn (optional logic, usually handled by clicking login)
         });
     };
 
@@ -73,8 +85,13 @@ export function initGoogleDrive(onUserChanged: (user: GoogleUser | null) => void
                     window.gapi.client.setToken(resp);
                 }
 
-                // Fetch info mới nhất từ API và cập nhật
-                fetchUserInfo(onUserChanged);
+                // KHI ĐĂNG NHẬP THÀNH CÔNG:
+                // Gọi fetchUserInfo, và truyền kết quả vào biến toàn cục currentUserChangeListener
+                fetchUserInfo((user) => {
+                    if (currentUserChangeListener) {
+                        currentUserChangeListener(user);
+                    }
+                });
             },
         });
         gisInited = true;
@@ -111,25 +128,30 @@ export function signIn() {
 export function signOut(callback: () => void) {
     const token = window.gapi?.client?.getToken();
     
-    // Hàm nội bộ để xóa dữ liệu và gọi callback
+    // Hàm dọn dẹp local
     const performCleanup = () => {
         accessToken = null;
         if (window.gapi?.client) window.gapi.client.setToken(null);
         localStorage.removeItem('gdrive_user_cache');
-        console.log("[DriveService] Cleaned up local session.");
+        
+        // Thông báo cho UI biết là đã logout (về null)
+        if (currentUserChangeListener) {
+            currentUserChangeListener(null);
+        }
+        
         callback();
     };
 
+    // Thử revoke token phía Google (Best effort)
     if (token !== null && window.google) {
         try {
-            // Thử revoke token
             window.google.accounts.oauth2.revoke(token.access_token, () => {
-                console.log("[DriveService] Token revoked successfully.");
+                // Revoke thành công
                 performCleanup();
             });
         } catch (e) {
-            console.warn("[DriveService] Revoke failed, forcing cleanup.", e);
-            // Nếu revoke lỗi (vd mạng), vẫn xóa session local
+            // Lỗi mạng hoặc lỗi script, vẫn force logout local
+            console.warn("Revoke error, forcing local logout", e);
             performCleanup();
         }
     } else {
@@ -167,7 +189,6 @@ async function fetchUserInfo(callback: (user: GoogleUser | null) => void) {
 export async function listFiles(): Promise<GoogleFile[]> {
     if (!accessToken) throw new Error("Chưa xác thực Google Drive.");
     
-    // Đảm bảo GAPI client có token
     if (window.gapi.client.getToken() === null) {
          window.gapi.client.setToken({ access_token: accessToken });
     }
