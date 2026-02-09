@@ -22,6 +22,7 @@ let tokenClient: any;
 let gapiInited = false;
 let gisInited = false;
 let accessToken: string | null = null;
+let isInteractiveSignIn = false; // Cờ để kiểm tra xem có phải người dùng đang bấm nút đăng nhập không
 
 // ==========================================================
 // INITIALIZATION
@@ -119,6 +120,8 @@ export function signIn() {
     }
     
     console.log("[DriveService] Requesting Access Token...");
+    isInteractiveSignIn = true; // Đánh dấu đây là hành động đăng nhập chủ động
+    
     // Luôn dùng 'consent' khi dev/unverified để đảm bảo popup hiện ra và token mới được cấp
     // Điều này giúp vượt qua trạng thái "token cũ bị block"
     tokenClient.requestAccessToken({ prompt: 'consent' });
@@ -163,6 +166,15 @@ async function fetchUserInfo(callback: (user: GoogleUser | null) => void) {
             localStorage.setItem('gdrive_user_cache', JSON.stringify(user));
             console.log("[DriveService] User Info Fetched Success:", user);
             callback(user);
+
+            // TỰ ĐỘNG RELOAD NẾU LÀ ĐĂNG NHẬP CHỦ ĐỘNG
+            if (isInteractiveSignIn) {
+                console.log("[DriveService] Interactive sign-in detected. Reloading page to apply changes...");
+                setTimeout(() => {
+                    window.location.reload();
+                }, 1000); // Đợi 1s để UI kịp hiện thông báo thành công (nếu có)
+            }
+
         } else {
             console.error("[DriveService] Failed to fetch user info. Status:", response.status);
             if (response.status === 401 || response.status === 403) {
