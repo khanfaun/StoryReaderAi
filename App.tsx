@@ -1,6 +1,6 @@
 
 import React, { useState, useCallback, useEffect, useRef, useMemo } from 'react';
-import type { Story, Chapter, ReadingHistoryItem, ApiKeyInfo, DownloadConfig } from './types';
+import type { Story, Chapter, ReadingHistoryItem, ApiKeyInfo, DownloadConfig, GoogleUser } from './types';
 import { searchStory, getStoryDetails, getStoryFromUrl, parseHtml, parseStoryDetailsFromDoc } from './services/truyenfullService';
 import { validateApiKey } from './services/geminiService';
 import { getCachedChapter, setCachedChapter } from './services/cacheService';
@@ -11,6 +11,9 @@ import * as apiKeyService from './services/apiKeyService';
 import { parseEbookFile } from './services/ebookParser';
 import { useBackgroundDownload } from './hooks/useBackgroundDownload';
 import { useDownloader } from './hooks/useDownloader';
+// Drive Sync Services
+import * as driveService from './services/googleDriveService';
+import * as syncManager from './services/syncManager';
 
 import Header from './components/Header';
 import Footer from './components/Footer';
@@ -118,6 +121,10 @@ const App: React.FC = () => {
   const [isTagDropdownOpen, setIsTagDropdownOpen] = useState(false);
   const tagDropdownRef = useRef<HTMLDivElement>(null);
 
+  // Google Drive Auth State
+  const [googleUser, setGoogleUser] = useState<GoogleUser | null>(null);
+  const [isSyncing, setIsSyncing] = useState(false);
+
   // Close dropdown logic
   useEffect(() => {
       const handleClickOutside = (event: MouseEvent) => {
@@ -140,9 +147,6 @@ const App: React.FC = () => {
   };
   
   const handleImportDataSuccess = () => {
-      // Triggered after import via DownloadModal, just force reload to be safe
-      // In StoryViewer, onDataChange handles local refresh. 
-      // For App level, we might want to refresh history/local stories.
       reloadDataFromStorage();
   };
 
@@ -194,6 +198,17 @@ const App: React.FC = () => {
       setIsLoading(true);
       await reloadDataFromStorage();
       
+      // Init Drive
+      driveService.initGoogleDrive(async (user) => {
+          setGoogleUser(user);
+          if (user) {
+              setIsSyncing(true);
+              await syncManager.syncIndex();
+              await reloadDataFromStorage(); // Reload to show new cloud stories
+              setIsSyncing(false);
+          }
+      });
+
       const hasSeenUpdate = localStorage.getItem(UPDATE_MODAL_VERSION);
       if (!hasSeenUpdate) {
           setIsUpdateModalOpen(true);
@@ -234,8 +249,15 @@ const App: React.FC = () => {
 
           let fullStory = selectedStory;
           
-          const needsFetching = (!selectedStory.chapters || selectedStory.chapters.length === 0 || forceFetch) 
-                                && selectedStory.source !== 'Local' && selectedStory.source !== 'Ebook';
+          // LAZY LOAD: Sync metadata from Drive if logged in and chapters are empty
+          if (driveService.isLoggedIn() && (!fullStory.chapters || fullStory.chapters.length === 0)) {
+              setIsSyncing(true);
+              fullStory = await syncManager.syncStoryMetadata(fullStory);
+              setIsSyncing(false);
+          }
+
+          const needsFetching = (!fullStory.chapters || fullStory.chapters.length === 0 || forceFetch) 
+                                && fullStory.source !== 'Local' && fullStory.source !== 'Ebook';
           
           if (needsFetching) {
               if (loadingAbortRef.current) throw new Error("Đã hủy quá trình tải.");
@@ -271,6 +293,10 @@ const App: React.FC = () => {
           if (loadingAbortRef.current) throw new Error("Đã hủy quá trình tải.");
 
           await dbService.saveStory(fullStory);
+          
+          // Background Upload (if logged in)
+          syncManager.uploadStoryToDrive(fullStory, null);
+
           setLocalStories(prev => {
               if (prev.some(s => s.url === fullStory.url)) {
                   return prev.map(s => s.url === fullStory.url ? fullStory : s);
@@ -299,6 +325,7 @@ const App: React.FC = () => {
           });
       } finally {
           setIsDataLoading(false);
+          setIsSyncing(false);
       }
   };
 
@@ -309,9 +336,11 @@ const App: React.FC = () => {
       }
 
       const existingStory = await dbService.getStory(selectedStory.url);
-      if (existingStory && existingStory.chapters && existingStory.chapters.length > 0) {
-           handleSelectStoryInternal(existingStory);
-           if (existingStory.chapters.length > 10) {
+      
+      // If we have existing data or we are logged in (to lazy load), use it
+      if (existingStory || driveService.isLoggedIn()) {
+           handleSelectStoryInternal(existingStory || selectedStory);
+           if (existingStory && existingStory.chapters && existingStory.chapters.length > 10) {
                runBackgroundContentFetcher(existingStory, 10);
            }
            return;
@@ -335,12 +364,8 @@ const App: React.FC = () => {
               await Promise.all(toLoad.map(async (c) => {
                    if (loadingAbortRef.current) return;
                    try {
-                      // Check cache first to be safe
-                      // getCachedChapter logic handles DB read
                       const cached = await dbService.getChapterData(fullStory.url, c.url);
                       if (!cached) {
-                          // Note: getChapterContent needs to be imported or available. 
-                          // It is imported from truyenfullService
                           const { getChapterContent } = await import('./services/truyenfullService');
                           const content = await getChapterContent(c, fullStory.source);
                           await setCachedChapter(fullStory.url, c.url, { content, stats: null });
@@ -536,8 +561,21 @@ const App: React.FC = () => {
              const storedStory = await dbService.getStory(item.url);
              if (storedStory) storyToLoad = storedStory; else throw new Error("Thông tin truyện không tìm thấy.");
         } else {
+             // Check local storage first
              const storedStory = await dbService.getStory(item.url);
-             if (storedStory) storyToLoad = storedStory; else { if (item.source === 'Local') throw new Error("Truyện này đã bị xóa."); storyToLoad = await getStoryFromUrl(item.url); }
+             
+             // If missing or incomplete and connected to drive, try sync
+             if ((!storedStory || !storedStory.chapters || storedStory.chapters.length === 0) && driveService.isLoggedIn()) {
+                 const baseStory = storedStory || { ...item, chapters: [] } as any;
+                 storyToLoad = await syncManager.syncStoryMetadata(baseStory);
+             } else {
+                 storyToLoad = storedStory;
+             }
+
+             if (!storyToLoad) {
+                 if (item.source === 'Local') throw new Error("Truyện này đã bị xóa.");
+                 storyToLoad = await getStoryFromUrl(item.url);
+             }
         }
         if (storyToLoad) {
             setStory(storyToLoad);
@@ -588,6 +626,10 @@ const App: React.FC = () => {
                 onOpenUpdateModal={() => setIsUpdateModalOpen(true)} 
                 onGoHome={handleBackToMain} 
                 storyTitle={isReadingMode ? story.title : undefined}
+                user={googleUser}
+                onLogin={driveService.loginGoogle}
+                onLogout={() => setGoogleUser(null)}
+                isSyncing={isSyncing}
               />
               
               <StoryViewer 
@@ -685,7 +727,15 @@ const App: React.FC = () => {
       )}
 
       <div className={`flex flex-col flex-grow ${appContentClass}`}>
-        <Header onOpenApiKeySettings={() => setIsApiKeyModalOpen(true)} onOpenUpdateModal={() => setIsUpdateModalOpen(true)} onGoHome={handleBackToMain} />
+        <Header 
+            onOpenApiKeySettings={() => setIsApiKeyModalOpen(true)} 
+            onOpenUpdateModal={() => setIsUpdateModalOpen(true)} 
+            onGoHome={handleBackToMain} 
+            user={googleUser}
+            onLogin={driveService.loginGoogle}
+            onLogout={() => setGoogleUser(null)}
+            isSyncing={isSyncing}
+        />
         <main className="max-w-screen-2xl mx-auto px-4 py-8 sm:py-12 flex-grow mb-16">
             <div className="mb-8 flex flex-col sm:flex-row gap-4 items-stretch sm:items-center">
                 <div className="flex-grow">
@@ -702,9 +752,11 @@ const App: React.FC = () => {
             {(isLoading || isDataLoading) ? (
                 <LoadingSpinner>
                     <div className="text-center mt-4 space-y-2">
-                        <h3 className="text-xl font-bold text-[var(--theme-accent-primary)]">Đang khởi tạo...</h3>
+                        <h3 className="text-xl font-bold text-[var(--theme-accent-primary)]">
+                            {isSyncing ? "Đang đồng bộ dữ liệu..." : "Đang tải..."}
+                        </h3>
                         <p className="text-sm text-[var(--theme-text-secondary)]">Vui lòng đợi trong giây lát</p>
-                        {isDataLoading && (
+                        {isDataLoading && !isSyncing && (
                         <button 
                             onClick={handleCancelLoading}
                             className="mt-3 px-4 py-1 text-xs font-semibold text-rose-300 border border-rose-500/50 rounded-md hover:bg-rose-900/30 transition-colors"
@@ -732,6 +784,7 @@ const App: React.FC = () => {
                                     </select>
                                     <select value={filterSource || ''} onChange={(e) => setFilterSource(e.target.value || null)} className="bg-[var(--theme-bg-base)] border border-[var(--theme-border)] text-[var(--theme-text-primary)] text-sm rounded-lg p-2 focus:ring-[var(--theme-accent-primary)] focus:border-[var(--theme-accent-primary)]">
                                         <option value="">Tất cả nguồn</option><option value="TruyenFull.vn">Web (TruyenFull)</option><option value="TangThuVien.net">Web (TTV)</option><option value="Ebook">Ebook</option><option value="Local">Tự thêm</option>
+                                        <option value="Cloud">Đồng bộ Cloud</option>
                                     </select>
                                     <div className="relative" ref={tagDropdownRef}>
                                         <button onClick={() => setIsTagDropdownOpen(!isTagDropdownOpen)} className="bg-[var(--theme-bg-base)] border border-[var(--theme-border)] text-[var(--theme-text-primary)] text-sm rounded-lg p-2 focus:ring-[var(--theme-accent-primary)] focus:border-[var(--theme-accent-primary)] min-w-[150px] text-left flex justify-between items-center"><span className="truncate">{filterTags.length === 0 ? "Tất cả thể loại" : `${filterTags.length} thể loại`}</span><svg className="w-4 h-4 ml-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg></button>
