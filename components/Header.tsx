@@ -44,10 +44,11 @@ const Header: React.FC<HeaderProps> = ({ onOpenApiKeySettings, onOpenUpdateModal
           )}
           <button
             onClick={onOpenUpdateModal}
-            className="p-2 rounded-full text-[var(--theme-text-secondary)] hover:bg-[var(--theme-border)] hover:text-[var(--theme-text-primary)] transition-colors duration-200"
+            className="relative p-2 rounded-full text-[var(--theme-text-secondary)] hover:bg-[var(--theme-border)] hover:text-[var(--theme-text-primary)] transition-colors duration-200"
             aria-label="Xem thông báo cập nhật"
           >
             <BellIcon className="w-6 h-6" />
+            <span className="absolute top-2 right-2 block h-2.5 w-2.5 rounded-full bg-red-500 ring-2 ring-[var(--theme-bg-surface)]"></span>
           </button>
           <button
             onClick={onOpenApiKeySettings}
