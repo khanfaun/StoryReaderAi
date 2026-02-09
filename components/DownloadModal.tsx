@@ -180,11 +180,21 @@ const DownloadModal: React.FC<DownloadModalProps> = ({
   };
 
   const confirmSignOut = () => {
-      driveService.signOut(() => {
-          // Buộc tải lại trang để xóa sạch dữ liệu phiên làm việc, đảm bảo an toàn và reset trạng thái UI
-          window.location.reload(); 
-      });
+      // Đánh dấu để UI biết đang xử lý (có thể thêm spinner nếu cần)
       setIsSignOutConfirmOpen(false);
+      
+      // Gọi service để đăng xuất (xóa token, cache)
+      driveService.signOut(() => {
+          // Callback này sẽ được gọi khi service hoàn tất
+          console.log("Service logout complete. Reloading...");
+          window.location.reload();
+      });
+
+      // BACKUP: Buộc reload sau 1 giây nếu callback trên bị treo (do lỗi Google API chẳng hạn)
+      setTimeout(() => {
+          console.log("Force reloading page...");
+          window.location.reload();
+      }, 1000);
   };
 
   const handleDriveUpload = async () => {
@@ -472,108 +482,103 @@ const DownloadModal: React.FC<DownloadModalProps> = ({
                     {/* TAB CONTENT: GOOGLE DRIVE */}
                     {activeTab === 'drive' && (
                         <div className="space-y-6 animate-fade-in">
-                            {!googleUser ? (
-                                <div className="text-center py-8">
-                                    <div className="p-4 bg-blue-900/20 border border-blue-700/50 rounded-lg mb-6 max-w-sm mx-auto">
-                                        <CloudIcon className="w-12 h-12 text-blue-400 mx-auto mb-2" />
-                                        <p className="text-sm text-blue-200 mb-2 font-semibold">Đồng bộ Google Drive</p>
-                                        <p className="text-xs text-[var(--theme-text-secondary)]">
-                                            Đăng nhập để sao lưu và khôi phục dữ liệu truyện này từ Google Drive của bạn.
-                                        </p>
-                                    </div>
-                                    <button
-                                        onClick={handleDriveSignIn}
-                                        className="bg-white hover:bg-gray-100 text-gray-800 font-bold py-3 px-6 rounded-lg inline-flex items-center justify-center gap-3 transition-colors duration-300 border border-gray-300"
-                                    >
-                                        <svg className="w-5 h-5" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg"><g clipPath="url(#clip0_17_40)"><path fill="#4285F4" d="M43.611 20.083H42V20H24V28H35.303C33.6747 33.148 29.2287 37.001 24 37C17.373 37 12 31.627 12 25C12 18.373 17.373 13 24 13C26.96 13 29.56 14.14 31.63 15.87L37.18 10.32C33.4725 6.94524 28.9375 5.00195 24 5C13.464 5 5 13.464 5 24C5 34.536 13.464 43 24 43C34.536 43 43 34.536 43 24C43 22.663 42.871 21.35 42.611 20.083V20.083Z"></path><path fill="#EA4335" d="M31.63 15.87L24 22.88L37.18 10.32C33.4725 6.94524 28.9375 5.00195 24 5V13C26.96 13 29.56 14.14 31.63 15.87Z"></path><path fill="#34A853" d="M24 43C28.9375 42.998 33.4725 41.0548 37.18 37.68L31.63 32.13C29.56 33.86 26.96 35 24 35C21.04 35 18.44 33.86 16.37 32.13L10.82 37.68C14.5275 41.0548 19.0625 42.998 24 43V43Z"></path><path fill="#FBBC05" d="M42.611 20.083H24V28H35.303C34.51 30.245 33.16 32.068 31.63 32.13L37.18 37.68C40.6552 34.4172 42.6625 30.0125 42.962 25.083C43.001 24.524 43 23.5 43 23C43 22.663 42.871 21.35 42.611 20.083V20.083Z"></path></g><defs><clipPath id="clip0_17_40"><rect width="48" height="48" fill="white"></rect></clipPath></defs></svg>
-                                        <span>Tiếp tục với Google</span>
-                                    </button>
-                                </div>
-                            ) : (
-                                <div className="space-y-6">
-                                    {/* User Info Card */}
-                                    <div className="p-4 bg-[var(--theme-bg-base)] border border-[var(--theme-border)] rounded-lg">
-                                        <div className="flex items-center justify-between mb-3">
-                                            <div className="flex items-center gap-3">
-                                                {googleUser.imageUrl ? (
-                                                    <img src={googleUser.imageUrl} alt="Avatar" className="w-10 h-10 rounded-full border-2 border-[var(--theme-accent-primary)]" />
-                                                ) : (
-                                                    <div className="w-10 h-10 rounded-full bg-blue-600 flex items-center justify-center text-white font-bold text-lg">
-                                                        {googleUser.name.charAt(0)}
-                                                    </div>
-                                                )}
-                                                <div>
-                                                    <p className="font-bold text-[var(--theme-text-primary)]">{googleUser.name}</p>
-                                                    <p className="text-xs text-[var(--theme-text-secondary)]">{googleUser.email}</p>
+                            <div className="space-y-6">
+                                {/* User Info Card - Always visible */}
+                                <div className={`p-4 bg-[var(--theme-bg-base)] border border-[var(--theme-border)] rounded-lg transition-opacity ${!googleUser ? 'opacity-90' : 'opacity-100'}`}>
+                                    <div className="flex items-center justify-between mb-3">
+                                        <div className="flex items-center gap-3">
+                                            {googleUser?.imageUrl ? (
+                                                <img src={googleUser.imageUrl} alt="Avatar" className="w-10 h-10 rounded-full border-2 border-[var(--theme-accent-primary)]" />
+                                            ) : (
+                                                <div className={`w-10 h-10 rounded-full flex items-center justify-center text-white font-bold text-lg ${googleUser ? 'bg-blue-600' : 'bg-slate-600'}`}>
+                                                    {googleUser ? googleUser.name.charAt(0) : '?'}
                                                 </div>
+                                            )}
+                                            <div>
+                                                <p className="font-bold text-[var(--theme-text-primary)]">
+                                                    {googleUser ? googleUser.name : 'Chưa đăng nhập'}
+                                                </p>
+                                                <p className="text-xs text-[var(--theme-text-secondary)]">
+                                                    {googleUser ? googleUser.email : 'Đăng nhập để đồng bộ dữ liệu'}
+                                                </p>
                                             </div>
-                                            <span className="text-[10px] font-bold px-2 py-1 bg-green-900/30 text-green-400 rounded-full border border-green-800 flex items-center gap-1">
-                                                <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse"></span>
-                                                Đã kết nối
-                                            </span>
                                         </div>
-                                        
-                                        <div className="flex items-center justify-between pt-3 border-t border-[var(--theme-border)]">
-                                            <div className="flex items-center gap-2">
-                                                <button 
-                                                    onClick={toggleAutoSync}
-                                                    className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors focus:outline-none ${autoSync ? 'bg-[var(--theme-accent-primary)]' : 'bg-gray-700'}`}
-                                                >
-                                                    <span className={`inline-block h-3 w-3 transform rounded-full bg-white transition-transform ${autoSync ? 'translate-x-5' : 'translate-x-1'}`} />
-                                                </button>
-                                                <span className="text-xs text-[var(--theme-text-secondary)]">Tự động đồng bộ</span>
-                                            </div>
+                                        <span className={`text-[10px] font-bold px-2 py-1 rounded-full border flex items-center gap-1 ${googleUser ? 'bg-green-900/30 text-green-400 border-green-800' : 'bg-slate-700 text-slate-300 border-slate-600'}`}>
+                                            <span className={`w-2 h-2 rounded-full ${googleUser ? 'bg-green-500 animate-pulse' : 'bg-slate-400'}`}></span>
+                                            {googleUser ? 'Đã kết nối' : 'Chưa kết nối'}
+                                        </span>
+                                    </div>
+                                    
+                                    <div className="flex items-center justify-between pt-3 border-t border-[var(--theme-border)]">
+                                        <div className={`flex items-center gap-2 ${!googleUser ? 'opacity-50 pointer-events-none' : ''}`}>
+                                            <button 
+                                                onClick={toggleAutoSync}
+                                                className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors focus:outline-none ${autoSync ? 'bg-[var(--theme-accent-primary)]' : 'bg-gray-700'}`}
+                                            >
+                                                <span className={`inline-block h-3 w-3 transform rounded-full bg-white transition-transform ${autoSync ? 'translate-x-5' : 'translate-x-1'}`} />
+                                            </button>
+                                            <span className="text-xs text-[var(--theme-text-secondary)]">Tự động đồng bộ</span>
+                                        </div>
+                                        {googleUser ? (
                                             <button 
                                                 onClick={handleDriveSignOut}
                                                 className="text-xs text-rose-400 hover:text-rose-300 hover:underline"
                                             >
                                                 Đăng xuất
                                             </button>
-                                        </div>
-                                    </div>
-                                    
-                                    {loginSuccess && (
-                                        <div className="p-2 text-center text-sm bg-green-900/40 text-green-400 border border-green-700/50 rounded-lg animate-fade-in">
-                                            <div className="flex items-center justify-center gap-2">
-                                                <CheckIcon className="w-4 h-4" />
-                                                <span>Đăng nhập thành công!</span>
-                                            </div>
-                                        </div>
-                                    )}
-
-                                    {driveStatusMsg && (
-                                        <div className={`p-3 text-sm rounded-lg text-center ${driveStatusMsg.includes('Lỗi') ? 'bg-red-900/30 text-red-300' : 'bg-blue-900/30 text-blue-300'}`}>
-                                            {driveStatusMsg}
-                                        </div>
-                                    )}
-
-                                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                                        <button 
-                                            onClick={handleDriveUpload}
-                                            disabled={isDriveProcessing}
-                                            className="flex flex-col items-center justify-center p-4 bg-blue-600/10 hover:bg-blue-600/20 border border-blue-600/30 hover:border-blue-500 rounded-lg transition-all group disabled:opacity-50 disabled:cursor-wait"
-                                        >
-                                            <div className="p-3 bg-blue-600 rounded-full text-white mb-2 group-hover:scale-110 transition-transform">
-                                                {isDriveProcessing ? <SpinnerIcon className="w-6 h-6 animate-spin"/> : <CloudIcon className="w-6 h-6" />}
-                                            </div>
-                                            <span className="font-bold text-blue-200 text-sm">Lưu lên Cloud</span>
-                                            <span className="text-[10px] text-blue-400/70 mt-1">Backup dữ liệu truyện này</span>
-                                        </button>
-
-                                        <button 
-                                            onClick={handleDriveImport}
-                                            disabled={isDriveProcessing}
-                                            className="flex flex-col items-center justify-center p-4 bg-[var(--theme-accent-primary)]/10 hover:bg-[var(--theme-accent-primary)]/20 border border-[var(--theme-accent-primary)]/30 hover:border-[var(--theme-accent-primary)] rounded-lg transition-all group disabled:opacity-50 disabled:cursor-wait"
-                                        >
-                                            <div className="p-3 bg-[var(--theme-accent-primary)] rounded-full text-white mb-2 group-hover:scale-110 transition-transform">
-                                                {isDriveProcessing ? <SpinnerIcon className="w-6 h-6 animate-spin"/> : <DownloadIcon className="w-6 h-6" />}
-                                            </div>
-                                            <span className="font-bold text-[var(--theme-text-primary)] text-sm">Tải về máy</span>
-                                            <span className="text-[10px] text-[var(--theme-text-secondary)] mt-1">Khôi phục từ Cloud</span>
-                                        </button>
+                                        ) : (
+                                            <button 
+                                                onClick={handleDriveSignIn}
+                                                className="text-xs font-bold text-[var(--theme-accent-primary)] hover:underline flex items-center gap-1"
+                                            >
+                                                <svg className="w-3 h-3" viewBox="0 0 24 24" fill="currentColor"><path d="M12.0003 3C16.9709 3 21.0003 7.02944 21.0003 12C21.0003 16.9706 16.9709 21 12.0003 21C7.02974 21 3.00031 16.9706 3.00031 12C3.00031 7.02944 7.02974 3 12.0003 3ZM12.0003 16V13H8.00031V11H12.0003V8L17.0003 12L12.0003 16Z"/></svg>
+                                                Đăng nhập ngay
+                                            </button>
+                                        )}
                                     </div>
                                 </div>
-                            )}
+                                
+                                {loginSuccess && (
+                                    <div className="p-2 text-center text-sm bg-green-900/40 text-green-400 border border-green-700/50 rounded-lg animate-fade-in">
+                                        <div className="flex items-center justify-center gap-2">
+                                            <CheckIcon className="w-4 h-4" />
+                                            <span>Đăng nhập thành công!</span>
+                                        </div>
+                                    </div>
+                                )}
+
+                                {driveStatusMsg && (
+                                    <div className={`p-3 text-sm rounded-lg text-center ${driveStatusMsg.includes('Lỗi') ? 'bg-red-900/30 text-red-300' : 'bg-blue-900/30 text-blue-300'}`}>
+                                        {driveStatusMsg}
+                                    </div>
+                                )}
+
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                                    <button 
+                                        onClick={handleDriveUpload}
+                                        disabled={isDriveProcessing || !googleUser}
+                                        className={`flex flex-col items-center justify-center p-4 bg-blue-600/10 border border-blue-600/30 rounded-lg transition-all group ${!googleUser ? 'opacity-50 cursor-not-allowed grayscale' : 'hover:bg-blue-600/20 hover:border-blue-500 cursor-pointer'}`}
+                                    >
+                                        <div className="p-3 bg-blue-600 rounded-full text-white mb-2 group-hover:scale-110 transition-transform">
+                                            {isDriveProcessing ? <SpinnerIcon className="w-6 h-6 animate-spin"/> : <CloudIcon className="w-6 h-6" />}
+                                        </div>
+                                        <span className="font-bold text-blue-200 text-sm">Lưu lên Cloud</span>
+                                        <span className="text-[10px] text-blue-400/70 mt-1">Backup dữ liệu truyện này</span>
+                                    </button>
+
+                                    <button 
+                                        onClick={handleDriveImport}
+                                        disabled={isDriveProcessing || !googleUser}
+                                        className={`flex flex-col items-center justify-center p-4 bg-[var(--theme-accent-primary)]/10 border border-[var(--theme-accent-primary)]/30 rounded-lg transition-all group ${!googleUser ? 'opacity-50 cursor-not-allowed grayscale' : 'hover:bg-[var(--theme-accent-primary)]/20 hover:border-[var(--theme-accent-primary)] cursor-pointer'}`}
+                                    >
+                                        <div className="p-3 bg-[var(--theme-accent-primary)] rounded-full text-white mb-2 group-hover:scale-110 transition-transform">
+                                            {isDriveProcessing ? <SpinnerIcon className="w-6 h-6 animate-spin"/> : <DownloadIcon className="w-6 h-6" />}
+                                        </div>
+                                        <span className="font-bold text-[var(--theme-text-primary)] text-sm">Tải về máy</span>
+                                        <span className="text-[10px] text-[var(--theme-text-secondary)] mt-1">Khôi phục từ Cloud</span>
+                                    </button>
+                                </div>
+                            </div>
                         </div>
                     )}
                 </div>

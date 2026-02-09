@@ -110,19 +110,30 @@ export function signIn() {
 
 export function signOut(callback: () => void) {
     const token = window.gapi?.client?.getToken();
-    const clearLocal = () => {
+    
+    // Hàm nội bộ để xóa dữ liệu và gọi callback
+    const performCleanup = () => {
         accessToken = null;
         if (window.gapi?.client) window.gapi.client.setToken(null);
         localStorage.removeItem('gdrive_user_cache');
+        console.log("[DriveService] Cleaned up local session.");
         callback();
     };
 
     if (token !== null && window.google) {
-        window.google.accounts.oauth2.revoke(token.access_token, () => {
-            clearLocal();
-        });
+        try {
+            // Thử revoke token
+            window.google.accounts.oauth2.revoke(token.access_token, () => {
+                console.log("[DriveService] Token revoked successfully.");
+                performCleanup();
+            });
+        } catch (e) {
+            console.warn("[DriveService] Revoke failed, forcing cleanup.", e);
+            // Nếu revoke lỗi (vd mạng), vẫn xóa session local
+            performCleanup();
+        }
     } else {
-        clearLocal();
+        performCleanup();
     }
 }
 
