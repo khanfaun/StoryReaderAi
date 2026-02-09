@@ -5,6 +5,10 @@ import { SparklesIcon } from './icons';
 const DonateSection: React.FC = () => {
   const [imgError, setImgError] = useState(false);
 
+  // Sử dụng đường dẫn trực tiếp từ GitHub Repo của bạn để đảm bảo ảnh luôn hiển thị
+  // Bỏ qua các vấn đề về đường dẫn tương đối hoặc cấu hình build
+  const qrCodeUrl = "https://raw.githubusercontent.com/khanfaun/StoryReaderAi/main/assets/qr_donate.jpg";
+
   return (
     <div className="h-full flex flex-col">
       <div className="bg-gradient-to-b from-indigo-900/30 to-[var(--theme-bg-base)] border border-indigo-500/30 rounded-lg p-5 flex flex-col items-center text-center h-full shadow-inner">
@@ -23,11 +27,11 @@ const DonateSection: React.FC = () => {
         <div className="bg-white p-2 rounded-lg shadow-lg mb-4 w-full max-w-[220px] aspect-square flex items-center justify-center overflow-hidden relative">
             {!imgError ? (
                 <img 
-                    src="/assets/qr_donate.jpg" 
+                    src={qrCodeUrl} 
                     alt="QR Ngân Hàng" 
                     className="w-full h-full object-contain"
                     onError={(e) => {
-                        console.error("Không thể tải ảnh QR. Đang hiển thị placeholder.", e);
+                        console.error("Không thể tải ảnh QR từ GitHub.", e);
                         setImgError(true);
                     }}
                 />
