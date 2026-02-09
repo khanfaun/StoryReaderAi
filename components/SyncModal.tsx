@@ -1,7 +1,8 @@
 
 import React, { useState, useEffect } from 'react';
-import { CloseIcon, SpinnerIcon, SyncIcon, CheckIcon, CloudIcon } from './icons';
-import { initGoogleDrive, signInToDrive, isAuthenticated, syncLibraryIndex } from '../services/sync';
+import { CloseIcon, SpinnerIcon, SyncIcon, CheckIcon, CloudIcon, LogoutIcon } from './icons';
+import { initGoogleDrive, signInToDrive, isAuthenticated, syncLibraryIndex, signOut } from '../services/sync';
+import ConfirmationModal from './ConfirmationModal';
 
 interface SyncModalProps {
   onClose: () => void;
@@ -12,6 +13,7 @@ const SyncModal: React.FC<SyncModalProps> = ({ onClose }) => {
   const [isWorking, setIsWorking] = useState(false);
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [initError, setInitError] = useState<string | null>(null);
+  const [isLogoutConfirmOpen, setIsLogoutConfirmOpen] = useState(false);
 
   useEffect(() => {
     const init = async () => {
@@ -65,7 +67,21 @@ const SyncModal: React.FC<SyncModalProps> = ({ onClose }) => {
       }
   }
 
+  const handleLogoutClick = () => {
+      setIsLogoutConfirmOpen(true);
+  };
+
+  const confirmLogout = () => {
+      signOut();
+      setIsLoggedIn(false);
+      setIsLogoutConfirmOpen(false);
+      setStatus('');
+      // Tải lại trang để xóa sạch dữ liệu cache cũ từ Drive nếu cần
+      window.location.reload();
+  };
+
   return (
+    <>
     <div className="sync-modal-overlay animate-fade-in" onClick={onClose} role="dialog" aria-modal="true">
       <div className="sync-modal animate-fade-in-up" onClick={(e) => e.stopPropagation()}>
         <header className="sync-modal__header">
@@ -125,14 +141,25 @@ const SyncModal: React.FC<SyncModalProps> = ({ onClose }) => {
                     </ul>
                 </div>
 
-                <button
-                    onClick={handleManualSyncIndex}
-                    disabled={isWorking}
-                    className="w-full bg-[var(--theme-accent-primary)] hover:brightness-110 text-white font-bold py-3 px-4 rounded-lg flex items-center justify-center gap-2 transition-colors disabled:opacity-50"
-                >
-                    {isWorking ? <SpinnerIcon className="w-5 h-5 animate-spin" /> : <SyncIcon className="w-5 h-5" />}
-                    <span>Làm mới danh sách truyện ngay</span>
-                </button>
+                <div className="flex flex-col gap-3">
+                    <button
+                        onClick={handleManualSyncIndex}
+                        disabled={isWorking}
+                        className="w-full bg-[var(--theme-accent-primary)] hover:brightness-110 text-white font-bold py-3 px-4 rounded-lg flex items-center justify-center gap-2 transition-colors disabled:opacity-50"
+                    >
+                        {isWorking ? <SpinnerIcon className="w-5 h-5 animate-spin" /> : <SyncIcon className="w-5 h-5" />}
+                        <span>Làm mới danh sách truyện ngay</span>
+                    </button>
+
+                    <button
+                        onClick={handleLogoutClick}
+                        disabled={isWorking}
+                        className="w-full bg-transparent border border-rose-500/50 hover:bg-rose-900/20 text-rose-400 font-bold py-3 px-4 rounded-lg flex items-center justify-center gap-2 transition-colors disabled:opacity-50"
+                    >
+                        <LogoutIcon className="w-5 h-5" />
+                        <span>Đăng xuất</span>
+                    </button>
+                </div>
             </div>
           )}
         </div>
@@ -142,6 +169,19 @@ const SyncModal: React.FC<SyncModalProps> = ({ onClose }) => {
         </div>
       </div>
     </div>
+    
+    <ConfirmationModal
+        isOpen={isLogoutConfirmOpen}
+        onClose={() => setIsLogoutConfirmOpen(false)}
+        onConfirm={confirmLogout}
+        title="Xác nhận đăng xuất"
+        confirmText="Đăng xuất"
+        confirmButtonClass="px-4 py-2 rounded-md bg-rose-600 hover:bg-rose-700 text-white font-semibold transition-colors"
+    >
+        <p>Bạn có chắc chắn muốn đăng xuất khỏi Google Drive?</p>
+        <p className="text-sm text-yellow-500 mt-2">Lưu ý: Sau khi đăng xuất, trang web sẽ được tải lại để đảm bảo dữ liệu hiển thị chính xác.</p>
+    </ConfirmationModal>
+    </>
   );
 };
 
