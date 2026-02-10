@@ -604,8 +604,12 @@ const App: React.FC = () => {
   };
 
   const handleSearch = async (query: string) => {
+    // If we are in reading mode (story is set), this will reset it to null and go back to home/search view
+    if (story) {
+        setStory(null);
+    }
     if (!query.trim()) return;
-    setIsDataLoading(true); setError(null); setSearchResults(null); setStory(null); 
+    setIsDataLoading(true); setError(null); setSearchResults(null); 
     try { const results = await searchStory(query); setSearchResults(results); } catch (err) { setError((err as Error).message); } finally { setIsDataLoading(false); }
   };
 
@@ -693,20 +697,21 @@ const App: React.FC = () => {
   };
 
   // Main Render Logic
-  
+  const appContentClass = isApiKeyModalOpen || isUpdateModalOpen || isHelpModalOpen || manualImportState.isOpen || isCreateStoryModalOpen || isDownloadModalOpen || isSyncModalOpen ? 'blur-sm pointer-events-none' : '';
+
   if (story) {
       return (
-          <div className="flex flex-col min-h-screen bg-[var(--theme-bg-base)] text-[var(--theme-text-primary)] font-sans transition-colors duration-300 relative">
-              {/* Only show global header if NOT in reading mode */}
-              {!isReadingMode && (
-                  <Header 
-                    onOpenApiKeySettings={() => setIsApiKeyModalOpen(true)} 
-                    onOpenUpdateModal={() => setIsUpdateModalOpen(true)} 
-                    onGoHome={handleBackToMain} 
-                    storyTitle={story.title}
-                    onOpenSyncModal={() => setIsSyncModalOpen(true)} 
-                  />
-              )}
+          <div className={`flex flex-col min-h-screen bg-[var(--theme-bg-base)] text-[var(--theme-text-primary)] font-sans transition-colors duration-300 relative ${appContentClass}`}>
+              {/* Always show Global Header and Search in Reading Mode */}
+              <Header 
+                onOpenApiKeySettings={() => setIsApiKeyModalOpen(true)} 
+                onOpenUpdateModal={() => setIsUpdateModalOpen(true)} 
+                onGoHome={handleBackToMain} 
+                onOpenSyncModal={() => setIsSyncModalOpen(true)} 
+              />
+              <div className="container mx-auto px-4 py-4">
+                  <SearchBar onSearch={handleSearch} isLoading={isDataLoading} onOpenHelpModal={() => setIsHelpModalOpen(true)} />
+              </div>
               
               <StoryViewer 
                   story={story}
@@ -749,6 +754,10 @@ const App: React.FC = () => {
                   isSearchLoading={isDataLoading}
                   onOpenHelpModal={() => setIsHelpModalOpen(true)}
                   onCreateStory={() => setIsCreateStoryModalOpen(true)}
+                  
+                  // NEW PROPS PASSED TO STORYVIEWER
+                  onOpenUpdateModal={() => setIsUpdateModalOpen(true)}
+                  onOpenSyncModal={() => setIsSyncModalOpen(true)}
               />
               
               {!isReadingMode && (
@@ -769,16 +778,14 @@ const App: React.FC = () => {
               <DownloadModal isOpen={isDownloadModalOpen} onClose={handleReadWithoutDownload} story={pendingStory || story} onStartDownload={handleStartDownloadWrapper} onDataImported={handleImportDataSuccess} />
               {isSyncModalOpen && <SyncModal onClose={() => setIsSyncModalOpen(false)} />}
               
-              {/* Fix: Added missing UpdateModal and HelpModal in Story Mode */}
               <UpdateModal isOpen={isUpdateModalOpen} onClose={handleCloseUpdateModal} />
               <HelpModal isOpen={isHelpModalOpen} onClose={() => setIsHelpModalOpen(false)} />
+              <ApiKeyModal isOpen={isApiKeyModalOpen} onClose={handleCloseApiKeyModal} onValidateKey={handleValidateKey} onDataChange={reloadDataFromStorage} tokenUsage={tokenUsage} />
           </div>
       )
   }
 
-  // Dashboard logic unchanged
-  const appContentClass = isApiKeyModalOpen || isUpdateModalOpen || isHelpModalOpen || manualImportState.isOpen || isCreateStoryModalOpen || isDownloadModalOpen || isSyncModalOpen ? 'blur-sm pointer-events-none' : '';
-
+  // Dashboard / Home View
   return (
     <div className="flex flex-col min-h-screen bg-[var(--theme-bg-base)] text-[var(--theme-text-primary)] font-sans transition-colors duration-300 relative">
       {downloadStatus.isProcessing && (

@@ -48,7 +48,18 @@ interface ChapterContentProps {
   initialScrollPercentage?: number;
   onScrollProgress?: (percentage: number) => void;
 
-  // Header Props
+  // Header Handlers (Passed through but not used for rendering local header anymore)
+  onOpenApiKeySettings: () => void;
+  onOpenUpdateModal: () => void;
+  onOpenSyncModal: () => void;
+  onGoHome: () => void;
+  
+  // Search
+  onSearch: (query: string) => void;
+  isSearchLoading: boolean;
+  onOpenHelpModal: () => void;
+
+  // Bookmark
   isBookmarked: boolean;
   onToggleBookmark: () => void;
 }
@@ -73,8 +84,9 @@ const ChapterContent: React.FC<ChapterContentProps> = ({
     onToggleChat, onToggleStats,
     initialScrollPercentage = 0,
     onScrollProgress,
-    isBookmarked,
-    onToggleBookmark
+    onOpenApiKeySettings, onOpenUpdateModal, onOpenSyncModal, onGoHome,
+    onSearch, isSearchLoading, onOpenHelpModal,
+    isBookmarked, onToggleBookmark
 }) => {
   const [isListVisible, setIsListVisible] = useState(false);
   const [isNavBarVisible, setIsNavBarVisible] = useState(true);
@@ -996,15 +1008,18 @@ const ChapterContent: React.FC<ChapterContentProps> = ({
     };
 
   return (
-    <>
-      {/* --- NEW STICKY HEADER --- */}
-      <div className="fixed top-0 left-0 right-0 z-[60] h-16 bg-[var(--theme-bg-surface)]/95 backdrop-blur border-b border-[var(--theme-border)] shadow-md flex items-center justify-between px-4 transition-transform duration-300 transform translate-y-0">
-          {/* Left: Back Button */}
+    <div className="flex flex-col min-h-screen">
+      
+      {/* Note: Global Header and SearchBar are now in App.tsx */}
+
+      {/* --- CHAPTER STICKY HEADER --- */}
+      <div className="sticky top-0 z-[60] h-16 bg-[var(--theme-bg-surface)]/95 backdrop-blur border-b border-[var(--theme-border)] shadow-md flex items-center justify-between px-4 transition-transform duration-300 transform translate-y-0">
+          {/* Left: Back Button (Go to Story Detail) */}
           <button 
               onClick={onBack} 
               disabled={isBusy && !isAnalyzing}
               className="p-2 text-[var(--theme-text-secondary)] hover:text-[var(--theme-text-primary)] hover:bg-[var(--theme-border)] rounded-full transition-colors disabled:opacity-50"
-              title="Quay lại"
+              title="Quay lại chi tiết truyện"
           >
               <span className="sr-only">Quay lại</span>
               <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -1015,35 +1030,13 @@ const ChapterContent: React.FC<ChapterContentProps> = ({
           {/* Center: Title */}
           <div className="flex-1 text-center px-4 overflow-hidden">
               <h2 className="text-sm font-bold text-[var(--theme-text-primary)] truncate">{story.title}</h2>
-              <p className="text-xs text-[var(--theme-text-secondary)] truncate">{chapterTitle}</p>
+              <p className="text-xs text-[var(--theme-text-secondary)] truncate">{story.chapters?.[currentChapterIndex]?.title ?? 'Đang tải...'}</p>
           </div>
 
-          {/* Right: Actions */}
+          {/* Right: Actions (Ordered: Bookmark, Copy, Edit, Add) */}
           <div className="flex items-center gap-1">
-              {/* Nút Sửa nội dung (Chỉ hiện khi có quyền sửa và chưa ở chế độ sửa) */}
-              {onContentUpdate && !isEditingContent && (
-                  <button
-                      onClick={() => setIsEditingContent(true)}
-                      disabled={isBusy && !isAnalyzing}
-                      className="p-2 text-[var(--theme-text-secondary)] hover:text-[var(--theme-accent-primary)] hover:bg-[var(--theme-border)] rounded-full transition-colors disabled:opacity-50"
-                      title="Sửa nội dung"
-                  >
-                      <EditIcon className="w-6 h-6" />
-                  </button>
-              )}
-
-              {/* Nút Thêm chương (Chỉ hiện khi có quyền thêm) */}
-              {onCreateChapter && (
-                  <button
-                      onClick={() => setIsAddChapterModalOpen(true)}
-                      disabled={isBusy && !isAnalyzing}
-                      className="p-2 text-[var(--theme-text-secondary)] hover:text-green-500 hover:bg-[var(--theme-border)] rounded-full transition-colors disabled:opacity-50"
-                      title="Thêm chương mới"
-                  >
-                      <PlusIcon className="w-6 h-6" />
-                  </button>
-              )}
-
+              
+              {/* 1. Bookmark */}
               <button 
                   onClick={onToggleBookmark}
                   className="p-2 text-[var(--theme-text-secondary)] hover:text-[var(--theme-accent-primary)] hover:bg-[var(--theme-border)] rounded-full transition-colors"
@@ -1051,7 +1044,8 @@ const ChapterContent: React.FC<ChapterContentProps> = ({
               >
                   {isBookmarked ? <BookmarkIcon className="h-6 w-6 text-[var(--theme-accent-primary)]" /> : <BookmarkSlashIcon className="h-6 w-6" />}
               </button>
-              
+
+              {/* 2. Copy */}
               <button 
                   onClick={() => {
                       navigator.clipboard.writeText(content).then(() => {
@@ -1069,10 +1063,34 @@ const ChapterContent: React.FC<ChapterContentProps> = ({
                       </span>
                   )}
               </button>
+
+              {/* 3. Edit Content */}
+              {onContentUpdate && !isEditingContent && (
+                  <button
+                      onClick={() => setIsEditingContent(true)}
+                      disabled={isBusy && !isAnalyzing}
+                      className="p-2 text-[var(--theme-text-secondary)] hover:text-[var(--theme-accent-primary)] hover:bg-[var(--theme-border)] rounded-full transition-colors disabled:opacity-50"
+                      title="Sửa nội dung"
+                  >
+                      <EditIcon className="w-6 h-6" />
+                  </button>
+              )}
+
+              {/* 4. Add Chapter */}
+              {onCreateChapter && (
+                  <button
+                      onClick={() => setIsAddChapterModalOpen(true)}
+                      disabled={isBusy && !isAnalyzing}
+                      className="p-2 text-[var(--theme-text-secondary)] hover:text-green-500 hover:bg-[var(--theme-border)] rounded-full transition-colors disabled:opacity-50"
+                      title="Thêm chương mới"
+                  >
+                      <PlusIcon className="w-6 h-6" />
+                  </button>
+              )}
           </div>
       </div>
 
-      <div className="bg-[var(--theme-bg-base)] rounded-lg shadow-xl p-4 sm:p-8 lg:p-12 w-full animate-fade-in border border-[var(--theme-border)] pb-24 mt-20">
+      <div className="flex-grow bg-[var(--theme-bg-base)] rounded-lg shadow-xl p-4 sm:p-8 lg:p-12 w-full animate-fade-in border border-[var(--theme-border)] pb-24 mt-4 mx-auto max-w-screen-xl">
         
         {ttsError && isAudioPlayerVisible && (
              <div className="my-2 p-2 bg-rose-900/50 text-rose-300 text-center rounded text-sm border border-rose-700">
@@ -1123,7 +1141,6 @@ const ChapterContent: React.FC<ChapterContentProps> = ({
             >
                 <div className="flex justify-between items-start mb-6 border-b border-[var(--theme-border)] pb-2 opacity-60 hover:opacity-100 transition-opacity">
                     <h2 className="text-2xl sm:text-3xl font-bold text-[var(--reader-title)]">{chapterTitle}</h2>
-                    {/* Các nút Sửa/Thêm đã được di chuyển lên Header */}
                 </div>
 
             {ttsStatus !== 'idle' && ttsTextChunks.length > 0 ? (
@@ -1258,7 +1275,7 @@ const ChapterContent: React.FC<ChapterContentProps> = ({
         onSave={handleConfirmAddChapter}
         nextChapterIndex={(story.chapters?.length || 0) + 1}
       />
-    </>
+    </div>
   );
 };
 

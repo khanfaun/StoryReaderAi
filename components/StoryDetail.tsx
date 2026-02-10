@@ -6,7 +6,6 @@ import ConfirmationModal from './ConfirmationModal';
 import StoryEditModal from './StoryEditModal';
 import ChapterEditModal from './ChapterEditModal';
 import DownloadModal from './DownloadModal';
-import SearchBar from './SearchBar';
 
 interface StoryDetailProps {
   story: Story;
@@ -244,11 +243,8 @@ const StoryDetail: React.FC<StoryDetailProps> = ({
   return (
     <div className="bg-[var(--theme-bg-surface)] rounded-lg shadow-xl p-4 sm:p-6 animate-fade-in border border-[var(--theme-border)]">
       
-      {/* SEARCH BAR & CREATE BUTTON (New Section) */}
-      <div className="mb-8 flex flex-col sm:flex-row gap-4 items-stretch sm:items-center border-b border-[var(--theme-border)] pb-6">
-          <div className="flex-grow">
-              <SearchBar onSearch={onSearch} isLoading={isSearchLoading} onOpenHelpModal={onOpenHelpModal} />
-          </div>
+      {/* Create Button (Search Bar is now Global in App) */}
+      <div className="mb-6 flex justify-end border-b border-[var(--theme-border)] pb-6">
           <button onClick={onCreateStory} className="flex-shrink-0 flex items-center justify-center gap-2 bg-green-600 hover:bg-green-500 text-white font-semibold py-2 px-4 rounded-lg transition-colors h-auto text-sm">
               <PlusIcon className="w-5 h-5" /> <span className="whitespace-nowrap">Tạo truyện mới</span>
           </button>

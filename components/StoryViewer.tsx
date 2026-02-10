@@ -66,6 +66,10 @@ interface StoryViewerProps {
   isSearchLoading: boolean;
   onOpenHelpModal: () => void;
   onCreateStory: () => void;
+  
+  // Header Handlers (Passed from App)
+  onOpenUpdateModal: () => void;
+  onOpenSyncModal: () => void;
 }
 
 interface ManualImportState {
@@ -90,7 +94,8 @@ const StoryViewer: React.FC<StoryViewerProps> = ({
     backgroundDownloads, downloadQueue, cachedChapters, onPauseDownload, onResumeDownload, onStopDownload, onStartBackgroundDownload, onStartDownloadExport, onRedownload,
     setIsBottomNavForReadingVisible, isBottomNavForReadingVisible, onTokenUsageUpdate,
     isApiKeyModalOpen, setIsApiKeyModalOpen, tokenUsage, onDataChange, onReadingModeChange,
-    onSearch, isSearchLoading, onOpenHelpModal, onCreateStory
+    onSearch, isSearchLoading, onOpenHelpModal, onCreateStory,
+    onOpenUpdateModal, onOpenSyncModal
 }) => {
     // Local State specific to the active story session
     const [selectedChapterIndex, setSelectedChapterIndex] = useState<number | null>(initialChapterIndex ?? null);
@@ -617,8 +622,9 @@ const StoryViewer: React.FC<StoryViewerProps> = ({
         }
     };
 
-    // Loading State specifically for initial navigation
-    if (initialChapterIndex !== null && initialChapterIndex !== undefined && chapterContent === null && !error) {
+    // Loading State specifically for initial navigation or pending selection
+    // FIX: Using selectedChapterIndex instead of initialChapterIndex to allow going back
+    if (selectedChapterIndex !== null && chapterContent === null && !error) {
          return (
             <div className="flex flex-col items-center justify-center min-h-[50vh]">
                 <LoadingSpinner />
@@ -659,6 +665,14 @@ const StoryViewer: React.FC<StoryViewerProps> = ({
                         onScrollProgress={handleScrollProgress}
                         isBookmarked={isBookmarked}
                         onToggleBookmark={handleToggleBookmark}
+                        // Header handlers
+                        onOpenApiKeySettings={() => setIsApiKeyModalOpen(true)}
+                        onOpenUpdateModal={onOpenUpdateModal}
+                        onOpenSyncModal={onOpenSyncModal}
+                        onGoHome={onBack} // Main Home handler
+                        onSearch={onSearch}
+                        isSearchLoading={isSearchLoading}
+                        onOpenHelpModal={onOpenHelpModal}
                     />
                 </div>
                 <aside className="hidden xl:block sticky top-20 self-start transition-all duration-300">
