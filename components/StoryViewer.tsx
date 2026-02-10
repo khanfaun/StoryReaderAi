@@ -5,7 +5,7 @@ import { getChapterContent, parseHtml, parseChapterContentFromDoc } from '../ser
 import { analyzeChapterForCharacterStats, chatWithEbook, chatWithChapterContent, rewriteChapterContent } from '../services/geminiService';
 import { getCachedChapter, setCachedChapter } from '../services/cacheService';
 import { getStoryState, saveStoryState as saveStoryStateLocal, mergeChapterStats } from '../services/storyStateService';
-import { updateReadingHistory, saveScrollPosition } from '../services/history';
+import { updateReadingHistory, saveScrollPosition, getReadingHistory, saveReadingHistory } from '../services/history';
 import * as dbService from '../services/dbService';
 import * as apiKeyService from '../services/apiKeyService';
 import * as syncService from '../services/sync'; // Import Sync Service
@@ -117,6 +117,9 @@ const StoryViewer: React.FC<StoryViewerProps> = ({
     const [manualImportState, setManualImportState] = useState<ManualImportState>({
         isOpen: false, url: '', message: '', type: 'chapter', source: ''
     });
+    
+    // Bookmark State
+    const [isBookmarked, setIsBookmarked] = useState(true);
 
     const operationIdRef = useRef<number>(0);
     const { availableSystemVoices } = useTts(settings, onSettingsChange);
@@ -211,6 +214,27 @@ const StoryViewer: React.FC<StoryViewerProps> = ({
     const handleScrollProgress = useCallback((percentage: number) => {
         saveScrollPosition(story.url, percentage);
     }, [story.url]);
+    
+    // --- Bookmark Logic ---
+    const handleToggleBookmark = useCallback(() => {
+        if (!isReading || selectedChapterIndex === null || !story.chapters) return;
+        
+        const currentState = !isBookmarked;
+        setIsBookmarked(currentState);
+        
+        const history = getReadingHistory();
+        if (currentState) {
+            // Re-add to history (Update timestamp)
+            const chapter = story.chapters[selectedChapterIndex];
+            const newHistory = updateReadingHistory(story, chapter);
+            setReadingHistory(newHistory);
+        } else {
+            // Remove from history
+            const newHistory = history.filter(item => item.url !== story.url);
+            saveReadingHistory(newHistory);
+            setReadingHistory(newHistory);
+        }
+    }, [isBookmarked, isReading, selectedChapterIndex, story, setReadingHistory]);
 
     // --- Content Fetching & Analysis ---
 
@@ -284,9 +308,11 @@ const StoryViewer: React.FC<StoryViewerProps> = ({
         setChapterContent(null);
         setError(null);
         
+        // Auto-update history on chapter load -> effectively "Bookmarked"
         const newHistory = updateReadingHistory(storyToLoad, chapter);
         setReadingHistory(newHistory);
         onReadChapterUpdate(chapter.url);
+        setIsBookmarked(true);
         
         try {
             // 1. Kiểm tra Local Cache trước
@@ -604,7 +630,7 @@ const StoryViewer: React.FC<StoryViewerProps> = ({
     if (isReading && story.chapters) {
         return (
             <div className="grid grid-cols-1 xl:grid-cols-[24rem_minmax(0,1fr)_24rem] 2xl:grid-cols-[28rem_minmax(0,1fr)_28rem] xl:gap-8 w-full px-4 sm:px-8 py-8 sm:py-12 flex-grow">
-                <aside className="hidden xl:block sticky top-8 self-start">
+                <aside className="hidden xl:block sticky top-20 self-start transition-all duration-300">
                     <CharacterPrimaryPanel 
                         stats={cumulativeStats} 
                         isAnalyzing={isAnalyzing} 
@@ -631,9 +657,11 @@ const StoryViewer: React.FC<StoryViewerProps> = ({
                         onToggleStats={() => setIsPanelVisible(!isPanelVisible)}
                         initialScrollPercentage={targetScrollPercentage}
                         onScrollProgress={handleScrollProgress}
+                        isBookmarked={isBookmarked}
+                        onToggleBookmark={handleToggleBookmark}
                     />
                 </div>
-                <aside className="hidden xl:block sticky top-8 self-start">
+                <aside className="hidden xl:block sticky top-20 self-start transition-all duration-300">
                     <CharacterPanel 
                         stats={cumulativeStats} 
                         story={story}

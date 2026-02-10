@@ -1,10 +1,11 @@
+
 import React, { useState, useEffect, useRef, useCallback, useMemo, useLayoutEffect } from 'react';
 import type { Story, Chapter, ReadingSettings, CharacterStats } from '../types';
 import ChapterListModal from './ChapterListModal';
 import ChapterEditModal from './ChapterEditModal';
 import SettingsPanel from './SettingsPanel';
 import EntityTooltip from './EntityTooltip';
-import { ListIcon, EditIcon, SparklesIcon, SpinnerIcon, PlusIcon, PlayIcon, PauseIcon, StopIcon, CloseIcon, BarsIcon, CogIcon, SlidersIcon, BackwardStepIcon, ForwardStepIcon, VolumeHighIcon, UserIcon } from './icons';
+import { ListIcon, EditIcon, SparklesIcon, SpinnerIcon, PlusIcon, PlayIcon, PauseIcon, StopIcon, CloseIcon, BarsIcon, CogIcon, SlidersIcon, BackwardStepIcon, ForwardStepIcon, VolumeHighIcon, UserIcon, ClipboardIcon, BookmarkIcon, BookmarkSlashIcon } from './icons';
 
 type TtsStatus = 'idle' | 'loading' | 'playing' | 'paused' | 'error' | 'ready';
 
@@ -46,6 +47,10 @@ interface ChapterContentProps {
   // Scroll Restoration
   initialScrollPercentage?: number;
   onScrollProgress?: (percentage: number) => void;
+
+  // Header Props
+  isBookmarked: boolean;
+  onToggleBookmark: () => void;
 }
 
 // Helper format thời gian mm:ss
@@ -67,7 +72,9 @@ const ChapterContent: React.FC<ChapterContentProps> = ({
     ttsStatus, ttsError, ttsTextChunks, ttsCurrentChunkIndex, availableSystemVoices,
     onToggleChat, onToggleStats,
     initialScrollPercentage = 0,
-    onScrollProgress
+    onScrollProgress,
+    isBookmarked,
+    onToggleBookmark
 }) => {
   const [isListVisible, setIsListVisible] = useState(false);
   const [isNavBarVisible, setIsNavBarVisible] = useState(true);
@@ -110,6 +117,7 @@ const ChapterContent: React.FC<ChapterContentProps> = ({
   
   // Karaoke State: Tracks the specific word being spoken within the current chunk
   const [currentWordRange, setCurrentWordRange] = useState<{start: number, end: number} | null>(null);
+  const [copySuccess, setCopySuccess] = useState(false);
 
   // Refs
   const utteranceRef = useRef<SpeechSynthesisUtterance | null>(null);
@@ -532,6 +540,15 @@ const ChapterContent: React.FC<ChapterContentProps> = ({
       onTtsRequest();
   };
 
+  const handleCopyContent = () => {
+      navigator.clipboard.writeText(content).then(() => {
+          setCopySuccess(true);
+          setTimeout(() => setCopySuccess(false), 2000);
+      }, (err) => {
+          console.error('Could not copy text: ', err);
+      });
+  };
+
   
   const entityMapData = useMemo(() => {
     if (!cumulativeStats) return { map: new Map(), regex: null };
@@ -668,75 +685,9 @@ const ChapterContent: React.FC<ChapterContentProps> = ({
   );
 
   const navButtons = (target: 'top' | 'bottom') => {
-    // 1. TOP NAV
+    // 1. TOP NAV - Removed old layout, now using Fixed Header
     if (target === 'top') {
-        const TtsButton = () => {
-            const isActive = isAudioPlayerVisible;
-            return (
-                <button
-                    onClick={handleTtsButtonClick}
-                    className={`flex-shrink-0 text-white p-2 rounded-lg transition-colors duration-200 ${isActive ? 'bg-[var(--theme-accent-primary)]/80' : 'bg-[var(--theme-accent-primary)] hover:brightness-110'} disabled:opacity-50 disabled:cursor-not-allowed`}
-                    aria-label="Mở/đóng trình phát âm thanh"
-                >
-                    {ttsStatus === 'loading' ? <SpinnerIcon className="h-6 w-6 animate-spin" /> : <PlayIcon className="h-6 w-6" />}
-                </button>
-            );
-        };
-
-        return (
-            <div className="w-full flex flex-wrap justify-center items-center gap-1 sm:gap-2 px-1">
-              
-              {/* Settings Button (Mobile Only - Left side) */}
-              <button 
-                onClick={() => setIsSettingsVisible(true)} 
-                disabled={isBusy && !isAnalyzing}
-                className="flex-shrink-0 xl:hidden bg-[var(--theme-bg-surface)] brightness-125 hover:brightness-150 text-[var(--theme-text-primary)] p-2 rounded-lg transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                <CogIcon className="w-6 h-6" />
-              </button>
-
-              {/* Prev Button */}
-              <button onClick={onPrev} disabled={isFirstChapter || (isBusy && !isAnalyzing)} className="whitespace-nowrap bg-[var(--theme-bg-surface)] brightness-125 hover:brightness-150 text-[var(--theme-text-primary)] font-bold text-xs sm:text-sm py-2 px-3 sm:px-4 rounded-lg transition-all duration-300 disabled:opacity-50">
-                  <span className="md:hidden"><BackwardStepIcon className="w-6 h-6" /></span>
-                  <span className="hidden md:inline">Chương Trước</span>
-              </button>
-
-              {/* List Button */}
-              <button onClick={() => setIsListVisible(true)} disabled={isBusy && !isAnalyzing} className="flex-shrink-0 bg-[var(--theme-text-primary)] text-[var(--theme-bg-surface)] hover:brightness-90 font-bold p-2 rounded-lg transition-all duration-300 disabled:opacity-50"><ListIcon className="h-6 w-6" /></button>
-
-              {/* Next Button */}
-              <button onClick={onNext} disabled={isLastChapter || (isBusy && !isAnalyzing)} className="whitespace-nowrap bg-[var(--theme-bg-surface)] brightness-125 hover:brightness-150 text-[var(--theme-text-primary)] font-bold text-xs sm:text-sm py-2 px-3 sm:px-4 rounded-lg transition-all duration-300 disabled:opacity-50">
-                  <span className="md:hidden"><ForwardStepIcon className="w-6 h-6" /></span>
-                  <span className="hidden md:inline">Chương Sau</span>
-              </button>
-
-              {/* User/Stats Button (Mobile Only - Added to Right) */}
-              <button 
-                onClick={onToggleStats} 
-                disabled={isBusy && !isAnalyzing}
-                className="flex-shrink-0 xl:hidden text-white font-bold p-2 rounded-lg transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed border" 
-                style={{ backgroundColor: '#8170ff', borderColor: '#8170ff' }}
-                aria-label="Thông tin nhân vật"
-              >
-                <UserIcon className="h-6 w-6" />
-              </button>
-              
-              <div className="hidden xl:block w-px h-6 bg-[var(--theme-border)] mx-1"></div>
-
-              <div className="hidden xl:flex gap-2">
-                  <TtsButton />
-                  <div ref={autoScrollButtonRefTop} className="relative flex-shrink-0">
-                    <button onClick={() => handleAutoScrollButtonClick('top')} className={`p-2 rounded-lg transition-all duration-300 ${isAutoScrolling ? 'bg-[var(--theme-accent-primary)] text-white' : 'bg-[var(--theme-bg-surface)] brightness-125 hover:brightness-150 text-[var(--theme-text-primary)]'}`}>
-                        {isAutoScrolling ? <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M10 9v6m4-6v6m7-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg> : <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M19 13l-7 7-7-7m14-8l-7 7-7-7" /></svg>}
-                    </button>
-                  </div>
-              </div>
-              
-               <button onClick={() => setIsSettingsVisible(true)} disabled={isBusy && !isAnalyzing} className="flex-shrink-0 hidden xl:block bg-[var(--theme-bg-surface)] brightness-125 hover:brightness-150 text-[var(--theme-text-primary)] p-2 rounded-lg transition-all duration-300 disabled:opacity-50">
-               <CogIcon className="w-6 h-6" />
-               </button>
-            </div>
-        );
+        return null; // Top buttons are now in the fixed header
     }
 
     // 2. BOTTOM NAV - AUDIO PLAYER ACTIVE
@@ -1046,52 +997,88 @@ const ChapterContent: React.FC<ChapterContentProps> = ({
 
   return (
     <>
-      <div className="bg-[var(--theme-bg-base)] rounded-lg shadow-xl p-4 sm:p-8 lg:p-12 w-full animate-fade-in border border-[var(--theme-border)] pb-24">
-        {/* ... Header and Content Area remain the same ... */}
-        <div className="mb-6 flex justify-between items-center flex-wrap gap-2">
-            <button
-                onClick={onBack}
-                disabled={isBusy && !isAnalyzing}
-                className="bg-[var(--theme-accent-primary)] hover:brightness-90 text-white font-bold py-2 px-4 rounded-lg transition-colors duration-300 disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-            &larr; Quay lại
-            </button>
-            
-            {onContentUpdate && !isEditingContent && (
-                <div className="flex gap-2">
-                    <button
-                        onClick={() => setIsEditingContent(true)}
-                        disabled={isBusy && !isAnalyzing}
-                        className="flex items-center gap-2 bg-slate-600 hover:bg-slate-500 text-white font-bold py-2 px-4 rounded-lg transition-colors duration-300 disabled:opacity-50 disabled:cursor-not-allowed"
-                    >
-                        <EditIcon className="w-5 h-5" />
-                        <span className="hidden sm:inline">Sửa nội dung</span>
-                    </button>
-                    {onCreateChapter && (
-                        <button
-                            onClick={() => setIsAddChapterModalOpen(true)}
-                            disabled={isBusy && !isAnalyzing}
-                            className="flex items-center gap-2 bg-green-600 hover:bg-green-500 text-white font-bold py-2 px-4 rounded-lg transition-colors duration-300 disabled:opacity-50 disabled:cursor-not-allowed"
-                            title="Thêm chương mới"
-                        >
-                            <PlusIcon className="w-5 h-5" />
-                        </button>
-                    )}
-                </div>
-            )}
-        </div>
+      {/* --- NEW STICKY HEADER --- */}
+      <div className="fixed top-0 left-0 right-0 z-[60] h-16 bg-[var(--theme-bg-surface)]/95 backdrop-blur border-b border-[var(--theme-border)] shadow-md flex items-center justify-between px-4 transition-transform duration-300 transform translate-y-0">
+          {/* Left: Back Button */}
+          <button 
+              onClick={onBack} 
+              disabled={isBusy && !isAnalyzing}
+              className="p-2 text-[var(--theme-text-secondary)] hover:text-[var(--theme-text-primary)] hover:bg-[var(--theme-border)] rounded-full transition-colors disabled:opacity-50"
+              title="Quay lại"
+          >
+              <span className="sr-only">Quay lại</span>
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M10 19l-7-7m0 0l7-7m-7 7h18" />
+              </svg>
+          </button>
 
-        <h2 className="text-3xl font-bold text-center text-[var(--reader-title)] mb-4">{chapterTitle}</h2>
+          {/* Center: Title */}
+          <div className="flex-1 text-center px-4 overflow-hidden">
+              <h2 className="text-sm font-bold text-[var(--theme-text-primary)] truncate">{story.title}</h2>
+              <p className="text-xs text-[var(--theme-text-secondary)] truncate">{chapterTitle}</p>
+          </div>
+
+          {/* Right: Actions */}
+          <div className="flex items-center gap-1">
+              {/* Nút Sửa nội dung (Chỉ hiện khi có quyền sửa và chưa ở chế độ sửa) */}
+              {onContentUpdate && !isEditingContent && (
+                  <button
+                      onClick={() => setIsEditingContent(true)}
+                      disabled={isBusy && !isAnalyzing}
+                      className="p-2 text-[var(--theme-text-secondary)] hover:text-[var(--theme-accent-primary)] hover:bg-[var(--theme-border)] rounded-full transition-colors disabled:opacity-50"
+                      title="Sửa nội dung"
+                  >
+                      <EditIcon className="w-6 h-6" />
+                  </button>
+              )}
+
+              {/* Nút Thêm chương (Chỉ hiện khi có quyền thêm) */}
+              {onCreateChapter && (
+                  <button
+                      onClick={() => setIsAddChapterModalOpen(true)}
+                      disabled={isBusy && !isAnalyzing}
+                      className="p-2 text-[var(--theme-text-secondary)] hover:text-green-500 hover:bg-[var(--theme-border)] rounded-full transition-colors disabled:opacity-50"
+                      title="Thêm chương mới"
+                  >
+                      <PlusIcon className="w-6 h-6" />
+                  </button>
+              )}
+
+              <button 
+                  onClick={onToggleBookmark}
+                  className="p-2 text-[var(--theme-text-secondary)] hover:text-[var(--theme-accent-primary)] hover:bg-[var(--theme-border)] rounded-full transition-colors"
+                  title={isBookmarked ? "Bỏ đánh dấu đọc tiếp" : "Đánh dấu đọc tiếp"}
+              >
+                  {isBookmarked ? <BookmarkIcon className="h-6 w-6 text-[var(--theme-accent-primary)]" /> : <BookmarkSlashIcon className="h-6 w-6" />}
+              </button>
+              
+              <button 
+                  onClick={() => {
+                      navigator.clipboard.writeText(content).then(() => {
+                          setCopySuccess(true);
+                          setTimeout(() => setCopySuccess(false), 2000);
+                      });
+                  }}
+                  className="p-2 text-[var(--theme-text-secondary)] hover:text-[var(--theme-text-primary)] hover:bg-[var(--theme-border)] rounded-full transition-colors relative"
+                  title="Sao chép nội dung chương"
+              >
+                  <ClipboardIcon className="h-6 w-6" />
+                  {copySuccess && (
+                      <span className="absolute top-10 right-0 bg-green-600 text-white text-[10px] px-2 py-1 rounded shadow-lg animate-fade-in whitespace-nowrap">
+                          Đã chép!
+                      </span>
+                  )}
+              </button>
+          </div>
+      </div>
+
+      <div className="bg-[var(--theme-bg-base)] rounded-lg shadow-xl p-4 sm:p-8 lg:p-12 w-full animate-fade-in border border-[var(--theme-border)] pb-24 mt-20">
         
         {ttsError && isAudioPlayerVisible && (
              <div className="my-2 p-2 bg-rose-900/50 text-rose-300 text-center rounded text-sm border border-rose-700">
                  Lỗi Audio: {ttsError}
              </div>
         )}
-
-        <div className="py-4 border-y border-[var(--theme-border)]">
-          {navButtons('top')}
-        </div>
 
         {isEditingContent ? (
             <div className="mt-6">
@@ -1134,6 +1121,11 @@ const ChapterContent: React.FC<ChapterContentProps> = ({
                 lineHeight: 1.8,
             }}
             >
+                <div className="flex justify-between items-start mb-6 border-b border-[var(--theme-border)] pb-2 opacity-60 hover:opacity-100 transition-opacity">
+                    <h2 className="text-2xl sm:text-3xl font-bold text-[var(--reader-title)]">{chapterTitle}</h2>
+                    {/* Các nút Sửa/Thêm đã được di chuyển lên Header */}
+                </div>
+
             {ttsStatus !== 'idle' && ttsTextChunks.length > 0 ? (
                 ttsTextChunks.map((chunk, index) => {
                     const isActive = index === ttsCurrentChunkIndex;

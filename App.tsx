@@ -697,13 +697,16 @@ const App: React.FC = () => {
   if (story) {
       return (
           <div className="flex flex-col min-h-screen bg-[var(--theme-bg-base)] text-[var(--theme-text-primary)] font-sans transition-colors duration-300 relative">
-              <Header 
-                onOpenApiKeySettings={() => setIsApiKeyModalOpen(true)} 
-                onOpenUpdateModal={() => setIsUpdateModalOpen(true)} 
-                onGoHome={handleBackToMain} 
-                storyTitle={isReadingMode ? story.title : undefined}
-                onOpenSyncModal={() => setIsSyncModalOpen(true)} 
-              />
+              {/* Only show global header if NOT in reading mode */}
+              {!isReadingMode && (
+                  <Header 
+                    onOpenApiKeySettings={() => setIsApiKeyModalOpen(true)} 
+                    onOpenUpdateModal={() => setIsUpdateModalOpen(true)} 
+                    onGoHome={handleBackToMain} 
+                    storyTitle={story.title}
+                    onOpenSyncModal={() => setIsSyncModalOpen(true)} 
+                  />
+              )}
               
               <StoryViewer 
                   story={story}
