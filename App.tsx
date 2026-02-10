@@ -292,17 +292,28 @@ const App: React.FC = () => {
 
           let fullStory = selectedStory;
           
-          // LAZY LOAD: Nếu truyện local chưa có chương (hoặc ít chương), thử tải từ Drive trước
-          if (syncService.isAuthenticated() && (!fullStory.chapters || fullStory.chapters.length === 0)) {
+          // SYNC LOGIC: Check Drive Metadata First
+          // Nếu đã đăng nhập, luôn kiểm tra xem trên Drive có bản cập nhật mới hơn của truyện này không (danh sách chương)
+          // Điều này giúp Máy B nhận được danh sách chương từ Máy A mà không cần cào lại Web.
+          if (syncService.isAuthenticated()) {
               console.log("Checking Drive for story metadata...");
-              const driveStory = await syncService.fetchStoryDetailsFromDrive(fullStory.url);
-              if (driveStory) {
-                  console.log("Loaded story details from Drive.");
-                  fullStory = driveStory;
-                  await dbService.saveStory(fullStory); // Cache lại local
+              try {
+                  const driveStory = await syncService.fetchStoryDetailsFromDrive(fullStory.url);
+                  if (driveStory) {
+                      console.log("Loaded story details from Drive.");
+                      // Merge với thông tin local để đảm bảo nhất quán
+                      fullStory = { ...fullStory, ...driveStory };
+                      await dbService.saveStory(fullStory); // Cache lại local
+                  }
+              } catch (e) {
+                  console.warn("Could not fetch story metadata from Drive, falling back to Web/Local", e);
               }
           }
 
+          // Chỉ fetch từ Web nếu:
+          // 1. Không có chương nào (Local và Drive đều trống)
+          // 2. Hoặc forceFetch được bật
+          // 3. VÀ không phải là truyện Local/Ebook
           const needsFetching = (!fullStory.chapters || fullStory.chapters.length === 0 || forceFetch) 
                                 && fullStory.source !== 'Local' && fullStory.source !== 'Ebook';
           
@@ -341,10 +352,10 @@ const App: React.FC = () => {
 
           await dbService.saveStory(fullStory);
           
-          // DRIVE SYNC: Sau khi có metadata đầy đủ, lưu lên Drive
+          // DRIVE SYNC: Sau khi có metadata đầy đủ (dù từ Web hay Drive), lưu/cập nhật lại lên Drive để đảm bảo đồng bộ
           if (syncService.isAuthenticated()) {
               syncService.saveStoryDetailsToDrive(fullStory).catch(console.error);
-              // Cập nhật index vì có thể có truyện mới
+              // Cập nhật index chính (library_index.json)
               syncService.syncLibraryIndex().catch(console.error);
           }
 
@@ -366,6 +377,7 @@ const App: React.FC = () => {
           window.scrollTo(0, 0);
 
           // TỰ ĐỘNG TẢI NGẦM TOÀN BỘ (Nếu không phải Local/Ebook)
+          // Lưu ý: Logic tải ngầm cũng sẽ ưu tiên lấy từ Drive trước nếu có
           if (fullStory.chapters && fullStory.chapters.length > 0 && fullStory.source !== 'Local' && fullStory.source !== 'Ebook') {
               runBackgroundContentFetcher(fullStory, 0);
           }

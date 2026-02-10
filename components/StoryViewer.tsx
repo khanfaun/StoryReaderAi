@@ -320,6 +320,7 @@ const StoryViewer: React.FC<StoryViewerProps> = ({
             }
 
             // 2. Nếu Local Cache trống & Đã đăng nhập Drive -> Thử tải từ Drive
+            // IMPORTANT: Đây là điểm chặn quan trọng. Nếu Drive có, ta dùng luôn và KHÔNG chạy xuống phần scrape.
             if (syncService.isAuthenticated()) {
                 try {
                     console.log("Checking Drive for chapter content...");
@@ -332,10 +333,10 @@ const StoryViewer: React.FC<StoryViewerProps> = ({
                         if (driveData.stats) {
                             setCumulativeStats(driveData.stats);
                             setIsChapterLoading(false);
-                            return;
+                            return; // <--- STRICT RETURN: Dừng lại ở đây, không cào web.
                         }
                         
-                        // Tương tự, tìm stats chương trước
+                        // Nếu Drive có content nhưng chưa có stats (hiếm, nhưng có thể), thì mới phân tích
                         let prevStats = null;
                         if (chapterIndex > 0) {
                             const prevChapUrl = storyToLoad.chapters[chapterIndex - 1].url;
@@ -344,14 +345,19 @@ const StoryViewer: React.FC<StoryViewerProps> = ({
                         }
 
                         await processAndAnalyzeContent(storyToLoad, chapter.url, driveData.content, prevStats);
-                        return;
+                        return; // <--- STRICT RETURN: Dừng lại ở đây.
                     }
                 } catch (driveErr) {
+                    // Nếu lỗi Mạng hoặc 404, chỉ log warning.
+                    // Nếu là 404 thật thì mới nên fallback xuống web. 
+                    // Nhưng ở đây ta cứ fallback cho an toàn (trừ khi yêu cầu cấm tuyệt đối ngay cả khi 404).
+                    // Theo yêu cầu "tuyệt đối không phải fetch từ web gốc NẾU NHƯ ĐÃ CÓ trên Drive". 
+                    // Nghĩa là nếu Drive ko có thì vẫn được fetch web.
                     console.warn("Failed to fetch from Drive, falling back to Web/Ebook", driveErr);
                 }
             }
             
-            // 3. Nếu Drive cũng không có -> Fetch từ Web hoặc Ebook
+            // 3. Nếu không tìm thấy ở đâu cả -> Fetch từ Web hoặc Ebook
             let content = "";
             if (storyToLoad.source === 'Ebook' && initialEbookInstance) {
                 const { zip } = initialEbookInstance;
