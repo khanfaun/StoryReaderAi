@@ -1,5 +1,6 @@
 
 import React from 'react';
+import { createPortal } from 'react-dom';
 import { CloseIcon, RefreshIcon, EditIcon, PlayIcon, DownloadIcon, CloudIcon } from './icons';
 import DonateSection from './DonateSection';
 
@@ -41,7 +42,7 @@ const UpdateModal: React.FC<UpdateModalProps> = ({ isOpen, onClose }) => {
     }
   ];
 
-  return (
+  return createPortal(
     <div className="sync-modal-overlay animate-fade-in" onClick={onClose} role="dialog" aria-modal="true" aria-labelledby="update-modal-title">
       <div className="sync-modal animate-fade-in-up !max-w-5xl" onClick={(e) => e.stopPropagation()}>
         <header className="sync-modal__header">
@@ -80,7 +81,8 @@ const UpdateModal: React.FC<UpdateModalProps> = ({ isOpen, onClose }) => {
         {/* Footer spacing */}
         <div className="p-2"></div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 };
 

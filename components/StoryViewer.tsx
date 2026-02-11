@@ -19,7 +19,6 @@ import CharacterPanel from './CharacterPanel';
 import ScrollToTopButton from './ScrollToTopButton';
 import CharacterPrimaryPanel from './CharacterPrimaryPanel';
 import ChatPanel from './ChatPanel'; 
-import ApiKeyModal from './ApiKeyModal';
 import ManualImportModal from './ManualImportModal';
 
 interface EbookHandler {
@@ -782,7 +781,6 @@ const StoryViewer: React.FC<StoryViewerProps> = ({
                 />
                 
                 {/* Modals needed during reading */}
-                <ApiKeyModal isOpen={isApiKeyModalOpen} onClose={() => setIsApiKeyModalOpen(false)} onValidateKey={async (k) => { try { await import('../services/geminiService').then(m => m.validateApiKey(k)); return true; } catch(e: any) { return e.message; } }} onDataChange={onDataChange} tokenUsage={tokenUsage} />
                 <ManualImportModal isOpen={manualImportState.isOpen} onClose={() => setManualImportState(prev => ({ ...prev, isOpen: false }))} urlToImport={manualImportState.url} message={manualImportState.message} onFileSelected={handleManualImportFile} />
             </div>
         );

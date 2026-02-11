@@ -1,5 +1,6 @@
 
 import React, { useState, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { isAiStudio } from '../services/apiKeyService';
 import { CloseIcon, SpinnerIcon, EyeIcon, EyeSlashIcon, WrenchScrewdriverIcon, TrashIcon, PlusIcon, CheckIcon } from './icons';
 import * as apiKeyService from '../services/apiKeyService';
@@ -149,7 +150,7 @@ const ApiKeyModal: React.FC<ApiKeyModalProps> = ({ isOpen, onClose, onValidateKe
 
   if (!isOpen) return null;
 
-  return (
+  return createPortal(
     <>
       <div className="sync-modal-overlay" onClick={onClose} role="dialog" aria-modal="true" aria-labelledby="api-key-modal-title">
         <div className="sync-modal max-w-lg" onClick={e => e.stopPropagation()}>
@@ -278,7 +279,8 @@ const ApiKeyModal: React.FC<ApiKeyModalProps> = ({ isOpen, onClose, onValidateKe
       >
         <p>Bạn có chắc muốn xóa vĩnh viễn key <strong className="text-[var(--theme-text-primary)] font-mono">••••••••{keyToDelete?.key.slice(-4)}</strong>?</p>
       </ConfirmationModal>
-    </>
+    </>,
+    document.body
   );
 };
 

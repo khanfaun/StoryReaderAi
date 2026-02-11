@@ -1,5 +1,6 @@
 
 import React, { useEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { CloseIcon } from './icons';
 import SearchBar from './SearchBar';
 
@@ -25,7 +26,7 @@ const MobileSearchModal: React.FC<MobileSearchModalProps> = ({ isOpen, onClose, 
 
   if (!isOpen) return null;
 
-  return (
+  return createPortal(
     <div className="sync-modal-overlay animate-fade-in" onClick={onClose} role="dialog" aria-modal="true" style={{ alignItems: 'flex-start', paddingTop: '4rem' }}>
       <div className="sync-modal animate-fade-in-up w-full max-w-lg mx-4" onClick={(e) => e.stopPropagation()}>
         <header className="sync-modal__header">
@@ -66,7 +67,8 @@ const MobileSearchModal: React.FC<MobileSearchModalProps> = ({ isOpen, onClose, 
           </div>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 };
 

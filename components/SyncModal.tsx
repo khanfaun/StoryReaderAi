@@ -1,5 +1,6 @@
 
 import React, { useState, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { CloseIcon, SpinnerIcon, SyncIcon, CheckIcon, CloudIcon, LogoutIcon } from './icons';
 import { initGoogleDrive, signInToDrive, isAuthenticated, syncLibraryIndex, signOut } from '../services/sync';
 import ConfirmationModal from './ConfirmationModal';
@@ -80,7 +81,7 @@ const SyncModal: React.FC<SyncModalProps> = ({ onClose }) => {
       window.location.reload();
   };
 
-  return (
+  return createPortal(
     <>
     <div className="sync-modal-overlay animate-fade-in" onClick={onClose} role="dialog" aria-modal="true">
       <div className="sync-modal animate-fade-in-up" onClick={(e) => e.stopPropagation()}>
@@ -181,7 +182,8 @@ const SyncModal: React.FC<SyncModalProps> = ({ onClose }) => {
         <p>Bạn có chắc chắn muốn đăng xuất khỏi Google Drive?</p>
         <p className="text-sm text-yellow-500 mt-2">Lưu ý: Sau khi đăng xuất, trang web sẽ được tải lại để đảm bảo dữ liệu hiển thị chính xác.</p>
     </ConfirmationModal>
-    </>
+    </>,
+    document.body
   );
 };
 

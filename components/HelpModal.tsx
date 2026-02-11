@@ -1,4 +1,6 @@
+
 import React from 'react';
+import { createPortal } from 'react-dom';
 import { CloseIcon } from './icons';
 
 interface HelpModalProps {
@@ -11,7 +13,7 @@ const HelpModal: React.FC<HelpModalProps> = ({ isOpen, onClose }) => {
     return null;
   }
 
-  return (
+  return createPortal(
     <div className="sync-modal-overlay animate-fade-in" onClick={onClose} role="dialog" aria-modal="true" aria-labelledby="help-modal-title">
       <div className="sync-modal animate-fade-in-up" onClick={(e) => e.stopPropagation()}>
         <header className="sync-modal__header">
@@ -47,7 +49,8 @@ const HelpModal: React.FC<HelpModalProps> = ({ isOpen, onClose }) => {
             </button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 };
 
