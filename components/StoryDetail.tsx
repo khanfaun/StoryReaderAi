@@ -298,7 +298,7 @@ const StoryDetail: React.FC<StoryDetailProps> = ({
                {story.imageUrl ? (
                   <img src={story.imageUrl} alt={story.title} className="w-full h-full object-cover" />
                ) : (
-                  <div className="w-full h-full bg-slate-800 flex items-center justify-center text-slate-500 text-lg font-bold p-4 text-center">{story.title}</div>
+                  <div className="w-full h-full bg-[var(--theme-bg-base)] flex items-center justify-center text-[var(--theme-text-secondary)] text-lg font-bold p-4 text-center">{story.title}</div>
                )}
           </div>
           <div className="flex-grow">

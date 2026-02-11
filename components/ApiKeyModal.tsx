@@ -184,7 +184,7 @@ const ApiKeyModal: React.FC<ApiKeyModalProps> = ({ isOpen, onClose, onValidateKe
                         id={`key-${keyInfo.id}`}
                         checked={activeKeyId === keyInfo.id}
                         onChange={() => handleSetActive(keyInfo.id)}
-                        className="w-4 h-4 text-[var(--theme-accent-primary)] bg-gray-700 border-gray-600 focus:ring-[var(--theme-accent-primary)] focus:ring-2"
+                        className="w-4 h-4 text-[var(--theme-accent-primary)] bg-[var(--theme-bg-base)] border-gray-500 focus:ring-[var(--theme-accent-primary)] focus:ring-2"
                         />
                         <label htmlFor={`key-${keyInfo.id}`} className="flex-grow cursor-pointer overflow-hidden">
                         <p className="font-mono text-sm text-[var(--theme-text-primary)]">Key ••••••••{keyInfo.key.slice(-4)}</p>
@@ -261,7 +261,7 @@ const ApiKeyModal: React.FC<ApiKeyModalProps> = ({ isOpen, onClose, onValidateKe
 
             {inAiStudio && (
                 <div className="mt-6 pt-4 border-t border-[var(--theme-border)]">
-                    <button onClick={handleLoadDemo} disabled={isLoadingDemo} className="w-full flex items-center justify-center gap-2 py-2 px-4 bg-slate-700/30 hover:bg-slate-700/50 text-[var(--theme-text-secondary)] hover:text-[var(--theme-text-primary)] rounded-md transition-colors text-xs border border-[var(--theme-border)] border-dashed hover:border-solid">
+                    <button onClick={handleLoadDemo} disabled={isLoadingDemo} className="w-full flex items-center justify-center gap-2 py-2 px-4 bg-[var(--theme-bg-surface)] hover:brightness-110 text-[var(--theme-text-secondary)] hover:text-[var(--theme-text-primary)] rounded-md transition-colors text-xs border border-[var(--theme-border)] border-dashed hover:border-solid">
                         {isLoadingDemo ? <SpinnerIcon className="w-3 h-3 animate-spin" /> : <WrenchScrewdriverIcon className="w-3 h-3" />}
                         <span>Nạp dữ liệu Demo (Dành cho Dev)</span>
                     </button>

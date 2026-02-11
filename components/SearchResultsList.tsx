@@ -49,11 +49,11 @@ const SearchResultItem: React.FC<SearchResultItemProps> = ({ story, onSelectStor
         href={story.url}
         target="_blank"
         rel="noopener noreferrer"
-        className="bg-slate-800/50 border border-dashed border-slate-600 rounded-md shadow-sm overflow-hidden flex flex-col cursor-pointer transition-all transform hover:scale-[1.02] hover:border-[var(--theme-accent-primary)] group h-full"
+        className="bg-[var(--theme-bg-surface)] border border-dashed border-[var(--theme-border)] rounded-md shadow-sm overflow-hidden flex flex-col cursor-pointer transition-all transform hover:scale-[1.02] hover:border-[var(--theme-accent-primary)] group h-full"
         aria-label={`Tìm kiếm '${story.title}' trên ${story.source}`}
       >
-        <div className="relative w-full aspect-[2/3] flex flex-col items-center justify-center p-2 bg-slate-800">
-           <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6 text-slate-500 group-hover:text-[var(--theme-accent-primary)] transition-colors" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+        <div className="relative w-full aspect-[2/3] flex flex-col items-center justify-center p-2 bg-[var(--theme-bg-base)]">
+           <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6 text-[var(--theme-text-secondary)] group-hover:text-[var(--theme-accent-primary)] transition-colors" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
             </svg>
             <p className="text-[10px] text-center text-[var(--theme-text-secondary)] mt-1">Mở link ngoài</p>
@@ -103,7 +103,7 @@ const SearchResultItem: React.FC<SearchResultItemProps> = ({ story, onSelectStor
       onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && onSelectStory(story)}
     >
       {/* Cover Image Container with Aspect Ratio 2:3 */}
-      <div className="relative w-full aspect-[2/3] bg-slate-800 overflow-hidden">
+      <div className="relative w-full aspect-[2/3] bg-[var(--theme-bg-base)] overflow-hidden">
         {story.imageUrl ? (
             <img 
             src={story.imageUrl} 
@@ -112,7 +112,7 @@ const SearchResultItem: React.FC<SearchResultItemProps> = ({ story, onSelectStor
             loading="lazy"
             />
         ) : (
-            <div className="absolute top-0 left-0 w-full h-full flex items-center justify-center bg-slate-700 text-slate-500 font-bold text-[10px] p-1 text-center select-none">
+            <div className="absolute top-0 left-0 w-full h-full flex items-center justify-center bg-[var(--theme-bg-base)] text-[var(--theme-text-secondary)] font-bold text-[10px] p-1 text-center select-none border-b border-[var(--theme-border)]">
                 {story.title}
             </div>
         )}

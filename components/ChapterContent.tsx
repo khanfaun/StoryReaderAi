@@ -752,7 +752,7 @@ const ChapterContent: React.FC<ChapterContentProps> = ({
   return (
     <div className="flex flex-col min-h-screen">
       {/* --- CHAPTER STICKY HEADER --- */}
-      <div className="sticky top-0 z-[60] h-16 bg-[var(--theme-bg-surface)]/95 backdrop-blur border-b border-[var(--theme-border)] shadow-md flex items-center justify-between px-4 transition-transform duration-300 transform translate-y-0">
+      <div className="sticky top-0 z-[60] h-16 bg-[var(--theme-bg-surface)] border-b border-[var(--theme-border)] shadow-lg flex items-center justify-between px-4 transition-transform duration-300 transform translate-y-0">
           <button onClick={onBack} disabled={isBusy && !isAnalyzing} className="p-2 text-[var(--theme-text-secondary)] hover:text-[var(--theme-text-primary)] hover:bg-[var(--theme-border)] rounded-full transition-colors disabled:opacity-50"><svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M10 19l-7-7m0 0l7-7m-7 7h18" /></svg></button>
           <div className="flex-1 text-center px-4 overflow-hidden"><h2 className="text-sm font-bold text-[var(--theme-text-primary)] truncate">{story.title}</h2><p className="text-xs text-[var(--theme-text-secondary)] truncate">{story.chapters?.[currentChapterIndex]?.title ?? 'Đang tải...'}</p></div>
           <div className="flex items-center gap-1">
@@ -804,7 +804,7 @@ const ChapterContent: React.FC<ChapterContentProps> = ({
         </div>
       )}
       {popoverTarget && autoScrollPopover}
-      <div className={`fixed bottom-0 left-0 right-0 z-40 py-4 bg-[var(--theme-bg-base)]/95 backdrop-blur-lg border-t border-[var(--theme-border)] shadow-lg transition-transform duration-300 ${isNavBarVisible ? 'translate-y-0' : 'translate-y-full'}`}>{navButtons('bottom')}</div>
+      <div className={`fixed bottom-0 left-0 right-0 z-40 py-4 bg-[var(--theme-bg-surface)] border-t border-[var(--theme-border)] shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.3)] transition-transform duration-300 ${isNavBarVisible ? 'translate-y-0' : 'translate-y-full'}`}>{navButtons('bottom')}</div>
       <ChapterListModal isOpen={isListVisible} onClose={() => setIsListVisible(false)} chapters={story.chapters ?? []} currentChapterUrl={story.chapters?.[currentChapterIndex]?.url} onSelectChapter={handleChapterSelectAndClose} readChapters={readChapters} />
       <SettingsPanel isOpen={isSettingsVisible} onClose={() => setIsSettingsVisible(false)} settings={settings} onSettingsChange={onSettingsChange} availableSystemVoices={availableSystemVoices} mode="default" onToggleTts={handleTtsButtonClick} onToggleAutoScroll={(target) => handleAutoScrollButtonClick(target)} isTtsActive={ttsStatus === 'playing' || ttsStatus === 'paused' || isAudioPlayerVisible} isAutoScrollActive={isAutoScrolling} />
       <SettingsPanel isOpen={isTtsSetupVisible} onClose={() => setIsTtsSetupVisible(false)} settings={settings} onSettingsChange={onSettingsChange} availableSystemVoices={availableSystemVoices} mode="tts-setup" onConfirmTts={handleConfirmTtsSetup} />

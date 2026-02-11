@@ -59,7 +59,7 @@ const UpdateModal: React.FC<UpdateModalProps> = ({ isOpen, onClose }) => {
               <ul className="space-y-10">
                 {features.map(feature => (
                   <li key={feature.title} className="flex items-start gap-4">
-                    <div className="flex-shrink-0 bg-slate-800 rounded-full p-2 border border-[var(--theme-border)]">{feature.icon}</div>
+                    <div className="flex-shrink-0 bg-[var(--theme-bg-base)] rounded-full p-2 border border-[var(--theme-border)]">{feature.icon}</div>
                     <div>
                       <h3 className="font-bold text-lg text-[var(--theme-accent-primary)] mb-1">{feature.title}</h3>
                       <p className="text-sm text-[var(--theme-text-secondary)] leading-relaxed">{feature.description}</p>

@@ -292,7 +292,7 @@ const RelationshipGraph: React.FC<RelationshipGraphProps> = ({ relations, mainCh
                 </div>
             </div>
             {focusedCharacter && focusedCharacter !== mainCharacterName && (
-                 <button onClick={() => setFocusedCharacter(mainCharacterName)} className="mt-4 px-4 py-2 text-sm bg-slate-600 text-white font-semibold rounded-lg hover:bg-slate-500 transition-all">
+                 <button onClick={() => setFocusedCharacter(mainCharacterName)} className="mt-4 px-4 py-2 text-sm bg-[var(--theme-bg-base)] border border-[var(--theme-border)] text-[var(--theme-text-primary)] font-semibold rounded-lg hover:border-[var(--theme-accent-primary)] transition-all">
                     Xem nhân vật chính
                 </button>
             )}
@@ -532,7 +532,7 @@ const CharacterPanel: React.FC<CharacterPanelProps> = ({
                     )}
                     {chatMessages?.map((msg, index) => (
                         <div key={index} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-                            <div className={`max-w-[85%] px-3 py-2 rounded-2xl text-sm ${msg.role === 'user' ? 'bg-[#f59e0b] text-white' : 'bg-[var(--theme-bg-base)] text-[var(--theme-text-primary)] border border-[var(--theme-border)]'}`}>
+                            <div className={`max-w-[85%] px-3 py-2 rounded-2xl text-sm ${msg.role === 'user' ? 'bg-[var(--theme-accent-primary)] text-white' : 'bg-[var(--theme-bg-base)] text-[var(--theme-text-primary)] border border-[var(--theme-border)]'}`}>
                                 <p className="whitespace-pre-wrap break-words">{msg.content}</p>
                             </div>
                         </div>
@@ -540,7 +540,7 @@ const CharacterPanel: React.FC<CharacterPanelProps> = ({
                     {isChatLoading && (
                         <div className="flex justify-start">
                             <div className="px-3 py-2 rounded-2xl bg-[var(--theme-bg-base)] border border-[var(--theme-border)] flex items-center">
-                                <SpinnerIcon className="animate-spin w-4 h-4 text-[#f59e0b]" />
+                                <SpinnerIcon className="animate-spin w-4 h-4 text-[var(--theme-accent-primary)]" />
                             </div>
                         </div>
                     )}
@@ -551,13 +551,13 @@ const CharacterPanel: React.FC<CharacterPanelProps> = ({
                         value={chatInput}
                         onChange={(e) => setChatInput(e.target.value)}
                         placeholder="Hỏi AI..." 
-                        className="flex-grow bg-[var(--theme-bg-base)] border border-[var(--theme-border)] rounded-full px-4 py-2 text-sm text-[var(--theme-text-primary)] focus:outline-none focus:ring-1 focus:ring-[#f59e0b] disabled:opacity-50"
+                        className="flex-grow bg-[var(--theme-bg-base)] border border-[var(--theme-border)] rounded-full px-4 py-2 text-sm text-[var(--theme-text-primary)] focus:outline-none focus:ring-1 focus:ring-[var(--theme-accent-primary)] disabled:opacity-50"
                         disabled={isChatLoading}
                     />
                     <button 
                         type="submit" 
                         disabled={!chatInput.trim() || isChatLoading}
-                        className="w-9 h-9 rounded-full bg-[#f59e0b] hover:bg-[#d97706] text-white flex items-center justify-center disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                        className="w-9 h-9 rounded-full bg-[var(--theme-accent-primary)] hover:brightness-110 text-white flex items-center justify-center disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                     >
                         <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-5 h-5 transform rotate-90">
                             <path d="M10.894 2.553a1 1 0 00-1.788 0l-7 14a1 1 0 001.169 1.409l5-1.429A1 1 0 009 15.571V11a1 1 0 112 0v4.571a1 1 0 00.725.962l5 1.428a1 1 0 001.17-1.408l-7-14z" />
@@ -785,10 +785,11 @@ const CharacterPanel: React.FC<CharacterPanelProps> = ({
       if (customColor) {
           if (isActive) {
               styleClass = 'text-white';
-              inlineStyle = { backgroundColor: customColor };
+              inlineStyle = { backgroundColor: 'var(--theme-accent-primary)' }; // Use theme accent instead of hardcoded
           } else {
               styleClass = 'hover:bg-opacity-20';
-              inlineStyle = { color: customColor, backgroundColor: `${customColor}1A` }; // 10% opacity
+              // Use theme text color for inactive state instead of customColor to blend better
+              inlineStyle = { color: 'var(--theme-text-secondary)', backgroundColor: 'transparent' }; 
           }
       } else {
           styleClass = isActive ? 'bg-[var(--theme-accent-primary)] text-white' : 'text-[var(--theme-text-secondary)] hover:bg-[var(--theme-bg-base)]';
@@ -854,7 +855,7 @@ const CharacterPanel: React.FC<CharacterPanelProps> = ({
                <TabButton tab="factions" label="Thế Lực" />
                <TabButton tab="locations" label="Địa Điểm" />
                <TabButton tab="data" label="Dữ liệu" />
-               <TabButton tab="chat" label="Chat AI" customColor="#f59e0b" />
+               <TabButton tab="chat" label="Chat AI" customColor="var(--theme-accent-primary)" />
              </>
           ) : (
             <>
@@ -868,7 +869,7 @@ const CharacterPanel: React.FC<CharacterPanelProps> = ({
               <TabButton tab="factions" label="Thế Lực" />
               <TabButton tab="locations" label="Địa Điểm" />
               <TabButton tab="data" label="Dữ liệu" />
-              <TabButton tab="chat" label="Chat AI" customColor="#f59e0b" />
+              <TabButton tab="chat" label="Chat AI" customColor="var(--theme-accent-primary)" />
             </>
           )}
         </div>
