@@ -109,6 +109,7 @@ export interface ReadingSettings {
   highlightColor: string;
   fontSize: number;
   fontFamily: string;
+  pcLayout: 'default' | 'stacked-left' | 'stacked-right' | 'minimal'; // New PC Layout option
   ttsSettings: {
     voice: string; // Stores voiceURI for Web Speech API
     playbackRate: number;

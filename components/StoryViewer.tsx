@@ -71,6 +71,12 @@ interface StoryViewerProps {
   // Header Handlers (Passed from App)
   onOpenUpdateModal: () => void;
   onOpenSyncModal: () => void;
+  
+  // Add Chapter Trigger
+  onOpenAddChapterModal?: () => void;
+
+  // New Prop: Global Header Visibility State
+  isHeaderVisible?: boolean;
 }
 
 interface ManualImportState {
@@ -96,7 +102,8 @@ const StoryViewer: React.FC<StoryViewerProps> = ({
     setIsBottomNavForReadingVisible, isBottomNavForReadingVisible, onTokenUsageUpdate,
     isApiKeyModalOpen, setIsApiKeyModalOpen, tokenUsage, onDataChange, onReadingModeChange,
     onSearch, isSearchLoading, onOpenHelpModal, onCreateStory,
-    onOpenUpdateModal, onOpenSyncModal
+    onOpenUpdateModal, onOpenSyncModal, onOpenAddChapterModal,
+    isHeaderVisible = true
 }) => {
     // Local State specific to the active story session
     const [selectedChapterIndex, setSelectedChapterIndex] = useState<number | null>(initialChapterIndex ?? null);
@@ -606,29 +613,7 @@ const StoryViewer: React.FC<StoryViewerProps> = ({
         });
     };
 
-    const handleCreateChapter = async (targetStory: Story, title: string, content: string) => {
-        if (targetStory.source !== 'Local' && targetStory.source !== 'Ebook') {
-            setError("Chỉ có thể thêm chương cho truyện tự tạo hoặc Ebook.");
-            return;
-        }
-        const newChapter: Chapter = { title, url: `${targetStory.url}/chapter-${Date.now()}` };
-        const updatedChapters = [...(targetStory.chapters || []), newChapter];
-        const updatedStory = { ...targetStory, chapters: updatedChapters };
-        
-        try {
-            await setCachedChapter(targetStory.url, newChapter.url, { content, stats: null });
-            await dbService.saveStory(updatedStory);
-            onUpdateStory(updatedStory);
-            
-            // Sync to Drive
-            if(syncService.isAuthenticated()) {
-                syncService.saveStoryDetailsToDrive(updatedStory).catch(console.error);
-                syncService.saveChapterContentToDrive(targetStory.url, newChapter.url, { content, stats: null }).catch(console.error);
-            }
-        } catch (e) {
-            setError(`Lỗi tạo chương: ${(e as Error).message}`);
-        }
-    };
+    // handleCreateChapter logic removed here, handled by App via onUpdateStory
 
     const handleManualImportFile = async (file: File) => {
         try {
@@ -660,17 +645,73 @@ const StoryViewer: React.FC<StoryViewerProps> = ({
     }
 
     if (isReading && story.chapters) {
+        const layout = settings.pcLayout || 'default';
+        let gridClass = "grid grid-cols-1 w-full px-4 sm:px-8 py-8 sm:py-12 flex-grow ";
+        let leftSidebarContent: React.ReactNode = null;
+        let rightSidebarContent: React.ReactNode = null;
+
+        const PrimaryPanel = (
+            <CharacterPrimaryPanel 
+                stats={cumulativeStats} 
+                isAnalyzing={isAnalyzing} 
+                onStatsChange={handleStatsChange} 
+                onReanalyze={handleFullReanalysis} 
+                onStopAnalysis={handleStopAnalysis} 
+            />
+        );
+
+        const WorldPanel = (
+            <CharacterPanel 
+                stats={cumulativeStats} 
+                story={story}
+                isAnalyzing={isAnalyzing} 
+                isOpen={true} 
+                onClose={() => {}} 
+                isSidebar={true} 
+                onStatsChange={handleStatsChange} 
+                onDataLoaded={onDataChange} 
+                onReanalyze={handleFullReanalysis} 
+                onStopAnalysis={handleStopAnalysis}
+                chatMessages={chatMessages}
+                onSendMessage={handleSendMessage}
+                isChatLoading={isChatLoading} 
+            />
+        );
+
+        // Define layout structure based on settings
+        if (layout === 'default') {
+            gridClass += "xl:grid-cols-[24rem_minmax(0,1fr)_24rem] 2xl:grid-cols-[28rem_minmax(0,1fr)_28rem] xl:gap-8";
+            leftSidebarContent = PrimaryPanel;
+            rightSidebarContent = WorldPanel;
+        } else if (layout === 'stacked-left') {
+            gridClass += "xl:grid-cols-[24rem_minmax(0,1fr)] 2xl:grid-cols-[28rem_minmax(0,1fr)] xl:gap-8";
+            leftSidebarContent = (
+                <div className="flex flex-col gap-6">
+                    {PrimaryPanel}
+                    {WorldPanel}
+                </div>
+            );
+        } else if (layout === 'stacked-right') {
+            gridClass += "xl:grid-cols-[minmax(0,1fr)_24rem] 2xl:grid-cols-[minmax(0,1fr)_28rem] xl:gap-8";
+            rightSidebarContent = (
+                <div className="flex flex-col gap-6">
+                    {PrimaryPanel}
+                    {WorldPanel}
+                </div>
+            );
+        } else {
+            // 'minimal' layout - uses mobile/tablet logic (1 column), panels are hidden
+            gridClass += "xl:grid-cols-1"; 
+        }
+
         return (
-            <div className="grid grid-cols-1 xl:grid-cols-[24rem_minmax(0,1fr)_24rem] 2xl:grid-cols-[28rem_minmax(0,1fr)_28rem] xl:gap-8 w-full px-4 sm:px-8 py-8 sm:py-12 flex-grow">
-                <aside className="hidden xl:block sticky top-20 self-start transition-all duration-300">
-                    <CharacterPrimaryPanel 
-                        stats={cumulativeStats} 
-                        isAnalyzing={isAnalyzing} 
-                        onStatsChange={handleStatsChange} 
-                        onReanalyze={handleFullReanalysis} 
-                        onStopAnalysis={handleStopAnalysis} 
-                    />
-                </aside>
+            <div className={gridClass}>
+                {leftSidebarContent && (
+                    <aside className="hidden xl:block sticky top-20 self-start transition-all duration-300 max-h-[calc(100vh-6rem)] overflow-y-auto custom-scrollbar pr-2">
+                        {leftSidebarContent}
+                    </aside>
+                )}
+                
                 <div className="min-w-0">
                     <ChapterContent
                         story={story} currentChapterIndex={selectedChapterIndex!} content={chapterContent || ''}
@@ -680,7 +721,7 @@ const StoryViewer: React.FC<StoryViewerProps> = ({
                         cumulativeStats={cumulativeStats} onStatsChange={handleStatsChange}
                         onContentUpdate={handleUpdateChapterContent} onRewrite={handleRewriteChapter}
                         isBusy={isChapterLoading || isAnalyzing || isRewriting || ttsState.status === 'loading'}
-                        isAnalyzing={isAnalyzing} onCreateChapter={handleCreateChapter}
+                        isAnalyzing={isAnalyzing} onCreateChapter={undefined} // Removed internal create, handled via + button props
                         onTtsRequest={handleTtsRequest} onTtsStop={cleanupTts}
                         onTtsStatusChange={handleTtsStatusChange} onTtsChunkChange={handleTtsChunkChange}
                         ttsStatus={ttsState.status} ttsError={ttsState.error}
@@ -699,28 +740,23 @@ const StoryViewer: React.FC<StoryViewerProps> = ({
                         onSearch={onSearch}
                         isSearchLoading={isSearchLoading}
                         onOpenHelpModal={onOpenHelpModal}
+                        // Layout prop
+                        pcLayout={layout}
+                        // Pass create modal trigger
+                        onOpenAddChapterModal={onOpenAddChapterModal}
+                        // Pass Global Header Visibility
+                        isMainHeaderVisible={isHeaderVisible}
                     />
                 </div>
-                <aside className="hidden xl:block sticky top-20 self-start transition-all duration-300">
-                    <CharacterPanel 
-                        stats={cumulativeStats} 
-                        story={story}
-                        isAnalyzing={isAnalyzing} 
-                        isOpen={true} 
-                        onClose={() => {}} 
-                        isSidebar={true} 
-                        onStatsChange={handleStatsChange} 
-                        onDataLoaded={onDataChange} 
-                        onReanalyze={handleFullReanalysis} 
-                        onStopAnalysis={handleStopAnalysis}
-                        chatMessages={chatMessages}
-                        onSendMessage={handleSendMessage}
-                        isChatLoading={isChatLoading} 
-                    />
-                </aside>
 
-                {/* Mobile Floating Panels */}
-                <div className="xl:hidden">
+                {rightSidebarContent && (
+                    <aside className="hidden xl:block sticky top-20 self-start transition-all duration-300 max-h-[calc(100vh-6rem)] overflow-y-auto custom-scrollbar pl-2">
+                        {rightSidebarContent}
+                    </aside>
+                )}
+
+                {/* Mobile/Tablet Floating Panels OR Minimal PC Layout Panels */}
+                <div className={layout === 'minimal' ? '' : 'xl:hidden'}>
                     <CharacterPanel 
                         isOpen={isPanelVisible} 
                         onClose={() => setIsPanelVisible(false)} 
@@ -754,12 +790,12 @@ const StoryViewer: React.FC<StoryViewerProps> = ({
 
     // Detail View
     return (
-        <div className="max-w-screen-2xl mx-auto px-4 py-8 sm:py-12 flex-grow">
+        <div className="max-w-screen-2xl mx-auto px-4 py-8 sm:py-12 flex-grow mt-16">
             <StoryDetail 
                 story={story} 
                 onSelectChapter={handleSelectChapter} readChapters={readChapters} lastReadChapterIndex={selectedChapterIndex} 
                 onBack={onBack} onUpdateStory={onUpdateStory} onDeleteStory={onDeleteStory}
-                onDeleteChapterContent={dbService.deleteChapterData} onCreateChapter={handleCreateChapter}
+                onDeleteChapterContent={dbService.deleteChapterData}
                 isBackgroundLoading={false}
                 onStartDownload={onStartDownloadExport}
                 downloadProgress={backgroundDownloads[story.url]}

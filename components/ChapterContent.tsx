@@ -2,7 +2,6 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo, useLayoutEffect } from 'react';
 import type { Story, Chapter, ReadingSettings, CharacterStats } from '../types';
 import ChapterListModal from './ChapterListModal';
-import ChapterEditModal from './ChapterEditModal';
 import SettingsPanel from './SettingsPanel';
 import EntityTooltip from './EntityTooltip';
 import { ListIcon, EditIcon, SparklesIcon, SpinnerIcon, PlusIcon, PlayIcon, PauseIcon, StopIcon, CloseIcon, BarsIcon, CogIcon, SlidersIcon, BackwardStepIcon, ForwardStepIcon, VolumeHighIcon, UserIcon, ClipboardIcon, BookmarkIcon, BookmarkSlashIcon } from './icons';
@@ -63,6 +62,15 @@ interface ChapterContentProps {
   // Bookmark
   isBookmarked: boolean;
   onToggleBookmark: () => void;
+  
+  // Layout Props
+  pcLayout?: 'default' | 'stacked-left' | 'stacked-right' | 'minimal';
+
+  // Modal Trigger from Parent
+  onOpenAddChapterModal?: () => void;
+
+  // Header Visibility State
+  isMainHeaderVisible?: boolean;
 }
 
 // Helper format thời gian mm:ss
@@ -87,7 +95,10 @@ const ChapterContent: React.FC<ChapterContentProps> = ({
     onSavePosition,
     onOpenApiKeySettings, onOpenUpdateModal, onOpenSyncModal, onGoHome,
     onSearch, isSearchLoading, onOpenHelpModal,
-    isBookmarked, onToggleBookmark
+    isBookmarked, onToggleBookmark,
+    pcLayout = 'default',
+    onOpenAddChapterModal,
+    isMainHeaderVisible = true
 }) => {
   const [isListVisible, setIsListVisible] = useState(false);
   const [isNavBarVisible, setIsNavBarVisible] = useState(true);
@@ -110,9 +121,6 @@ const ChapterContent: React.FC<ChapterContentProps> = ({
   const [editableContent, setEditableContent] = useState(content);
   const [isRewriting, setIsRewriting] = useState(false);
   
-  // Add Chapter State
-  const [isAddChapterModalOpen, setIsAddChapterModalOpen] = useState(false);
-
   // State cho chức năng tự động cuộn
   const [popoverTarget, setPopoverTarget] = useState<'top' | 'bottom' | null>(null);
   const [autoScrollSpeed, setAutoScrollSpeed] = useState(1);
@@ -529,9 +537,7 @@ const ChapterContent: React.FC<ChapterContentProps> = ({
       }
   };
   
-  const handleConfirmAddChapter = async (title: string, newContent: string) => {
-      if (onCreateChapter) await onCreateChapter(story, title, newContent);
-  };
+  // No internal create chapter modal anymore
   
   const handleTtsButtonClick = () => {
       if (isAudioPlayerVisible) {
@@ -737,7 +743,10 @@ const ChapterContent: React.FC<ChapterContentProps> = ({
           <button onClick={onPrev} disabled={isFirstChapter || (isBusy && !isAnalyzing)} className="whitespace-nowrap bg-[var(--theme-bg-surface)] brightness-125 hover:brightness-150 text-[var(--theme-text-primary)] font-bold text-xs sm:text-sm py-2 px-3 sm:px-4 rounded-lg transition-all duration-300 disabled:opacity-50"><span className="md:hidden"><BackwardStepIcon className="w-6 h-6" /></span><span className="hidden md:inline">Chương trước</span></button>
           <button onClick={() => setIsListVisible(true)} disabled={isBusy && !isAnalyzing} className="flex-shrink-0 bg-[var(--theme-text-primary)] text-[var(--theme-bg-surface)] hover:brightness-90 font-bold p-2 rounded-lg transition-all duration-300 disabled:opacity-50"><ListIcon className="h-6 w-6" /></button>
           <button onClick={onNext} disabled={isLastChapter || (isBusy && !isAnalyzing)} className="whitespace-nowrap bg-[var(--theme-bg-surface)] brightness-125 hover:brightness-150 text-[var(--theme-text-primary)] font-bold text-xs sm:text-sm py-2 px-3 sm:px-4 rounded-lg transition-all duration-300 disabled:opacity-50"><span className="md:hidden"><ForwardStepIcon className="w-6 h-6" /></span><span className="hidden md:inline">Chương sau</span></button>
-          <button onClick={onToggleStats} disabled={isBusy && !isAnalyzing} className="flex-shrink-0 xl:hidden text-white font-bold p-2 rounded-lg transition-all duration-300 disabled:opacity-50 border" style={{ backgroundColor: '#8170ff', borderColor: '#8170ff' }}><UserIcon className="h-6 w-6" /></button>
+          
+          {/* Toggle Stats Button: Hidden on XL unless in 'minimal' layout */}
+          <button onClick={onToggleStats} disabled={isBusy && !isAnalyzing} className={`flex-shrink-0 text-white font-bold p-2 rounded-lg transition-all duration-300 disabled:opacity-50 border ${pcLayout === 'minimal' ? '' : 'xl:hidden'}`} style={{ backgroundColor: '#8170ff', borderColor: '#8170ff' }}><UserIcon className="h-6 w-6" /></button>
+          
           <div className="hidden md:flex items-center gap-2 pl-2 sm:pl-3">
              <button onClick={handleTtsButtonClick} className={`flex-shrink-0 text-white p-2 rounded-lg transition-colors duration-200 bg-[var(--theme-accent-primary)] hover:brightness-110 disabled:opacity-50`} disabled={isRewriting}>{ttsStatus === 'loading' ? <SpinnerIcon className="h-6 w-6 animate-spin" /> : <PlayIcon className="h-6 w-6" />}</button>
           </div>
@@ -751,19 +760,22 @@ const ChapterContent: React.FC<ChapterContentProps> = ({
 
   return (
     <div className="flex flex-col min-h-screen">
-      {/* --- CHAPTER STICKY HEADER --- */}
-      <div className="sticky top-0 z-[60] h-16 bg-[var(--theme-bg-surface)] border-b border-[var(--theme-border)] shadow-lg flex items-center justify-between px-4 transition-transform duration-300 transform translate-y-0">
+      {/* --- CHAPTER HEADER (FIXED BELOW MAIN HEADER) --- */}
+      {/* Dynamic top position based on Main Header visibility */}
+      <div className={`fixed left-0 right-0 z-[100] h-16 bg-[var(--theme-bg-surface)] border-b border-[var(--theme-border)] shadow-lg flex items-center justify-between px-4 transition-all duration-300 ${isMainHeaderVisible ? 'top-16' : 'top-0'}`}>
           <button onClick={onBack} disabled={isBusy && !isAnalyzing} className="p-2 text-[var(--theme-text-secondary)] hover:text-[var(--theme-text-primary)] hover:bg-[var(--theme-border)] rounded-full transition-colors disabled:opacity-50"><svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M10 19l-7-7m0 0l7-7m-7 7h18" /></svg></button>
           <div className="flex-1 text-center px-4 overflow-hidden"><h2 className="text-sm font-bold text-[var(--theme-text-primary)] truncate">{story.title}</h2><p className="text-xs text-[var(--theme-text-secondary)] truncate">{story.chapters?.[currentChapterIndex]?.title ?? 'Đang tải...'}</p></div>
           <div className="flex items-center gap-1">
               <button onClick={onToggleBookmark} className="p-2 text-[var(--theme-text-secondary)] hover:text-[var(--theme-accent-primary)] hover:bg-[var(--theme-border)] rounded-full transition-colors">{isBookmarked ? <BookmarkIcon className="h-6 w-6 text-[var(--theme-accent-primary)]" /> : <BookmarkSlashIcon className="h-6 w-6" />}</button>
               <button onClick={() => { navigator.clipboard.writeText(content).then(() => { setCopySuccess(true); setTimeout(() => setCopySuccess(false), 2000); }); }} className="p-2 text-[var(--theme-text-secondary)] hover:text-[var(--theme-text-primary)] hover:bg-[var(--theme-border)] rounded-full transition-colors relative"><ClipboardIcon className="h-6 w-6" />{copySuccess && <span className="absolute top-10 right-0 bg-green-600 text-white text-[10px] px-2 py-1 rounded shadow-lg animate-fade-in whitespace-nowrap">Đã chép!</span>}</button>
               {onContentUpdate && !isEditingContent && <button onClick={() => setIsEditingContent(true)} disabled={isBusy && !isAnalyzing} className="p-2 text-[var(--theme-text-secondary)] hover:text-[var(--theme-accent-primary)] hover:bg-[var(--theme-border)] rounded-full transition-colors disabled:opacity-50"><EditIcon className="w-6 h-6" /></button>}
-              {onCreateChapter && <button onClick={() => setIsAddChapterModalOpen(true)} disabled={isBusy && !isAnalyzing} className="p-2 text-[var(--theme-text-secondary)] hover:text-green-500 hover:bg-[var(--theme-border)] rounded-full transition-colors disabled:opacity-50"><PlusIcon className="w-6 h-6" /></button>}
+              {onCreateChapter && <button onClick={() => onOpenAddChapterModal?.()} disabled={isBusy && !isAnalyzing} className="p-2 text-[var(--theme-text-secondary)] hover:text-green-500 hover:bg-[var(--theme-border)] rounded-full transition-colors disabled:opacity-50"><PlusIcon className="w-6 h-6" /></button>}
           </div>
       </div>
 
-      <div className="flex-grow bg-[var(--theme-bg-base)] rounded-lg shadow-xl p-4 sm:p-8 lg:p-12 w-full animate-fade-in border border-[var(--theme-border)] pb-24 mt-4 mx-auto max-w-screen-xl">
+      {/* Main Content Area - Added top margin to compensate for fixed headers (Main Header + Chapter Header usually) */}
+      {/* Dynamic top margin: 36 (~144px, 64+64+padding) when both headers visible, 20 (~80px, 64+padding) when only sub-header */}
+      <div className={`flex-grow bg-[var(--theme-bg-base)] rounded-lg shadow-xl p-4 sm:p-8 lg:p-12 w-full animate-fade-in border border-[var(--theme-border)] pb-24 mx-auto max-w-screen-xl transition-all duration-300 ${isMainHeaderVisible ? 'mt-36' : 'mt-20'}`}>
         {ttsError && isAudioPlayerVisible && <div className="my-2 p-2 bg-rose-900/50 text-rose-300 text-center rounded text-sm border border-rose-700">Lỗi Audio: {ttsError}</div>}
         {isEditingContent ? (
             <div className="mt-6">
@@ -808,7 +820,6 @@ const ChapterContent: React.FC<ChapterContentProps> = ({
       <ChapterListModal isOpen={isListVisible} onClose={() => setIsListVisible(false)} chapters={story.chapters ?? []} currentChapterUrl={story.chapters?.[currentChapterIndex]?.url} onSelectChapter={handleChapterSelectAndClose} readChapters={readChapters} />
       <SettingsPanel isOpen={isSettingsVisible} onClose={() => setIsSettingsVisible(false)} settings={settings} onSettingsChange={onSettingsChange} availableSystemVoices={availableSystemVoices} mode="default" onToggleTts={handleTtsButtonClick} onToggleAutoScroll={(target) => handleAutoScrollButtonClick(target)} isTtsActive={ttsStatus === 'playing' || ttsStatus === 'paused' || isAudioPlayerVisible} isAutoScrollActive={isAutoScrolling} />
       <SettingsPanel isOpen={isTtsSetupVisible} onClose={() => setIsTtsSetupVisible(false)} settings={settings} onSettingsChange={onSettingsChange} availableSystemVoices={availableSystemVoices} mode="tts-setup" onConfirmTts={handleConfirmTtsSetup} />
-      <ChapterEditModal isOpen={isAddChapterModalOpen} onClose={() => setIsAddChapterModalOpen(false)} onSave={handleConfirmAddChapter} nextChapterIndex={(story.chapters?.length || 0) + 1} />
     </div>
   );
 };

@@ -2,7 +2,7 @@
 import React, { useState } from 'react';
 import type { ReadingSettings } from '../types';
 import { themePresets } from '../hooks/useReadingSettings';
-import { QuestionMarkCircleIcon, PlayIcon, ChatIcon, StopIcon, PauseIcon, CloseIcon } from './icons';
+import { QuestionMarkCircleIcon, PlayIcon, ChatIcon, StopIcon, PauseIcon, CloseIcon, BarsIcon } from './icons';
 
 interface SettingsPanelProps {
   isOpen: boolean;
@@ -76,6 +76,7 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
       themeMode: 'dark' as const, 
       fontSize: 20, 
       fontFamily: "'Readex Pro', sans-serif", 
+      pcLayout: 'default' as const,
       ttsSettings: { voice: 'vi-VN-HoaiMyNeural', playbackRate: 1, volume: 1, showTtsSetupOnPlay: true } 
   };
 
@@ -194,6 +195,24 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
                             <option value="Verdana, sans-serif">Verdana</option>
                         </select>
                     </div>
+                </div>
+
+                {/* PC Layout Selector - Hidden on mobile */}
+                <div className="hidden md:block">
+                    <label htmlFor="pcLayout" className="block text-xs font-medium text-[var(--theme-text-secondary)] mb-1">
+                        Bố cục đọc (PC)
+                    </label>
+                    <select
+                        id="pcLayout"
+                        value={settings.pcLayout || 'default'}
+                        onChange={e => handleSettingChange('pcLayout', e.target.value as any)}
+                        className="w-full bg-[var(--theme-bg-base)] border border-[var(--theme-border)] rounded-md p-2 text-sm text-[var(--theme-text-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--theme-accent-primary)]"
+                    >
+                        <option value="default">Mặc định (3 Cột: Panel Trái - Truyện - Panel Phải)</option>
+                        <option value="stacked-left">2 Cột (Panel Trái [Gộp] - Truyện)</option>
+                        <option value="stacked-right">2 Cột (Truyện - Panel Phải [Gộp])</option>
+                        <option value="minimal">Tối giản (1 Cột - Ẩn Panel vào nút)</option>
+                    </select>
                 </div>
 
                 {/* Font Size Slider */}

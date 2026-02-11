@@ -24,10 +24,12 @@ import UpdateModal from './components/UpdateModal';
 import HelpModal from './components/HelpModal';
 import ManualImportModal from './components/ManualImportModal';
 import StoryEditModal from './components/StoryEditModal';
+import ChapterEditModal from './components/ChapterEditModal';
 import DownloadModal from './components/DownloadModal';
 import ConfirmationModal from './components/ConfirmationModal';
 import GlobalDownloadManager from './components/GlobalDownloadManager';
 import SyncModal from './components/SyncModal'; 
+import MobileSearchModal from './components/MobileSearchModal';
 import { PlusIcon, StopIcon, SpinnerIcon, CheckIcon, CloseIcon, UploadIcon, DownloadIcon } from './components/icons';
 
 import StoryViewer from './components/StoryViewer';
@@ -111,11 +113,16 @@ const App: React.FC = () => {
   const [isHelpModalOpen, setIsHelpModalOpen] = useState(false);
   const [isSyncModalOpen, setIsSyncModalOpen] = useState(false); 
   
+  // State cho Mobile Search
+  const [isMobileSearchModalOpen, setIsMobileSearchModalOpen] = useState(false);
+
   const [manualImportState, setManualImportState] = useState<ManualImportState>({
       isOpen: false, url: '', message: '', type: 'chapter', source: ''
   });
   
   const [isCreateStoryModalOpen, setIsCreateStoryModalOpen] = useState(false);
+  const [isCreateChapterModalOpen, setIsCreateChapterModalOpen] = useState(false);
+  
   const [isDownloadModalOpen, setIsDownloadModalOpen] = useState(false);
   const [pendingStory, setPendingStory] = useState<Story | null>(null); 
 
@@ -127,6 +134,42 @@ const App: React.FC = () => {
   const [filterTags, setFilterTags] = useState<string[]>([]);
   const [isTagDropdownOpen, setIsTagDropdownOpen] = useState(false);
   const tagDropdownRef = useRef<HTMLDivElement>(null);
+
+  // --- GLOBAL SCROLL / HEADER VISIBILITY LOGIC ---
+  const [isGlobalHeaderVisible, setIsGlobalHeaderVisible] = useState(true);
+  const lastScrollYRef = useRef(0);
+
+  useEffect(() => {
+      // Logic cuộn chỉ hoạt động khi đang đọc truyện (story mode)
+      if (!story) {
+          setIsGlobalHeaderVisible(true);
+          return;
+      }
+
+      const handleScroll = () => {
+          // Nếu không ở chế độ đọc chi tiết (đang ở StoryDetail chẳng hạn), vẫn giữ logic
+          // Nhưng logic này chủ yếu để đồng bộ 2 header trong ChapterContent.
+          if (!isReadingMode) {
+              // Trong trang chi tiết (chưa vào đọc), header cũng có thể autohide
+              // nhưng không cần đồng bộ với sub-header.
+              // Tuy nhiên để trải nghiệm nhất quán, ta dùng chung logic.
+          }
+
+          const currentScrollY = window.scrollY;
+          
+          if (currentScrollY < lastScrollYRef.current || currentScrollY < 50) {
+              setIsGlobalHeaderVisible(true);
+          } else if (currentScrollY > lastScrollYRef.current && currentScrollY > 50) {
+              setIsGlobalHeaderVisible(false);
+          }
+          
+          lastScrollYRef.current = currentScrollY;
+      };
+
+      window.addEventListener('scroll', handleScroll, { passive: true });
+      return () => window.removeEventListener('scroll', handleScroll);
+  }, [story, isReadingMode]);
+
 
   useEffect(() => {
       const handleClickOutside = (event: MouseEvent) => {
@@ -556,6 +599,31 @@ const App: React.FC = () => {
      }
   };
 
+  const handleCreateChapter = async (title: string, content: string) => {
+      if (!story || (story.source !== 'Local' && story.source !== 'Ebook')) {
+          setError("Chỉ có thể thêm chương cho truyện tự tạo hoặc Ebook.");
+          return;
+      }
+      
+      const newChapter: Chapter = { title, url: `${story.url}/chapter-${Date.now()}` };
+      const updatedChapters = [...(story.chapters || []), newChapter];
+      const updatedStory = { ...story, chapters: updatedChapters };
+      
+      try {
+          await setCachedChapter(story.url, newChapter.url, { content, stats: null });
+          await dbService.saveStory(updatedStory);
+          handleUpdateStory(updatedStory);
+          
+          // Sync to Drive
+          if(syncService.isAuthenticated()) {
+              syncService.saveStoryDetailsToDrive(updatedStory).catch(console.error);
+              syncService.saveChapterContentToDrive(story.url, newChapter.url, { content, stats: null }).catch(console.error);
+          }
+      } catch (e) {
+          setError(`Lỗi tạo chương: ${(e as Error).message}`);
+      }
+  };
+
   const handleUpdateStory = async (updatedStory: Story) => {
       try {
           await dbService.saveStory(updatedStory);
@@ -711,7 +779,21 @@ const App: React.FC = () => {
   };
 
   // Main Render Logic
-  const appContentClass = isApiKeyModalOpen || isUpdateModalOpen || isHelpModalOpen || manualImportState.isOpen || isCreateStoryModalOpen || isDownloadModalOpen || isSyncModalOpen ? 'blur-sm pointer-events-none' : '';
+  const appContentClass = isApiKeyModalOpen || isUpdateModalOpen || isHelpModalOpen || manualImportState.isOpen || isCreateStoryModalOpen || isCreateChapterModalOpen || isDownloadModalOpen || isSyncModalOpen || isMobileSearchModalOpen ? 'blur-sm pointer-events-none' : '';
+
+  // Render Search Bar for Header (Desktop Only)
+  const renderHeaderSearch = () => (
+      <SearchBar 
+          onSearch={handleSearch} 
+          isLoading={isDataLoading} 
+          onOpenHelpModal={() => setIsHelpModalOpen(true)}
+          onAddStory={() => setIsCreateStoryModalOpen(true)}
+          // Only show Add Chapter when in Story Detail mode (story is set but not reading content) or if in reading mode but user wants quick access
+          // Since the request is to "replace the button in detail page", we show it when !isReadingMode if story is set.
+          // Or specifically for local stories.
+          onAddChapter={story && !isReadingMode && (story.source === 'Local' || story.source === 'Ebook') ? () => setIsCreateChapterModalOpen(true) : undefined}
+      />
+  );
 
   if (story) {
       return (
@@ -722,10 +804,13 @@ const App: React.FC = () => {
                 onOpenUpdateModal={() => setIsUpdateModalOpen(true)} 
                 onGoHome={handleBackToMain} 
                 onOpenSyncModal={() => setIsSyncModalOpen(true)} 
-              />
-              <div className="container mx-auto px-4 py-4">
-                  <SearchBar onSearch={handleSearch} isLoading={isDataLoading} onOpenHelpModal={() => setIsHelpModalOpen(true)} />
-              </div>
+                isVisible={isGlobalHeaderVisible} 
+                // Enable mobile buttons
+                onOpenMobileSearch={() => setIsMobileSearchModalOpen(true)}
+                onCreateStory={() => setIsCreateStoryModalOpen(true)}
+              >
+                  {renderHeaderSearch()}
+              </Header>
               
               <StoryViewer 
                   story={story}
@@ -773,6 +858,10 @@ const App: React.FC = () => {
                   // NEW PROPS PASSED TO STORYVIEWER
                   onOpenUpdateModal={() => setIsUpdateModalOpen(true)}
                   onOpenSyncModal={() => setIsSyncModalOpen(true)}
+                  onOpenAddChapterModal={() => setIsCreateChapterModalOpen(true)}
+                  
+                  // Pass Global Header Visibility State
+                  isHeaderVisible={isGlobalHeaderVisible}
               />
               
               {!isReadingMode && (
@@ -790,12 +879,20 @@ const App: React.FC = () => {
               )}
 
               <StoryEditModal isOpen={isCreateStoryModalOpen} onClose={() => setIsCreateStoryModalOpen(false)} onSave={handleCreateStory} onParseEbook={parseEbookFile} />
+              <ChapterEditModal isOpen={isCreateChapterModalOpen} onClose={() => setIsCreateChapterModalOpen(false)} onSave={handleCreateChapter} nextChapterIndex={(story.chapters?.length || 0) + 1} />
               <DownloadModal isOpen={isDownloadModalOpen} onClose={handleReadWithoutDownload} story={pendingStory || story} onStartDownload={handleStartDownloadWrapper} onDataImported={handleImportDataSuccess} />
               {isSyncModalOpen && <SyncModal onClose={() => setIsSyncModalOpen(false)} />}
               
               <UpdateModal isOpen={isUpdateModalOpen} onClose={handleCloseUpdateModal} />
               <HelpModal isOpen={isHelpModalOpen} onClose={() => setIsHelpModalOpen(false)} />
               <ApiKeyModal isOpen={isApiKeyModalOpen} onClose={handleCloseApiKeyModal} onValidateKey={handleValidateKey} onDataChange={reloadDataFromStorage} tokenUsage={tokenUsage} />
+              
+              <MobileSearchModal 
+                isOpen={isMobileSearchModalOpen} 
+                onClose={() => setIsMobileSearchModalOpen(false)} 
+                onSearch={handleSearch} 
+                isLoading={isDataLoading} 
+              />
           </div>
       )
   }
@@ -834,19 +931,15 @@ const App: React.FC = () => {
             onOpenApiKeySettings={() => setIsApiKeyModalOpen(true)} 
             onOpenUpdateModal={() => setIsUpdateModalOpen(true)} 
             onGoHome={handleBackToMain} 
-            onOpenSyncModal={() => setIsSyncModalOpen(true)} 
-        />
-        <main className="max-w-screen-2xl mx-auto px-4 py-8 sm:py-12 flex-grow mb-16">
-            <div className="mb-8 flex flex-col sm:flex-row gap-4 items-stretch sm:items-center">
-                <div className="flex-grow">
-                    <SearchBar onSearch={handleSearch} isLoading={isDataLoading} onOpenHelpModal={() => setIsHelpModalOpen(true)} />
-                </div>
-                 {!searchResults && (
-                    <button onClick={() => setIsCreateStoryModalOpen(true)} className="flex-shrink-0 flex items-center justify-center gap-2 bg-green-600 hover:bg-green-500 text-white font-semibold py-2 px-4 rounded-lg transition-colors h-auto">
-                        <PlusIcon className="w-5 h-5" /> <span className="whitespace-nowrap">Tạo truyện mới</span>
-                    </button>
-                )}
-            </div>
+            onOpenSyncModal={() => setIsSyncModalOpen(true)}
+            // Enable mobile buttons
+            onOpenMobileSearch={() => setIsMobileSearchModalOpen(true)}
+            onCreateStory={() => setIsCreateStoryModalOpen(true)}
+        >
+            {renderHeaderSearch()}
+        </Header>
+
+        <main className="max-w-screen-2xl mx-auto px-4 py-8 sm:py-12 flex-grow mb-16 mt-16">
             
             {(isLoading || isDataLoading) ? (
                 <LoadingSpinner>
@@ -926,7 +1019,7 @@ const App: React.FC = () => {
                             )}
                         </section>
                     )}
-                    {!readingHistory.length && !localStories.length && ( <div className="text-center text-[var(--theme-text-secondary)] py-12"><h2 className="text-2xl mb-4 text-[var(--theme-text-primary)]">Chào mừng đến với Trình Đọc Truyện</h2><p>Sử dụng thanh tìm kiếm để tìm truyện hoặc tạo truyện mới để bắt đầu.</p></div> )}
+                    {!readingHistory.length && !localStories.length && ( <div className="text-center text-[var(--theme-text-secondary)] py-12"><h2 className="text-2xl mb-4 text-[var(--theme-text-primary)]">Chào mừng đến với Ai Storymind</h2><p className="max-w-lg mx-auto">Trang web hỗ trợ phân tích dữ liệu truyện, tóm tắt nội dung và tương tác với nhân vật bằng trí tuệ nhân tạo.</p></div> )}
                 </div>
             )}
         </main>
@@ -952,12 +1045,21 @@ const App: React.FC = () => {
       <ApiKeyModal isOpen={isApiKeyModalOpen} onClose={handleCloseApiKeyModal} onValidateKey={handleValidateKey} onDataChange={reloadDataFromStorage} tokenUsage={tokenUsage} />
       <ManualImportModal isOpen={manualImportState.isOpen} onClose={() => setManualImportState(prev => ({ ...prev, isOpen: false }))} urlToImport={manualImportState.url} message={manualImportState.message} onFileSelected={handleManualImportFile} />
       <StoryEditModal isOpen={isCreateStoryModalOpen} onClose={() => setIsCreateStoryModalOpen(false)} onSave={handleCreateStory} onParseEbook={parseEbookFile} />
+      <ChapterEditModal isOpen={isCreateChapterModalOpen} onClose={() => setIsCreateChapterModalOpen(false)} onSave={handleCreateChapter} nextChapterIndex={story?.chapters ? story.chapters.length + 1 : 1} />
       <DownloadModal isOpen={isDownloadModalOpen} onClose={handleReadWithoutDownload} story={pendingStory || story} onStartDownload={handleStartDownloadWrapper} onDataImported={handleImportDataSuccess} />
       <ConfirmationModal isOpen={deleteConfirmation.isOpen} onClose={() => setDeleteConfirmation({ isOpen: false })} onConfirm={confirmDeleteEbook} title="Xác nhận xóa">
         <p>Bạn có chắc chắn muốn xóa truyện <strong className="text-[var(--theme-text-primary)]">{deleteConfirmation.item?.title}</strong> {' '}vĩnh viễn không?</p>
         <p className="mt-2 text-sm text-rose-400">Hành động này không thể hoàn tác.</p>
       </ConfirmationModal>
       {isSyncModalOpen && <SyncModal onClose={() => setIsSyncModalOpen(false)} />}
+      
+      {/* Mobile Search Modal */}
+      <MobileSearchModal 
+        isOpen={isMobileSearchModalOpen} 
+        onClose={() => setIsMobileSearchModalOpen(false)} 
+        onSearch={handleSearch} 
+        isLoading={isDataLoading} 
+      />
     </div>
   );
 };

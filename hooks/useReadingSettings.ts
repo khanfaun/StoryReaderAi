@@ -35,6 +35,7 @@ const defaultSettings: ReadingSettings = {
   backgroundColor: themePresets.dark.surfaceColor,
   fontSize: 20,
   fontFamily: "'Readex Pro', sans-serif",
+  pcLayout: 'default', // Default layout
   ttsSettings: {
     voice: 'vi-VN-HoaiMyNeural', // Default to HoaiMy if available
     playbackRate: 1, // Tốc độ bình thường
@@ -72,7 +73,7 @@ export const useReadingSettings = (): [ReadingSettings, (settings: ReadingSettin
     try {
       const savedSettings = localStorage.getItem(SETTINGS_KEY);
       if (savedSettings) {
-        // Hợp nhất cài đặt đã lưu với cài đặt mặc định để đảm bảo các key mới (như ttsSettings) được thêm vào
+        // Hợp nhất cài đặt đã lưu với cài đặt mặc định để đảm bảo các key mới (như ttsSettings, pcLayout) được thêm vào
         const parsedSettings = JSON.parse(savedSettings);
         
         // Deep merge for ttsSettings because it's an object

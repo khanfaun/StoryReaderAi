@@ -4,7 +4,6 @@ import type { Story, Chapter, DownloadConfig } from '../types';
 import { EditIcon, TrashIcon, PlusIcon, CheckIcon, CloseIcon, SpinnerIcon, DownloadIcon, InfoIcon, PauseIcon, PlayIcon, StopIcon, RefreshIcon, SortIcon } from './icons';
 import ConfirmationModal from './ConfirmationModal';
 import StoryEditModal from './StoryEditModal';
-import ChapterEditModal from './ChapterEditModal';
 import DownloadModal from './DownloadModal';
 
 interface StoryDetailProps {
@@ -16,7 +15,6 @@ interface StoryDetailProps {
   onUpdateStory?: (updatedStory: Story) => void;
   onDeleteStory?: (story: Story) => void;
   onDeleteChapterContent?: (storyUrl: string, chapterUrl: string) => Promise<void>;
-  onCreateChapter?: (story: Story, title: string, content: string) => Promise<void>;
   onFilterAuthor?: (author: string) => void;
   onFilterTag?: (tag: string) => void;
   isBackgroundLoading?: boolean;
@@ -41,7 +39,6 @@ interface StoryDetailProps {
   onSearch: (query: string) => void;
   isSearchLoading: boolean;
   onOpenHelpModal: () => void;
-  onCreateStory: () => void;
 }
 
 const StoryDetail: React.FC<StoryDetailProps> = ({ 
@@ -53,7 +50,6 @@ const StoryDetail: React.FC<StoryDetailProps> = ({
     onUpdateStory,
     onDeleteStory,
     onDeleteChapterContent,
-    onCreateChapter,
     onFilterAuthor,
     onFilterTag,
     isBackgroundLoading = false,
@@ -69,15 +65,13 @@ const StoryDetail: React.FC<StoryDetailProps> = ({
     cachedChapters,
     onSearch,
     isSearchLoading,
-    onOpenHelpModal,
-    onCreateStory
+    onOpenHelpModal
 }) => {
   // Pagination state
   const [currentPage, setCurrentPage] = useState(1);
   const chaptersPerPage = 20; // Giảm xuống 20 chương mỗi trang
 
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
-  const [isAddChapterModalOpen, setIsAddChapterModalOpen] = useState(false);
   const [confirmDeleteStory, setConfirmDeleteStory] = useState(false);
   const [confirmRedownload, setConfirmRedownload] = useState(false);
   
@@ -191,25 +185,6 @@ const StoryDetail: React.FC<StoryDetailProps> = ({
       setEditingChapterTitle('');
   };
 
-  const handleAddChapterClick = () => {
-      setIsAddChapterModalOpen(true);
-  };
-
-  const handleConfirmAddChapter = async (title: string, content: string) => {
-      if (onCreateChapter) {
-          await onCreateChapter(story, title, content);
-          // Move to last page to see new chapter if inserting at end (default)
-          // Nếu đang sort desc, chương mới (thường ở cuối mảng gốc) sẽ hiện ở đầu trang 1
-          if (sortOrder === 'asc') {
-              const newTotalChapters = (story.chapters?.length || 0) + 1;
-              const newTotalPages = Math.ceil(newTotalChapters / chaptersPerPage);
-              setCurrentPage(newTotalPages);
-          } else {
-              setCurrentPage(1);
-          }
-      }
-  };
-
   const handleAuthorClick = () => {
       if (onFilterAuthor && story.author) {
           onFilterAuthor(story.author);
@@ -243,13 +218,6 @@ const StoryDetail: React.FC<StoryDetailProps> = ({
   return (
     <div className="bg-[var(--theme-bg-surface)] rounded-lg shadow-xl p-4 sm:p-6 animate-fade-in border border-[var(--theme-border)]">
       
-      {/* Create Button (Search Bar is now Global in App) */}
-      <div className="mb-6 flex justify-end border-b border-[var(--theme-border)] pb-6">
-          <button onClick={onCreateStory} className="flex-shrink-0 flex items-center justify-center gap-2 bg-green-600 hover:bg-green-500 text-white font-semibold py-2 px-4 rounded-lg transition-colors h-auto text-sm">
-              <PlusIcon className="w-5 h-5" /> <span className="whitespace-nowrap">Tạo truyện mới</span>
-          </button>
-      </div>
-
       <div className="flex justify-between items-center mb-6 flex-wrap gap-2">
         <button
             onClick={onBack}
@@ -361,11 +329,6 @@ const StoryDetail: React.FC<StoryDetailProps> = ({
                           <SortIcon className="w-4 h-4" />
                           <span className="hidden sm:inline">{sortOrder === 'asc' ? 'Cũ nhất' : 'Mới nhất'}</span>
                       </button>
-                      {onCreateChapter && (
-                          <button onClick={handleAddChapterClick} className="flex items-center gap-1 text-sm bg-[var(--theme-accent-primary)] text-white px-3 py-1 rounded hover:brightness-110 transition-colors">
-                              <PlusIcon className="w-4 h-4" /> <span className="hidden sm:inline">Thêm chương</span>
-                          </button>
-                      )}
                   </div>
               </div>
           </div>
@@ -655,13 +618,6 @@ const StoryDetail: React.FC<StoryDetailProps> = ({
         onClose={() => setIsEditModalOpen(false)}
         onSave={handleUpdateMetadata}
         story={story}
-      />
-      
-      <ChapterEditModal
-        isOpen={isAddChapterModalOpen}
-        onClose={() => setIsAddChapterModalOpen(false)}
-        onSave={handleConfirmAddChapter}
-        nextChapterIndex={(story.chapters?.length || 0) + 1}
       />
       
       <DownloadModal
