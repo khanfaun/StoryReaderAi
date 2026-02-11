@@ -65,6 +65,7 @@ const App: React.FC = () => {
   const [story, setStory] = useState<Story | null>(null);
   const [initialChapterIndex, setInitialChapterIndex] = useState<number | null>(null); // State mới để điều hướng trực tiếp
   const [initialScrollPercentage, setInitialScrollPercentage] = useState<number>(0);
+  const [initialParagraphIndex, setInitialParagraphIndex] = useState<number>(0); // NEW: Anchor Scrolling
 
   const [isLoading, setIsLoading] = useState<boolean>(true); 
   const [isDataLoading, setIsDataLoading] = useState<boolean>(false); 
@@ -399,7 +400,18 @@ const App: React.FC = () => {
   const handleSelectStory = useCallback(async (selectedStory: Story) => {
       // Logic chọn truyện
       const existingStory = await dbService.getStory(selectedStory.url);
-      setInitialScrollPercentage(0); // Reset scroll on fresh select
+      
+      // KIỂM TRA LỊCH SỬ ĐỂ KHÔI PHỤC VỊ TRÍ ĐỌC
+      // Thay vì reset về 0, ta kiểm tra xem truyện này có trong lịch sử không
+      const history = getReadingHistory();
+      const historyItem = history.find(h => h.url === selectedStory.url);
+      
+      if (historyItem && historyItem.lastScrollPosition) {
+          setInitialScrollPercentage(historyItem.lastScrollPosition);
+      } else {
+          setInitialScrollPercentage(0);
+      }
+      setInitialParagraphIndex(0);
       
       if (existingStory) {
            handleSelectStoryInternal(existingStory);
@@ -496,6 +508,7 @@ const App: React.FC = () => {
     setEbookInstance(null); // Reset ebook instance
     setIsReadingMode(false); // Reset reading mode
     setInitialScrollPercentage(0);
+    setInitialParagraphIndex(0);
   };
   
   const handleCreateStory = async (storyData: Partial<Story> & { ebookFile?: File }) => {
@@ -658,6 +671,7 @@ const App: React.FC = () => {
             
             // Set initial scroll position if available
             setInitialScrollPercentage(item.lastScrollPosition || 0);
+            setInitialParagraphIndex(item.lastParagraphIndex || 0);
 
             setStory(storyToLoad);
             const savedRead = localStorage.getItem(`readChapters_${storyToLoad.url}`);
@@ -718,6 +732,7 @@ const App: React.FC = () => {
                   initialEbookInstance={ebookInstance}
                   initialChapterIndex={initialChapterIndex} // Truyền index chương cần đọc
                   initialScrollPercentage={initialScrollPercentage} // Truyền vị trí cuộn
+                  initialParagraphIndex={initialParagraphIndex} // Truyền vị trí đoạn văn (Anchor)
                   settings={settings}
                   onSettingsChange={setSettings}
                   onBack={handleBackToMain}

@@ -44,6 +44,7 @@ export function updateReadingHistory(story: Story, chapter: Chapter): ReadingHis
     item.lastChapterTitle = chapter.title;
     item.lastReadTimestamp = now;
     item.lastScrollPosition = 0; // Reset scroll when changing chapter
+    item.lastParagraphIndex = 0; // Reset paragraph index
     // Move to top by removing and re-adding
     history.splice(existingIndex, 1);
     history.unshift(item);
@@ -58,6 +59,7 @@ export function updateReadingHistory(story: Story, chapter: Chapter): ReadingHis
       lastChapterTitle: chapter.title,
       lastReadTimestamp: now,
       lastScrollPosition: 0,
+      lastParagraphIndex: 0,
     };
     history.unshift(newItem);
   }
@@ -71,15 +73,14 @@ export function updateReadingHistory(story: Story, chapter: Chapter): ReadingHis
   return history;
 }
 
-export function saveScrollPosition(storyUrl: string, scrollPercentage: number): void {
+export function saveReadingPosition(storyUrl: string, scrollPercentage: number, paragraphIndex: number): void {
     const history = getReadingHistory();
     const existingIndex = history.findIndex(item => item.url === storyUrl);
 
     if (existingIndex > -1) {
         history[existingIndex].lastScrollPosition = scrollPercentage;
+        history[existingIndex].lastParagraphIndex = paragraphIndex;
         history[existingIndex].lastReadTimestamp = Date.now();
-        // We don't necessarily need to sort/splice here to avoid UI jumpiness if history is displayed live,
-        // but for consistency with "Last Read", we save it.
         // Direct save without re-sort to avoid performance hit on scroll
         localStorage.setItem(HISTORY_KEY, JSON.stringify(history));
     }

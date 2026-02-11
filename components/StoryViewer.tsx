@@ -5,7 +5,7 @@ import { getChapterContent, parseHtml, parseChapterContentFromDoc } from '../ser
 import { analyzeChapterForCharacterStats, chatWithEbook, chatWithChapterContent, rewriteChapterContent } from '../services/geminiService';
 import { getCachedChapter, setCachedChapter } from '../services/cacheService';
 import { getStoryState, saveStoryState as saveStoryStateLocal, mergeChapterStats } from '../services/storyStateService';
-import { updateReadingHistory, saveScrollPosition, getReadingHistory, saveReadingHistory } from '../services/history';
+import { updateReadingHistory, saveReadingPosition, getReadingHistory, saveReadingHistory } from '../services/history';
 import * as dbService from '../services/dbService';
 import * as apiKeyService from '../services/apiKeyService';
 import * as syncService from '../services/sync'; // Import Sync Service
@@ -30,7 +30,8 @@ interface StoryViewerProps {
   story: Story;
   initialEbookInstance: EbookHandler | null;
   initialChapterIndex?: number | null; // Prop mới
-  initialScrollPercentage?: number; // Prop mới cho vị trí cuộn
+  initialScrollPercentage?: number; // Prop mới cho vị trí cuộn (fallback)
+  initialParagraphIndex?: number; // Prop mới cho anchor scroll (primary)
   settings: ReadingSettings;
   onSettingsChange: (settings: ReadingSettings) => void;
   onBack: () => void;
@@ -89,7 +90,7 @@ interface TtsState {
 }
 
 const StoryViewer: React.FC<StoryViewerProps> = ({
-    story, initialEbookInstance, initialChapterIndex, initialScrollPercentage, settings, onSettingsChange, onBack,
+    story, initialEbookInstance, initialChapterIndex, initialScrollPercentage, initialParagraphIndex, settings, onSettingsChange, onBack,
     onUpdateStory, onDeleteStory, readChapters, onReadChapterUpdate, setReadingHistory,
     backgroundDownloads, downloadQueue, cachedChapters, onPauseDownload, onResumeDownload, onStopDownload, onStartBackgroundDownload, onStartDownloadExport, onRedownload,
     setIsBottomNavForReadingVisible, isBottomNavForReadingVisible, onTokenUsageUpdate,
@@ -103,7 +104,10 @@ const StoryViewer: React.FC<StoryViewerProps> = ({
     const [isChapterLoading, setIsChapterLoading] = useState<boolean>(false);
     const [error, setError] = useState<string | null>(null);
     
-    // State for scroll restoration - only applies on initial load of the viewer
+    // Track entry method: Direct (from History) vs Indirect (from Library -> Detail)
+    const enteredDirectlyRef = useRef(initialChapterIndex !== null && initialChapterIndex !== undefined);
+    
+    // State for restoration - managed internally now
     const [targetScrollPercentage, setTargetScrollPercentage] = useState<number>(initialScrollPercentage || 0);
     
     const [cumulativeStats, setCumulativeStats] = useState<CharacterStats | null>(null);
@@ -207,17 +211,25 @@ const StoryViewer: React.FC<StoryViewerProps> = ({
 
     const handleBackToStory = () => {
         cleanupTts();
-        setSelectedChapterIndex(null);
-        setChapterContent(null);
-        setError(null);
-        setIsPanelVisible(false);
-        // Refresh global state when going back to detail view
-        const stats = getStoryState(story.url);
-        setCumulativeStats(stats || {});
+        
+        // Logic điều hướng Back:
+        if (enteredDirectlyRef.current) {
+            // Nếu vào trực tiếp (từ Lịch sử) -> Quay về Home
+            onBack(); 
+        } else {
+            // Nếu vào từ danh sách chương (Detail) -> Quay về danh sách chương
+            setSelectedChapterIndex(null);
+            setChapterContent(null);
+            setError(null);
+            setIsPanelVisible(false);
+            // Refresh global state when going back to detail view
+            const stats = getStoryState(story.url);
+            setCumulativeStats(stats || {});
+        }
     };
 
-    const handleScrollProgress = useCallback((percentage: number) => {
-        saveScrollPosition(story.url, percentage);
+    const handleSaveReadingPosition = useCallback((percentage: number, paragraphIndex: number) => {
+        saveReadingPosition(story.url, percentage, paragraphIndex);
     }, [story.url]);
     
     // --- Bookmark Logic ---
@@ -303,10 +315,24 @@ const StoryViewer: React.FC<StoryViewerProps> = ({
         cleanupTts();
         const chapter = storyToLoad.chapters[chapterIndex];
         
-        // Reset scroll restoration target if we are manually changing chapters (only use initial prop on first load)
-        if (chapterIndex !== initialChapterIndex) {
-            setTargetScrollPercentage(0);
+        // --- LOGIC QUYẾT ĐỊNH VỊ TRÍ CUỘN ---
+        // Kiểm tra lịch sử đọc để xem chương này có phải là chương đang đọc dở không
+        const history = getReadingHistory();
+        const historyItem = history.find(h => h.url === storyToLoad.url);
+        
+        // Mặc định về 0
+        let newTargetScroll = 0;
+        
+        // Nếu tìm thấy lịch sử VÀ URL chương khớp với chương cuối cùng đã đọc
+        if (historyItem && historyItem.lastChapterUrl === chapter.url) {
+            newTargetScroll = historyItem.lastScrollPosition || 0;
+        } else if (chapterIndex === initialChapterIndex && initialScrollPercentage && initialScrollPercentage > 0) {
+            // Fallback: Nếu đây là lần load đầu tiên (từ prop)
+            newTargetScroll = initialScrollPercentage;
         }
+        
+        setTargetScrollPercentage(newTargetScroll);
+        // --- KẾT THÚC LOGIC CUỘN ---
 
         setSelectedChapterIndex(chapterIndex);
         setIsChapterLoading(true);
@@ -435,7 +461,7 @@ const StoryViewer: React.FC<StoryViewerProps> = ({
             setError(`Lỗi tải chương: ${error.message}.`);
             setIsChapterLoading(false);
         }
-    }, [initialEbookInstance, processAndAnalyzeContent, cleanupTts, setReadingHistory, onReadChapterUpdate, initialChapterIndex]);
+    }, [initialEbookInstance, processAndAnalyzeContent, cleanupTts, setReadingHistory, onReadChapterUpdate, initialChapterIndex, initialScrollPercentage]);
 
     // --- Interaction Handlers ---
 
@@ -662,7 +688,7 @@ const StoryViewer: React.FC<StoryViewerProps> = ({
                         availableSystemVoices={availableSystemVoices}
                         onToggleStats={() => setIsPanelVisible(!isPanelVisible)}
                         initialScrollPercentage={targetScrollPercentage}
-                        onScrollProgress={handleScrollProgress}
+                        onSavePosition={handleSaveReadingPosition}
                         isBookmarked={isBookmarked}
                         onToggleBookmark={handleToggleBookmark}
                         // Header handlers

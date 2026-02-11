@@ -28,7 +28,8 @@ export interface ReadingHistoryItem {
   lastChapterUrl: string;
   lastChapterTitle: string;
   lastReadTimestamp: number;
-  lastScrollPosition?: number; // 0.0 to 1.0 (Percentage)
+  lastScrollPosition?: number; // 0.0 to 1.0 (Percentage) - Fallback
+  lastParagraphIndex?: number; // Index of the paragraph being read (Anchor) - Primary
 }
 
 export interface TuChat {
