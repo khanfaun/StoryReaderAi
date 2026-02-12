@@ -134,7 +134,7 @@ const InfoItemDisplay: React.FC<InfoItemDisplayProps> = ({ item, onEdit, onDelet
       <button
         ref={buttonRef}
         onClick={() => setIsPopoverVisible(!isPopoverVisible)}
-        className={`w-full text-left px-4 py-2 rounded-md text-sm font-medium transition-all duration-200 border flex justify-between items-center ${statusStyleClass}`}
+        className={`w-full text-left px-4 py-2 lg:px-2 lg:py-1.5 xl:px-4 xl:py-2 rounded-md text-sm lg:text-xs xl:text-sm font-medium transition-all duration-200 border flex justify-between items-center ${statusStyleClass}`}
         aria-haspopup="true"
         aria-expanded={isPopoverVisible}
       >
@@ -142,22 +142,27 @@ const InfoItemDisplay: React.FC<InfoItemDisplayProps> = ({ item, onEdit, onDelet
         {statusText && <span className="text-[10px] ml-2 italic opacity-80 flex-shrink-0">{statusText}</span>}
       </button>
       {popoverContent}
-       <div className="absolute top-1/2 -translate-y-1/2 right-2 hidden group-hover:flex items-center gap-1 bg-[var(--theme-bg-surface)] shadow-md rounded-full px-1 py-0.5 border border-[var(--theme-border)]">
+       {/* 
+          FIX DOUBLE TAP ISSUE ON MOBILE:
+          - Dùng 'xl:group-hover:flex' thay vì 'group-hover:flex' để tắt hiệu ứng hover trên mobile/tablet (các thiết bị < 1280px).
+          - Trên mobile, khi click vào (isPopoverVisible = true), các nút này sẽ hiện ra nhờ class 'flex'.
+       */}
+       <div className={`absolute top-1/2 -translate-y-1/2 right-2 items-center gap-1 bg-[var(--theme-bg-surface)] shadow-md rounded-full px-1 py-0.5 border border-[var(--theme-border)] ${isPopoverVisible ? 'flex' : 'hidden xl:group-hover:flex'}`}>
           <button
             onClick={(e) => { e.stopPropagation(); onEdit(); }}
-            className="p-1.5 text-[var(--theme-text-secondary)] hover:text-cyan-400 rounded-full transition-colors"
+            className="p-1.5 lg:p-1 xl:p-1.5 text-[var(--theme-text-secondary)] hover:text-cyan-400 rounded-full transition-colors"
             aria-label={`Sửa ${item.ten}`}
             title="Sửa"
           >
-            <EditIcon className="w-4 h-4" />
+            <EditIcon className="w-4 h-4 lg:w-3 lg:h-3" />
           </button>
           <button
             onClick={(e) => { e.stopPropagation(); onDelete(); }}
-            className="p-1.5 text-[var(--theme-text-secondary)] hover:text-rose-500 rounded-full transition-colors"
+            className="p-1.5 lg:p-1 xl:p-1.5 text-[var(--theme-text-secondary)] hover:text-rose-500 rounded-full transition-colors"
             aria-label={`Xóa ${item.ten}`}
             title="Xóa vĩnh viễn"
           >
-            <TrashIcon className="w-4 h-4" />
+            <TrashIcon className="w-4 h-4 lg:w-3 lg:h-3" />
           </button>
       </div>
     </div>

@@ -101,7 +101,7 @@ const CharacterPrimaryPanel: React.FC<CharacterPrimaryPanelProps> = ({ stats, is
          return (
             <div className="flex flex-col items-center justify-center h-48">
             <LoadingSpinner />
-            <p className="text-[var(--theme-accent-primary)] mt-2">Đang phân tích chương...</p>
+            <p className="text-[var(--theme-accent-primary)] mt-2 text-sm lg:text-xs">Đang phân tích chương...</p>
             </div>
         );
     }
@@ -110,21 +110,21 @@ const CharacterPrimaryPanel: React.FC<CharacterPrimaryPanelProps> = ({ stats, is
         const list = items || [];
         return (
             <div>
-                <div className="flex justify-between items-center mb-4">
-                    <h3 className="text-xl font-bold text-[var(--theme-accent-primary)]">{title}</h3>
+                <div className="flex justify-between items-center mb-4 lg:mb-2">
+                    <h3 className="text-xl lg:text-lg xl:text-xl font-bold text-[var(--theme-accent-primary)]">{title}</h3>
                     <button 
                         onClick={() => handleOpenModal(type)}
                         className="flex items-center gap-1 px-2 py-1 text-xs bg-slate-600 hover:bg-slate-500 text-white font-semibold rounded-md transition-colors"
                         aria-label={`Thêm ${title} mới`}
                     >
-                        <PlusIcon className="w-4 h-4" />
+                        <PlusIcon className="w-4 h-4 lg:w-3 lg:h-3" />
                         Thêm
                     </button>
                 </div>
                 {list.length === 0 ? (
-                    <p className="text-[var(--theme-text-secondary)] italic text-sm">Chưa có thông tin. Nhấn "Thêm" để nhập tay.</p>
+                    <p className="text-[var(--theme-text-secondary)] italic text-sm lg:text-xs">Chưa có thông tin. Nhấn "Thêm" để nhập tay.</p>
                 ) : (
-                    <div className="flex flex-col gap-2">
+                    <div className="flex flex-col gap-2 lg:gap-1">
                         {list.map((item, index) => {
                              const isString = typeof item === 'string';
                              const displayItem = isString ? { ten: item, moTa: '' } : item;
@@ -149,22 +149,22 @@ const CharacterPrimaryPanel: React.FC<CharacterPrimaryPanelProps> = ({ stats, is
         const status = stats?.trangThai;
         return (
           <div>
-            <div className="flex justify-between items-center mb-4">
-                <h3 className="text-xl font-bold text-[var(--theme-accent-primary)]">Trạng Thái & Cảnh Giới</h3>
+            <div className="flex justify-between items-center mb-4 lg:mb-2">
+                <h3 className="text-xl lg:text-lg xl:text-xl font-bold text-[var(--theme-accent-primary)]">Trạng Thái & Cảnh Giới</h3>
                 <button
                     onClick={() => handleOpenModal('mainCharacter', { ten: stats?.trangThai?.ten, canhGioi: stats?.canhGioi })}
                     className="flex items-center gap-1 px-2 py-1 text-xs bg-slate-600 hover:bg-slate-500 text-white font-semibold rounded-md transition-colors"
                     aria-label="Sửa thông tin nhân vật chính"
                 >
-                    <EditIcon className="w-4 h-4" />
+                    <EditIcon className="w-4 h-4 lg:w-3 lg:h-3" />
                     Sửa
                 </button>
             </div>
-            <div className="space-y-4">
-                <p className="text-lg"><strong>Tên:</strong> {status?.ten || 'Chưa cập nhật'}</p>
-                 <p className="text-lg">
+            <div className="space-y-4 lg:space-y-2 text-lg lg:text-sm xl:text-lg">
+                <p><strong>Tên:</strong> {status?.ten || 'Chưa cập nhật'}</p>
+                 <p>
                     <strong>Cảnh giới:</strong> 
-                    <span className="text-2xl ml-2 text-[var(--theme-accent-secondary)] font-semibold">{stats?.canhGioi || 'Chưa rõ'}</span>
+                    <span className="text-2xl lg:text-xl xl:text-2xl ml-2 text-[var(--theme-accent-secondary)] font-semibold">{stats?.canhGioi || 'Chưa rõ'}</span>
                 </p>
                 {renderInfoList('Tư chất / Đặc tính', status?.tuChat, 'tuChat')}
               </div>
@@ -186,20 +186,20 @@ const CharacterPrimaryPanel: React.FC<CharacterPrimaryPanelProps> = ({ stats, is
   const TabButton: React.FC<{tab: Tab, label: string}> = ({ tab, label }) => (
       <button 
         onClick={() => setActiveTab(tab)}
-        className={`px-3 py-2 text-sm font-medium rounded-md transition-colors ${activeTab === tab ? 'bg-[var(--theme-accent-primary)] text-white' : 'text-[var(--theme-text-secondary)] hover:bg-[var(--theme-bg-base)]'}`}>
+        className={`px-3 py-2 lg:px-2 lg:py-1.5 xl:px-3 xl:py-2 text-sm lg:text-[10px] xl:text-sm font-medium rounded-md transition-colors ${activeTab === tab ? 'bg-[var(--theme-accent-primary)] text-white' : 'text-[var(--theme-text-secondary)] hover:bg-[var(--theme-bg-base)]'}`}>
           {label}
       </button>
   );
   
   const panelInnerContent = (
     <>
-        <div className="flex justify-between items-center p-4 border-b border-[var(--theme-border)]">
-          <div className="flex items-center gap-3">
-              <h2 className="text-xl font-bold text-[var(--theme-text-primary)] flex items-center">
+        <div className="flex justify-between items-center p-4 lg:p-3 xl:p-4 border-b border-[var(--theme-border)]">
+          <div className="flex items-center gap-3 lg:gap-2 xl:gap-3">
+              <h2 className="text-xl lg:text-lg xl:text-xl font-bold text-[var(--theme-text-primary)] flex items-center">
                 Trạng Thái Nhân Vật
               </h2>
               {isAnalyzing && (
-                  <svg className="animate-spin h-5 w-5 text-[var(--theme-accent-primary)]" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                  <svg className="animate-spin h-5 w-5 lg:h-4 lg:w-4 xl:h-5 xl:w-5 text-[var(--theme-accent-primary)]" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
                       <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
                       <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
                   </svg>
@@ -209,16 +209,16 @@ const CharacterPrimaryPanel: React.FC<CharacterPrimaryPanelProps> = ({ stats, is
             {isAnalyzing ? (
                 <button 
                   onClick={onStopAnalysis} 
-                  className="bg-rose-600 text-white font-semibold text-xs px-3 py-1 rounded-md hover:bg-rose-500 transition-colors animate-pulse"
+                  className="bg-rose-600 text-white font-semibold text-xs lg:text-[10px] xl:text-xs px-3 py-1 rounded-md hover:bg-rose-500 transition-colors animate-pulse"
                   aria-label="Dừng phân tích"
                   title="Dừng phân tích"
                 >
-                  Dừng phân tích
+                  Dừng
                 </button>
             ) : (
                 <button 
                   onClick={onReanalyze} 
-                  className="bg-[var(--theme-accent-secondary)] text-slate-900 font-semibold text-xs px-3 py-1 rounded-md hover:brightness-110 transition-colors"
+                  className="bg-[var(--theme-accent-secondary)] text-slate-900 font-semibold text-xs lg:text-[10px] xl:text-xs px-3 py-1 rounded-md hover:brightness-110 transition-colors"
                   aria-label="Phân tích lại thông tin nhân vật"
                   title="Phân tích lại"
                 >
@@ -228,7 +228,7 @@ const CharacterPrimaryPanel: React.FC<CharacterPrimaryPanelProps> = ({ stats, is
           </div>
         </div>
         
-        <div className="p-4 flex flex-wrap gap-2 border-b border-[var(--theme-border)] bg-[var(--theme-bg-base)]/50">
+        <div className="p-4 lg:p-2 xl:p-4 flex flex-wrap gap-2 lg:gap-1 border-b border-[var(--theme-border)] bg-[var(--theme-bg-base)]/50">
           <TabButton tab="status" label="Trạng Thái" />
           <TabButton tab="realmSystem" label="Cấp Độ" />
           <TabButton tab="inventory" label="Balo" />
@@ -236,7 +236,7 @@ const CharacterPrimaryPanel: React.FC<CharacterPrimaryPanelProps> = ({ stats, is
           <TabButton tab="equipment" label="Trang Bị" />
         </div>
         
-        <div className="p-6 min-h-[200px]">
+        <div className="p-6 lg:p-3 xl:p-6 min-h-[200px]">
           {renderContent()}
         </div>
     </>

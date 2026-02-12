@@ -1,3 +1,4 @@
+
 import React, { useState, useMemo, useEffect, useRef } from 'react';
 import type { Chapter } from '../types';
 
@@ -46,14 +47,15 @@ const ChapterListModal: React.FC<ChapterListModalProps> = ({ isOpen, onClose, ch
   }
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-75 z-50 flex justify-center items-center" onClick={onClose}>
+    // Updated z-index from z-50 to z-[200] to overlay headers (z-100/z-110)
+    <div className="fixed inset-0 bg-black bg-opacity-75 z-[200] flex justify-center items-center" onClick={onClose}>
       <div
         className="bg-[var(--theme-bg-surface)] rounded-lg shadow-2xl w-full max-w-2xl h-[90vh] flex flex-col m-4 border border-[var(--theme-border)]"
         onClick={e => e.stopPropagation()}
       >
         <div className="flex justify-between items-center p-4 border-b border-[var(--theme-border)] sticky top-0 bg-[var(--theme-bg-surface)]">
           <h2 className="text-xl font-bold text-[var(--theme-text-primary)]">Danh sách chương ({filteredChapters.length}/{chapters.length})</h2>
-          <button onClick={onClose} className="text-[var(--theme-text-secondary)] hover:text-[var(--theme-text-primary)] text-3xl leading-none">&times;</button>
+          <button onClick={onClose} className="text-[var(--theme-text-secondary)] hover:text-[var(--theme-text-primary)] text-3xl leading-none px-2">&times;</button>
         </div>
         
         <div className="p-4">

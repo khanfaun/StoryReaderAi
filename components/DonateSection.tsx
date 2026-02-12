@@ -1,6 +1,6 @@
 
 import React, { useState } from 'react';
-import { SparklesIcon, UploadIcon, CheckIcon, ClipboardIcon } from './icons';
+import { SparklesIcon, UploadIcon, CheckIcon, ClipboardIcon, DownloadIcon } from './icons';
 import { QR_CODE_BASE64 } from '../donateConfig';
 
 const DonateSection: React.FC = () => {
@@ -30,9 +30,19 @@ const DonateSection: React.FC = () => {
       }
   };
 
+  const handleDownloadQR = () => {
+      if (!displayImage) return;
+      const link = document.createElement('a');
+      link.href = displayImage;
+      link.download = 'qr_donate_banking.png';
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+  };
+
   return (
     <div className="h-full flex flex-col">
-      <div className="bg-gradient-to-b from-indigo-900/30 to-[var(--theme-bg-base)] border border-indigo-500/30 rounded-lg p-5 flex flex-col items-center text-center h-full shadow-inner">
+      <div className="bg-gradient-to-b from-indigo-900/30 to-[var(--theme-bg-base)] border border-indigo-500/30 rounded-lg p-4 sm:p-5 flex flex-col items-center text-center h-full shadow-inner">
         <div className="mb-4 bg-indigo-500/20 p-3 rounded-full">
             <SparklesIcon className="w-8 h-8 text-indigo-300" />
         </div>
@@ -41,41 +51,59 @@ const DonateSection: React.FC = () => {
           Ủng hộ Nhà Phát Triển
         </h3>
         
-        <p className="text-sm text-[var(--theme-text-secondary)] mb-4 leading-relaxed">
+        <p className="text-sm text-[var(--theme-text-secondary)] mb-6 leading-relaxed">
           Nếu bạn thấy ứng dụng này hữu ích, hãy mời mình một ly cà phê nhé! Sự ủng hộ của bạn là động lực lớn nhất để mình duy trì và phát triển thêm nhiều tính năng mới.
         </p>
 
-        {/* KHUNG HIỂN THỊ ẢNH */}
-        <div className="bg-white p-2 rounded-lg shadow-lg mb-4 w-full max-w-[220px] aspect-square flex items-center justify-center overflow-hidden relative mx-auto group">
-            {displayImage ? (
-                <img 
-                    src={displayImage} 
-                    alt="QR Ngân Hàng" 
-                    className="w-full h-full object-contain"
-                />
-            ) : (
-                <div className="flex flex-col items-center justify-center text-center p-4 bg-gray-50 w-full h-full border-2 border-dashed border-gray-200 rounded-lg">
-                    <div className="opacity-20 mb-2">
-                        <SparklesIcon className="w-12 h-12 text-gray-400" />
-                    </div>
-                    <span className="text-xs text-gray-400 font-medium">Chưa có mã QR</span>
+        {/* CONTAINER CHO ẢNH VÀ THÔNG TIN - Mobile: Dọc (Ảnh trên, Tin dưới) / Desktop: Dọc */}
+        <div className="w-full flex flex-col items-center gap-4 lg:gap-0">
+            
+            <div className="flex flex-col items-center gap-2 flex-shrink-0">
+                {/* KHUNG HIỂN THỊ ẢNH */}
+                <div className="bg-white p-2 rounded-lg shadow-lg w-32 h-32 sm:w-40 sm:h-40 flex-shrink-0 flex items-center justify-center overflow-hidden relative group lg:w-full lg:max-w-[220px] lg:h-auto lg:aspect-square lg:mb-2 lg:mx-auto">
+                    {displayImage ? (
+                        <img 
+                            src={displayImage} 
+                            alt="QR Ngân Hàng" 
+                            className="w-full h-full object-contain"
+                        />
+                    ) : (
+                        <div className="flex flex-col items-center justify-center text-center p-2 lg:p-4 bg-gray-50 w-full h-full border-2 border-dashed border-gray-200 rounded-lg">
+                            <div className="opacity-20 mb-1 lg:mb-2">
+                                <SparklesIcon className="w-6 h-6 sm:w-8 sm:h-8 lg:w-12 lg:h-12 text-gray-400" />
+                            </div>
+                            <span className="text-[9px] sm:text-[10px] lg:text-xs text-gray-400 font-medium">Chưa có mã QR</span>
+                        </div>
+                    )}
                 </div>
-            )}
-        </div>
+                
+                {/* NÚT TẢI ẢNH QR - NO BORDER/STROKE */}
+                {displayImage && (
+                    <button 
+                        onClick={handleDownloadQR}
+                        className="flex items-center gap-1 text-[10px] sm:text-xs text-[var(--theme-accent-primary)] hover:text-white hover:underline transition-colors lg:mb-4 bg-transparent hover:bg-[var(--theme-accent-primary)]/20 rounded px-2 py-1"
+                        title="Tải ảnh QR về máy"
+                    >
+                        <DownloadIcon className="w-3 h-3 sm:w-4 sm:h-4" />
+                        <span>Tải QR</span>
+                    </button>
+                )}
+            </div>
 
-        {/* THÔNG TIN CHUYỂN KHOẢN */}
-        <div className="w-full space-y-2 text-sm bg-[var(--theme-bg-surface)] p-3 rounded-md border border-[var(--theme-border)]">
-            <div className="flex justify-between items-center">
-                <span className="text-[var(--theme-text-secondary)] text-xs">Ngân hàng:</span>
-                <span className="font-bold text-[var(--theme-text-primary)] text-right">BVBank (Bản Việt)</span>
-            </div>
-            <div className="flex justify-between items-center">
-                <span className="text-[var(--theme-text-secondary)] text-xs">Số tài khoản:</span>
-                <span className="font-bold text-[var(--theme-accent-primary)] select-all font-mono text-base">9021616938732</span>
-            </div>
-            <div className="flex justify-between items-center">
-                <span className="text-[var(--theme-text-secondary)] text-xs">Chủ tài khoản:</span>
-                <span className="font-bold text-[var(--theme-text-primary)] uppercase text-right text-xs">Phan Trinh An Khang</span>
+            {/* THÔNG TIN CHUYỂN KHOẢN */}
+            <div className="w-full flex-1 min-w-0 space-y-2 text-sm bg-[var(--theme-bg-surface)] p-3 rounded-md border border-[var(--theme-border)] flex flex-col justify-center">
+                <div className="flex flex-row justify-between items-center gap-0.5 sm:gap-0">
+                    <span className="text-[var(--theme-text-secondary)] text-xs whitespace-nowrap">Ngân hàng:</span>
+                    <span className="font-bold text-[var(--theme-text-primary)] text-right truncate">BVBank</span>
+                </div>
+                <div className="flex flex-row justify-between items-center gap-0.5 sm:gap-0">
+                    <span className="text-[var(--theme-text-secondary)] text-xs whitespace-nowrap">Số tài khoản:</span>
+                    <span className="font-bold text-[var(--theme-accent-primary)] select-all font-mono text-sm lg:text-base text-right break-all sm:break-normal">9021616938732</span>
+                </div>
+                <div className="flex flex-row justify-between items-center gap-0.5 sm:gap-0">
+                    <span className="text-[var(--theme-text-secondary)] text-xs whitespace-nowrap">Chủ tài khoản:</span>
+                    <span className="font-bold text-[var(--theme-text-primary)] uppercase text-[10px] lg:text-xs text-right truncate">Phan Trinh An Khang</span>
+                </div>
             </div>
         </div>
         

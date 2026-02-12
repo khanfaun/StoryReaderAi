@@ -53,8 +53,14 @@ const UpdateModal: React.FC<UpdateModalProps> = ({ isOpen, onClose }) => {
         </header>
 
         <div className="p-6 max-h-[80vh] overflow-y-auto">
-          <div className="grid grid-cols-1 lg:grid-cols-5 gap-8">
+          {/* Mobile: Flex Column with Donate first. Desktop: Grid with standard layout */}
+          <div className="flex flex-col lg:grid lg:grid-cols-5 gap-8">
             
+            {/* Cột phải: Donate (chiếm 2 phần ~ 40%) - Mobile: Order First / Desktop: Order Last */}
+            <div className="order-first lg:order-last lg:col-span-2">
+                <DonateSection />
+            </div>
+
             {/* Cột trái: Tính năng (chiếm 3 phần ~ 60%) */}
             <div className="lg:col-span-3">
               <ul className="space-y-10">
@@ -68,11 +74,6 @@ const UpdateModal: React.FC<UpdateModalProps> = ({ isOpen, onClose }) => {
                   </li>
                 ))}
               </ul>
-            </div>
-
-            {/* Cột phải: Donate (chiếm 2 phần ~ 40%) */}
-            <div className="lg:col-span-2">
-                <DonateSection />
             </div>
 
           </div>

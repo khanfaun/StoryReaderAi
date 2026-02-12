@@ -1,10 +1,11 @@
 
 import React, { useState, useMemo } from 'react';
 import type { Story, Chapter, DownloadConfig } from '../types';
-import { EditIcon, TrashIcon, PlusIcon, CheckIcon, CloseIcon, SpinnerIcon, DownloadIcon, InfoIcon, PauseIcon, PlayIcon, StopIcon, RefreshIcon, SortIcon } from './icons';
+import { EditIcon, TrashIcon, PlusIcon, CheckIcon, CloseIcon, SpinnerIcon, DownloadIcon, InfoIcon, PauseIcon, PlayIcon, StopIcon, RefreshIcon, SortIcon, DocumentPlusIcon } from './icons';
 import ConfirmationModal from './ConfirmationModal';
 import StoryEditModal from './StoryEditModal';
 import DownloadModal from './DownloadModal';
+import MultiChapterAddModal from './MultiChapterAddModal';
 
 interface StoryDetailProps {
   story: Story;
@@ -39,6 +40,9 @@ interface StoryDetailProps {
   onSearch: (query: string) => void;
   isSearchLoading: boolean;
   onOpenHelpModal: () => void;
+  
+  // NEW: Add Chapters Handler
+  onAddChapters?: (story: Story, newChapters: { number: number; title: string; content: string }[]) => Promise<void>;
 }
 
 const StoryDetail: React.FC<StoryDetailProps> = ({ 
@@ -65,7 +69,8 @@ const StoryDetail: React.FC<StoryDetailProps> = ({
     cachedChapters,
     onSearch,
     isSearchLoading,
-    onOpenHelpModal
+    onOpenHelpModal,
+    onAddChapters
 }) => {
   // Pagination state
   const [currentPage, setCurrentPage] = useState(1);
@@ -77,6 +82,9 @@ const StoryDetail: React.FC<StoryDetailProps> = ({
   
   // Download states
   const [isDownloadModalOpen, setIsDownloadModalOpen] = useState(false);
+  
+  // Multi Chapter Add Modal
+  const [isMultiAddModalOpen, setIsMultiAddModalOpen] = useState(false);
 
   // State riêng để xóa chương bằng Modal
   const [chapterToDelete, setChapterToDelete] = useState<{ chapter: Chapter } | null>(null);
@@ -210,11 +218,17 @@ const StoryDetail: React.FC<StoryDetailProps> = ({
       }
       setIsDownloadModalOpen(false);
   }
+  
+  const handleAddChaptersInternal = async (newChapters: { number: number; title: string; content: string }[]) => {
+      if (onAddChapters) {
+          await onAddChapters(story, newChapters);
+      }
+  };
 
   // Calculate percentage for progress bar
   const downloadPercentage = downloadProgress ? (downloadProgress.current / downloadProgress.total) * 100 : 0;
   const isPaused = downloadProgress?.status === 'paused';
-
+  
   return (
     <div className="bg-[var(--theme-bg-surface)] rounded-lg shadow-xl p-4 sm:p-6 animate-fade-in border border-[var(--theme-border)]">
       
@@ -230,6 +244,17 @@ const StoryDetail: React.FC<StoryDetailProps> = ({
         
         {onUpdateStory && (
             <div className="flex gap-2 flex-wrap">
+                {onAddChapters && (
+                    <button
+                        onClick={() => setIsMultiAddModalOpen(true)}
+                        className="flex items-center gap-2 bg-green-600 hover:bg-green-500 text-white font-bold p-2 sm:py-2 sm:px-4 rounded-lg transition-colors duration-300"
+                        title="Thêm nhiều chương mới"
+                    >
+                        <DocumentPlusIcon className="w-5 h-5" />
+                        <span className="hidden sm:inline">Thêm chương mới</span>
+                    </button>
+                )}
+                
                 <button
                     onClick={handleDownloadClick}
                     className="flex items-center gap-2 bg-teal-600 hover:bg-teal-500 text-white font-bold p-2 sm:py-2 sm:px-4 rounded-lg transition-colors duration-300"
@@ -626,6 +651,13 @@ const StoryDetail: React.FC<StoryDetailProps> = ({
         story={story}
         onStartDownload={handleStartDownloadInternal}
         isBackgroundDownloading={!!downloadProgress}
+      />
+      
+      <MultiChapterAddModal 
+        isOpen={isMultiAddModalOpen}
+        onClose={() => setIsMultiAddModalOpen(false)}
+        onSave={handleAddChaptersInternal}
+        nextChapterIndex={(story.chapters?.length || 0) + 1}
       />
     </div>
   );

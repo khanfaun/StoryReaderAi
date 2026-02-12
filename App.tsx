@@ -59,6 +59,12 @@ interface DownloadStatus {
     isError?: boolean;
 }
 
+interface NewChapterData {
+    number: number;
+    title: string;
+    content: string;
+}
+
 const UPDATE_MODAL_VERSION = 'update_modal_seen_v2'; 
 
 const App: React.FC = () => {
@@ -99,6 +105,7 @@ const App: React.FC = () => {
   const [ebookInstance, setEbookInstance] = useState<EbookHandler | null>(null);
 
   const [deleteConfirmation, setDeleteConfirmation] = useState<{ isOpen: boolean; item?: ReadingHistoryItem }>({ isOpen: false });
+  const [overwriteConfirmation, setOverwriteConfirmation] = useState<{ isOpen: boolean; chapters: NewChapterData[]; story: Story } | null>(null);
   
   // SỬA ĐỔI: Khởi tạo state dựa trên localStorage để không hiện lại nếu đã tắt
   const [isApiKeyModalOpen, setIsApiKeyModalOpen] = useState<boolean>(() => {
@@ -552,6 +559,10 @@ const App: React.FC = () => {
     setIsReadingMode(false); // Reset reading mode
     setInitialScrollPercentage(0);
     setInitialParagraphIndex(0);
+    
+    // Reset search context
+    setSearchResults(null);
+    setError(null);
   };
   
   const handleCreateStory = async (storyData: Partial<Story> & { ebookFile?: File }) => {
@@ -599,11 +610,78 @@ const App: React.FC = () => {
      }
   };
 
+  const executeAddChapters = async (targetStory: Story, chaptersToAdd: NewChapterData[], isOverwrite: boolean) => {
+      try {
+          const timestamp = Date.now();
+          const finalChapters = [...(targetStory.chapters || [])];
+          
+          await Promise.all(chaptersToAdd.map(async (ch, index) => {
+              // Logic: Chapter Number trong mảng bắt đầu từ 1. Index mảng = number - 1.
+              // Nếu overwrite, ta tìm chapter ở vị trí (ch.number - 1).
+              const targetIndex = ch.number - 1;
+              let chapUrl = "";
+              
+              if (isOverwrite && targetIndex < finalChapters.length) {
+                  // Giữ URL cũ để đè nội dung
+                  chapUrl = finalChapters[targetIndex].url;
+                  // Cập nhật title trong metadata
+                  finalChapters[targetIndex].title = ch.title;
+              } else {
+                  // Tạo mới
+                  chapUrl = `${targetStory.url}/chapter-${timestamp}-${index}`;
+                  // Chèn vào đúng vị trí hoặc push
+                  if (targetIndex < finalChapters.length) {
+                      // Insert at specific index (rare usage but possible logic)
+                      // Tuy nhiên logic Modal thường là Append nếu number > length.
+                      // Nếu number <= length mà không overwrite thì là chèn? 
+                      // Hiện tại để đơn giản: Nếu không overwrite mà trùng index -> Chèn hoặc báo lỗi?
+                      // Logic hiện tại của modal: Add Card luôn +1.
+                      // Ta chỉ xử lý Insert/Overwrite dựa trên index.
+                      finalChapters.splice(targetIndex, 0, { title: ch.title, url: chapUrl });
+                  } else {
+                      // Append
+                      finalChapters[targetIndex] = { title: ch.title, url: chapUrl };
+                  }
+              }
+
+              const data = { content: ch.content, stats: null };
+              // Save content
+              await setCachedChapter(targetStory.url, chapUrl, data);
+              // Sync content
+              if(syncService.isAuthenticated()) {
+                  syncService.saveChapterContentToDrive(targetStory.url, chapUrl, data).catch(console.error);
+              }
+          }));
+
+          // Fill empty slots if any (in case user added Chapter 10 but skipped 9)
+          for(let i=0; i<finalChapters.length; i++) {
+              if(!finalChapters[i]) {
+                  finalChapters[i] = { title: `Chương ${i+1} (Trống)`, url: `${targetStory.url}/empty-${i}` };
+              }
+          }
+
+          const updatedStory = { ...targetStory, chapters: finalChapters };
+          await dbService.saveStory(updatedStory);
+          handleUpdateStory(updatedStory);
+          
+          if (syncService.isAuthenticated()) {
+              syncService.saveStoryDetailsToDrive(updatedStory).catch(console.error);
+          }
+          
+      } catch (e) {
+          throw e; // Để modal bắt lỗi
+      }
+  };
+
   const handleCreateChapter = async (title: string, content: string) => {
       if (!story || (story.source !== 'Local' && story.source !== 'Ebook')) {
           setError("Chỉ có thể thêm chương cho truyện tự tạo hoặc Ebook.");
           return;
       }
+      
+      // Check if trying to add a chapter that implies overwrite?
+      // Single add modal usually appends.
+      // We'll treat single add as append always for simplicity unless complex logic needed.
       
       const newChapter: Chapter = { title, url: `${story.url}/chapter-${Date.now()}` };
       const updatedChapters = [...(story.chapters || []), newChapter];
@@ -621,6 +699,81 @@ const App: React.FC = () => {
           }
       } catch (e) {
           setError(`Lỗi tạo chương: ${(e as Error).message}`);
+      }
+  };
+  
+  // NEW: Bulk Add Chapters with Overwrite Logic
+  const handleBatchAddChapters = async (targetStory: Story, newChapters: NewChapterData[]) => {
+      if (!targetStory) return;
+      
+      // Check for potential overwrites
+      const currentChapterCount = targetStory.chapters?.length || 0;
+      const potentialOverwrites = newChapters.filter(ch => ch.number <= currentChapterCount);
+      
+      if (potentialOverwrites.length > 0) {
+          setOverwriteConfirmation({
+              isOpen: true,
+              chapters: newChapters,
+              story: targetStory
+          });
+          // Trả về promise để modal chờ, nhưng vì logic UI là modal đóng/mở
+          // Ta cần cơ chế để modal biết là đang chờ confirm.
+          // Tuy nhiên, để đơn giản: Modal gọi hàm này -> Hàm này mở Confirm -> Modal đóng hoặc chờ?
+          // Yêu cầu: "hệ thống popup modal hỏi có muốn ghi đè không".
+          // Cách tốt nhất: Modal gọi hàm này -> Hàm này check -> Nếu trùng -> throw error đặc biệt hoặc return false?
+          // Hoặc: Hàm này return void, nhưng set state để mở Confirm modal.
+          // Modal 'MultiChapterAdd' sẽ đóng lại. Người dùng sẽ tương tác với Confirm Modal của App.
+          // Nếu Confirm -> Execute. Nếu Cancel -> Hủy. Dữ liệu trong Modal đã mất nếu Modal đóng.
+          // FIX: Để Modal không đóng, hàm này cần return Promise.
+          // Nếu overwrite -> User confirm -> Resolve. User cancel -> Reject.
+          
+          return new Promise<void>((resolve, reject) => {
+              // Hacky way: Attach resolvers to the state so ConfirmModal can call them
+              (window as any)._overwriteResolve = resolve;
+              (window as any)._overwriteReject = reject;
+          });
+      } else {
+          try {
+              await executeAddChapters(targetStory, newChapters, false);
+          } catch (e) {
+              setError(`Lỗi khi lưu các chương mới: ${(e as Error).message}`);
+              throw e; // Rethrow to keep modal open
+          }
+      }
+  };
+
+  const confirmOverwriteAction = async () => {
+      if (!overwriteConfirmation) return;
+      
+      try {
+          await executeAddChapters(overwriteConfirmation.story, overwriteConfirmation.chapters, true);
+          setOverwriteConfirmation(null);
+          // Resolve pending promise if any
+          if ((window as any)._overwriteResolve) {
+              (window as any)._overwriteResolve();
+              delete (window as any)._overwriteResolve;
+              delete (window as any)._overwriteReject;
+          }
+      } catch (e) {
+          setError(`Lỗi khi ghi đè chương: ${(e as Error).message}`);
+          // Reject if error
+           if ((window as any)._overwriteReject) {
+              (window as any)._overwriteReject(e);
+          }
+      }
+  };
+
+  const cancelOverwriteAction = () => {
+      setOverwriteConfirmation(null);
+      // Reject promise to keep MultiAddModal open if possible, or just to signal cancellation
+      if ((window as any)._overwriteReject) {
+          // Truyền lỗi "Cancelled" để modal biết không đóng (hoặc xử lý tùy ý)
+          // Tuy nhiên nếu modal đóng rồi thì thôi. 
+          // Ở đây ta giả định Modal gọi await handleBatchAdd... 
+          // Nếu ta reject, modal sẽ catch và hiện lỗi, giữ form.
+          (window as any)._overwriteReject(new Error("Đã hủy ghi đè."));
+          delete (window as any)._overwriteResolve;
+          delete (window as any)._overwriteReject;
       }
   };
 
@@ -779,7 +932,7 @@ const App: React.FC = () => {
   };
 
   // Main Render Logic
-  const appContentClass = isApiKeyModalOpen || isUpdateModalOpen || isHelpModalOpen || manualImportState.isOpen || isCreateStoryModalOpen || isCreateChapterModalOpen || isDownloadModalOpen || isSyncModalOpen || isMobileSearchModalOpen ? 'blur-sm pointer-events-none' : '';
+  const appContentClass = isApiKeyModalOpen || isUpdateModalOpen || isHelpModalOpen || manualImportState.isOpen || isCreateStoryModalOpen || isCreateChapterModalOpen || isDownloadModalOpen || isSyncModalOpen || isMobileSearchModalOpen || overwriteConfirmation ? 'blur-sm pointer-events-none' : '';
 
   // Render Search Bar for Header (Desktop Only)
   const renderHeaderSearch = () => (
@@ -797,86 +950,91 @@ const App: React.FC = () => {
 
   if (story) {
       return (
-          <div className={`flex flex-col min-h-screen bg-[var(--theme-bg-base)] text-[var(--theme-text-primary)] font-sans transition-colors duration-300 relative ${appContentClass}`}>
-              {/* Always show Global Header and Search in Reading Mode */}
-              <Header 
-                onOpenApiKeySettings={() => setIsApiKeyModalOpen(true)} 
-                onOpenUpdateModal={() => setIsUpdateModalOpen(true)} 
-                onGoHome={handleBackToMain} 
-                onOpenSyncModal={() => setIsSyncModalOpen(true)} 
-                isVisible={isGlobalHeaderVisible} 
-                // Enable mobile buttons
-                onOpenMobileSearch={() => setIsMobileSearchModalOpen(true)}
-                onCreateStory={() => setIsCreateStoryModalOpen(true)}
-              >
-                  {renderHeaderSearch()}
-              </Header>
-              
-              <StoryViewer 
-                  story={story}
-                  initialEbookInstance={ebookInstance}
-                  initialChapterIndex={initialChapterIndex} // Truyền index chương cần đọc
-                  initialScrollPercentage={initialScrollPercentage} // Truyền vị trí cuộn
-                  initialParagraphIndex={initialParagraphIndex} // Truyền vị trí đoạn văn (Anchor)
-                  settings={settings}
-                  onSettingsChange={setSettings}
-                  onBack={handleBackToMain}
-                  onUpdateStory={handleUpdateStory}
-                  onDeleteStory={handleDeleteStory}
-                  readChapters={readChapters}
-                  onReadChapterUpdate={(url) => {
-                      const newRead = new Set(readChapters).add(url);
-                      setReadChapters(newRead);
-                      localStorage.setItem(`readChapters_${story.url}`, JSON.stringify(Array.from(newRead)));
-                  }}
-                  setReadingHistory={setReadingHistory}
-                  
-                  backgroundDownloads={backgroundDownloads}
-                  downloadQueue={downloadQueue}
-                  cachedChapters={cachedChapters}
-                  onPauseDownload={handlePauseBackgroundDownload}
-                  onResumeDownload={handleResumeBackgroundDownload}
-                  onStopDownload={handleStopBackgroundDownload}
-                  onStartBackgroundDownload={handleStartBackgroundDownload}
-                  onStartDownloadExport={handleStartDownloadWrapper}
-                  onRedownload={handleRedownloadStory} // Passed handler
-                  
-                  setIsBottomNavForReadingVisible={setIsBottomNavForReadingVisible}
-                  isBottomNavForReadingVisible={isBottomNavForReadingVisible}
-                  onTokenUsageUpdate={handleTokenUsageUpdate}
-                  isApiKeyModalOpen={isApiKeyModalOpen}
-                  setIsApiKeyModalOpen={setIsApiKeyModalOpen}
-                  tokenUsage={tokenUsage}
-                  onDataChange={reloadDataFromStorage}
-                  onReadingModeChange={setIsReadingMode}
+          <div className={`flex flex-col min-h-screen bg-[var(--theme-bg-base)] text-[var(--theme-text-primary)] font-sans transition-colors duration-300 relative`}>
+              <div className={`flex flex-col min-h-screen ${appContentClass}`}>
+                {/* Always show Global Header and Search in Reading Mode */}
+                <Header 
+                    onOpenApiKeySettings={() => setIsApiKeyModalOpen(true)} 
+                    onOpenUpdateModal={() => setIsUpdateModalOpen(true)} 
+                    onGoHome={handleBackToMain} 
+                    onOpenSyncModal={() => setIsSyncModalOpen(true)} 
+                    isVisible={isGlobalHeaderVisible} 
+                    // Enable mobile buttons
+                    onOpenMobileSearch={() => setIsMobileSearchModalOpen(true)}
+                    onCreateStory={() => setIsCreateStoryModalOpen(true)}
+                >
+                    {renderHeaderSearch()}
+                </Header>
+                
+                <StoryViewer 
+                    story={story}
+                    initialEbookInstance={ebookInstance}
+                    initialChapterIndex={initialChapterIndex} // Truyền index chương cần đọc
+                    initialScrollPercentage={initialScrollPercentage} // Truyền vị trí cuộn
+                    initialParagraphIndex={initialParagraphIndex} // Truyền vị trí đoạn văn (Anchor)
+                    settings={settings}
+                    onSettingsChange={setSettings}
+                    onBack={handleBackToMain}
+                    onUpdateStory={handleUpdateStory}
+                    onDeleteStory={handleDeleteStory}
+                    readChapters={readChapters}
+                    onReadChapterUpdate={(url) => {
+                        const newRead = new Set(readChapters).add(url);
+                        setReadChapters(newRead);
+                        localStorage.setItem(`readChapters_${story.url}`, JSON.stringify(Array.from(newRead)));
+                    }}
+                    setReadingHistory={setReadingHistory}
+                    
+                    backgroundDownloads={backgroundDownloads}
+                    downloadQueue={downloadQueue}
+                    cachedChapters={cachedChapters}
+                    onPauseDownload={handlePauseBackgroundDownload}
+                    onResumeDownload={handleResumeBackgroundDownload}
+                    onStopDownload={handleStopBackgroundDownload}
+                    onStartBackgroundDownload={handleStartBackgroundDownload}
+                    onStartDownloadExport={handleStartDownloadWrapper}
+                    onRedownload={handleRedownloadStory} // Passed handler
+                    
+                    setIsBottomNavForReadingVisible={setIsBottomNavForReadingVisible}
+                    isBottomNavForReadingVisible={isBottomNavForReadingVisible}
+                    onTokenUsageUpdate={handleTokenUsageUpdate}
+                    isApiKeyModalOpen={isApiKeyModalOpen}
+                    setIsApiKeyModalOpen={setIsApiKeyModalOpen}
+                    tokenUsage={tokenUsage}
+                    onDataChange={reloadDataFromStorage}
+                    onReadingModeChange={setIsReadingMode}
 
-                  onSearch={handleSearch}
-                  isSearchLoading={isDataLoading}
-                  onOpenHelpModal={() => setIsHelpModalOpen(true)}
-                  onCreateStory={() => setIsCreateStoryModalOpen(true)}
-                  
-                  // NEW PROPS PASSED TO STORYVIEWER
-                  onOpenUpdateModal={() => setIsUpdateModalOpen(true)}
-                  onOpenSyncModal={() => setIsSyncModalOpen(true)}
-                  onOpenAddChapterModal={() => setIsCreateChapterModalOpen(true)}
-                  
-                  // Pass Global Header Visibility State
-                  isHeaderVisible={isGlobalHeaderVisible}
-              />
-              
-              {!isReadingMode && (
-                  <GlobalDownloadManager 
-                      activeDownloads={backgroundDownloads}
-                      queue={downloadQueue}
-                      allStories={localStories}
-                      activeStory={story}
-                      onPause={handlePauseBackgroundDownload}
-                      onResume={handleResumeBackgroundDownload}
-                      onStop={handleStopBackgroundDownload}
-                      onPrioritize={handlePrioritize}
-                      onRemoveFromQueue={handleRemoveFromQueue}
-                  />
-              )}
+                    onSearch={handleSearch}
+                    isSearchLoading={isDataLoading}
+                    onOpenHelpModal={() => setIsHelpModalOpen(true)}
+                    onCreateStory={() => setIsCreateStoryModalOpen(true)}
+                    
+                    // NEW PROPS PASSED TO STORYVIEWER
+                    onOpenUpdateModal={() => setIsUpdateModalOpen(true)}
+                    onOpenSyncModal={() => setIsSyncModalOpen(true)}
+                    onOpenAddChapterModal={() => setIsCreateChapterModalOpen(true)}
+                    
+                    // NEW PROP: Add Chapters Handler
+                    onAddChapters={handleBatchAddChapters}
+
+                    // Pass Global Header Visibility State
+                    isHeaderVisible={isGlobalHeaderVisible}
+                />
+                
+                {!isReadingMode && (
+                    <GlobalDownloadManager 
+                        activeDownloads={backgroundDownloads}
+                        queue={downloadQueue}
+                        allStories={localStories}
+                        activeStory={story}
+                        onPause={handlePauseBackgroundDownload}
+                        onResume={handleResumeBackgroundDownload}
+                        onStop={handleStopBackgroundDownload}
+                        onPrioritize={handlePrioritize}
+                        onRemoveFromQueue={handleRemoveFromQueue}
+                    />
+                )}
+              </div>
 
               <StoryEditModal isOpen={isCreateStoryModalOpen} onClose={() => setIsCreateStoryModalOpen(false)} onSave={handleCreateStory} onParseEbook={parseEbookFile} />
               <ChapterEditModal isOpen={isCreateChapterModalOpen} onClose={() => setIsCreateChapterModalOpen(false)} onSave={handleCreateChapter} nextChapterIndex={(story.chapters?.length || 0) + 1} />
@@ -893,6 +1051,19 @@ const App: React.FC = () => {
                 onSearch={handleSearch} 
                 isLoading={isDataLoading} 
               />
+              
+              <ConfirmationModal
+                isOpen={!!overwriteConfirmation}
+                onClose={cancelOverwriteAction}
+                onConfirm={confirmOverwriteAction}
+                title="Phát hiện chương trùng lặp"
+                confirmText="Ghi đè"
+                cancelText="Hủy bỏ"
+                confirmButtonClass="px-4 py-2 rounded-md bg-amber-600 hover:bg-amber-700 text-white font-semibold transition-colors"
+              >
+                <p>Hệ thống phát hiện {overwriteConfirmation?.chapters.filter(ch => ch.number <= (overwriteConfirmation?.story.chapters?.length || 0)).length} chương có số thứ tự trùng với chương đã tồn tại.</p>
+                <p className="text-sm mt-2 text-[var(--theme-text-secondary)]">Bạn có muốn <strong>ghi đè</strong> nội dung mới vào các chương cũ không?</p>
+              </ConfirmationModal>
           </div>
       )
   }
@@ -957,7 +1128,26 @@ const App: React.FC = () => {
                     </div>
                 </LoadingSpinner>
             ) : error ? (
-                <div className="text-center p-4 bg-rose-900/50 border border-rose-700 rounded-lg"><p className="text-rose-300 font-semibold">Đã xảy ra lỗi</p><p className="text-rose-400 mt-2">{error}</p></div> 
+                <div className="flex flex-col items-center justify-center min-h-[50vh] p-4">
+                    <div className="text-center p-6 bg-rose-900/20 border border-rose-500/30 rounded-xl max-w-lg w-full shadow-xl animate-fade-in-up">
+                        <div className="bg-rose-500/20 p-4 rounded-full w-16 h-16 mx-auto mb-4 flex items-center justify-center">
+                             <svg xmlns="http://www.w3.org/2000/svg" className="h-8 w-8 text-rose-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                            </svg>
+                        </div>
+                        <h3 className="text-xl font-bold text-rose-200 mb-2">Đã xảy ra lỗi</h3>
+                        <p className="text-rose-300/80 mb-6">{error}</p>
+                        <button 
+                            onClick={handleBackToMain}
+                            className="px-6 py-2.5 bg-rose-600 hover:bg-rose-500 text-white rounded-lg transition-all duration-300 font-semibold shadow-lg hover:shadow-rose-900/20 flex items-center gap-2 mx-auto"
+                        >
+                            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                                <path fillRule="evenodd" d="M9.707 16.707a1 1 0 01-1.414 0l-6-6a1 1 0 010-1.414l6-6a1 1 0 011.414 1.414L5.414 9H17a1 1 0 110 2H5.414l4.293 4.293a1 1 0 010 1.414z" clipRule="evenodd" />
+                            </svg>
+                            Quay lại Trang chủ
+                        </button>
+                    </div>
+                </div> 
             ) : searchResults ? (
                 <SearchResultsList results={searchResults} onSelectStory={handleSelectStory} />
             ) : (

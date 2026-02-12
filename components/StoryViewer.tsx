@@ -76,6 +76,9 @@ interface StoryViewerProps {
 
   // New Prop: Global Header Visibility State
   isHeaderVisible?: boolean;
+
+  // NEW PROP: Add Chapters Handler (This was missing in interface)
+  onAddChapters?: (story: Story, newChapters: { number: number; title: string; content: string }[]) => Promise<void>;
 }
 
 interface ManualImportState {
@@ -102,7 +105,9 @@ const StoryViewer: React.FC<StoryViewerProps> = ({
     isApiKeyModalOpen, setIsApiKeyModalOpen, tokenUsage, onDataChange, onReadingModeChange,
     onSearch, isSearchLoading, onOpenHelpModal, onCreateStory,
     onOpenUpdateModal, onOpenSyncModal, onOpenAddChapterModal,
-    isHeaderVisible = true
+    isHeaderVisible = true,
+    // Destructure the new prop here
+    onAddChapters
 }) => {
     // Local State specific to the active story session
     const [selectedChapterIndex, setSelectedChapterIndex] = useState<number | null>(initialChapterIndex ?? null);
@@ -676,37 +681,53 @@ const StoryViewer: React.FC<StoryViewerProps> = ({
                 isChatLoading={isChatLoading} 
             />
         );
+        
+        // Unified Panel for stacked layouts
+        const UnifiedPanel = (
+            <CharacterPanel 
+                stats={cumulativeStats} 
+                story={story}
+                isAnalyzing={isAnalyzing} 
+                isOpen={true} 
+                onClose={() => {}} 
+                isSidebar={true}
+                unifiedMode={true} // Force show all tabs
+                onStatsChange={handleStatsChange} 
+                onDataLoaded={onDataChange} 
+                onReanalyze={handleFullReanalysis} 
+                onStopAnalysis={handleStopAnalysis}
+                chatMessages={chatMessages}
+                onSendMessage={handleSendMessage}
+                isChatLoading={isChatLoading} 
+            />
+        );
 
         // Define layout structure based on settings
+        // Updated breakpoints to support Tablet Landscape (lg) with significantly reduced sidebar width (16rem/256px)
         if (layout === 'default') {
-            gridClass += "xl:grid-cols-[24rem_minmax(0,1fr)_24rem] 2xl:grid-cols-[28rem_minmax(0,1fr)_28rem] xl:gap-8";
+            gridClass += "lg:grid-cols-[16rem_minmax(0,1fr)_16rem] xl:grid-cols-[22rem_minmax(0,1fr)_22rem] 2xl:grid-cols-[28rem_minmax(0,1fr)_28rem] lg:gap-4 xl:gap-8";
             leftSidebarContent = PrimaryPanel;
             rightSidebarContent = WorldPanel;
         } else if (layout === 'stacked-left') {
-            gridClass += "xl:grid-cols-[24rem_minmax(0,1fr)] 2xl:grid-cols-[28rem_minmax(0,1fr)] xl:gap-8";
-            leftSidebarContent = (
-                <div className="flex flex-col gap-6">
-                    {PrimaryPanel}
-                    {WorldPanel}
-                </div>
-            );
+            gridClass += "lg:grid-cols-[18rem_minmax(0,1fr)] xl:grid-cols-[24rem_minmax(0,1fr)] 2xl:grid-cols-[28rem_minmax(0,1fr)] lg:gap-6";
+            leftSidebarContent = UnifiedPanel;
         } else if (layout === 'stacked-right') {
-            gridClass += "xl:grid-cols-[minmax(0,1fr)_24rem] 2xl:grid-cols-[minmax(0,1fr)_28rem] xl:gap-8";
-            rightSidebarContent = (
-                <div className="flex flex-col gap-6">
-                    {PrimaryPanel}
-                    {WorldPanel}
-                </div>
-            );
+            gridClass += "lg:grid-cols-[minmax(0,1fr)_18rem] xl:grid-cols-[minmax(0,1fr)_24rem] 2xl:grid-cols-[minmax(0,1fr)_28rem] lg:gap-6";
+            rightSidebarContent = UnifiedPanel;
         } else {
             // 'minimal' layout - uses mobile/tablet logic (1 column), panels are hidden
-            gridClass += "xl:grid-cols-1"; 
+            gridClass += "lg:grid-cols-1"; 
         }
+
+        // Apply dynamic sticky classes based on header visibility
+        const stickySidebarClass = isHeaderVisible 
+            ? "top-36 max-h-[calc(100vh-10rem)]" 
+            : "top-20 max-h-[calc(100vh-6rem)]";
 
         return (
             <div className={gridClass}>
                 {leftSidebarContent && (
-                    <aside className="hidden xl:block sticky top-20 self-start transition-all duration-300 max-h-[calc(100vh-6rem)] overflow-y-auto custom-scrollbar pr-2">
+                    <aside className={`hidden lg:block sticky ${stickySidebarClass} self-start transition-all duration-300 overflow-y-auto custom-scrollbar pr-2`}>
                         {leftSidebarContent}
                     </aside>
                 )}
@@ -745,17 +766,19 @@ const StoryViewer: React.FC<StoryViewerProps> = ({
                         onOpenAddChapterModal={onOpenAddChapterModal}
                         // Pass Global Header Visibility
                         isMainHeaderVisible={isHeaderVisible}
+                        // Add panel status for back button logic
+                        isPanelOpen={isPanelVisible}
                     />
                 </div>
 
                 {rightSidebarContent && (
-                    <aside className="hidden xl:block sticky top-20 self-start transition-all duration-300 max-h-[calc(100vh-6rem)] overflow-y-auto custom-scrollbar pl-2">
+                    <aside className={`hidden lg:block sticky ${stickySidebarClass} self-start transition-all duration-300 overflow-y-auto custom-scrollbar pl-2`}>
                         {rightSidebarContent}
                     </aside>
                 )}
 
                 {/* Mobile/Tablet Floating Panels OR Minimal PC Layout Panels */}
-                <div className={layout === 'minimal' ? '' : 'xl:hidden'}>
+                <div className={layout === 'minimal' ? '' : 'lg:hidden'}>
                     <CharacterPanel 
                         isOpen={isPanelVisible} 
                         onClose={() => setIsPanelVisible(false)} 
@@ -770,6 +793,7 @@ const StoryViewer: React.FC<StoryViewerProps> = ({
                         chatMessages={chatMessages}
                         onSendMessage={handleSendMessage}
                         isChatLoading={isChatLoading} 
+                        isHeaderVisible={isHeaderVisible}
                     />
                 </div>
                 
@@ -810,6 +834,8 @@ const StoryViewer: React.FC<StoryViewerProps> = ({
                 isSearchLoading={isSearchLoading}
                 onOpenHelpModal={onOpenHelpModal}
                 onCreateStory={onCreateStory}
+                // Pass ADD CHAPTERS HANDLER
+                onAddChapters={onAddChapters}
             />
         </div>
     );

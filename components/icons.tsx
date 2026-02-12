@@ -222,7 +222,7 @@ export const SortIcon: React.FC<React.SVGProps<SVGSVGElement>> = (props) => (
 
 export const ClipboardIcon: React.FC<React.SVGProps<SVGSVGElement>> = (props) => (
   <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" {...props}>
-    <path strokeLinecap="round" strokeLinejoin="round" d="M15.666 3.888A2.25 2.25 0 0013.5 2.25h-3c-1.03 0-1.9.693-2.166 1.638m7.332 0c.055.194.084.4.084.612v0a.75.75 0 01-.75.75H9a.75.75 0 01-.75-.75v0c0-.212.03-.418.084-.612m7.332 0c.646.049 1.288.564 1.508 1.188.196.556.223 1.226.223 2.023v9.096c0 .798-.027 1.467-.223 2.024-.22.624-.862 1.139-1.508 1.188-.755.057-1.745.057-3.25.057H9.75c-1.505 0-2.495 0-3.25-.057-.646-.049-1.288-.564-1.508-1.188-.196-.556-.223-1.226-.223-2.024V7.711c0-.797.027-1.467.223-2.023.22-.624.862-1.139 1.508-1.188.755-.057 1.745-.057 3.25-.057h4.5c1.505 0 2.495 0 3.25.057z" />
+    <path strokeLinecap="round" strokeLinejoin="round" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
   </svg>
 );
 

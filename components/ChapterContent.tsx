@@ -4,7 +4,7 @@ import type { Story, Chapter, ReadingSettings, CharacterStats } from '../types';
 import ChapterListModal from './ChapterListModal';
 import SettingsPanel from './SettingsPanel';
 import EntityTooltip from './EntityTooltip';
-import { ListIcon, EditIcon, SparklesIcon, SpinnerIcon, PlusIcon, PlayIcon, PauseIcon, StopIcon, CloseIcon, BarsIcon, CogIcon, SlidersIcon, BackwardStepIcon, ForwardStepIcon, VolumeHighIcon, UserIcon, ClipboardIcon, BookmarkIcon, BookmarkSlashIcon } from './icons';
+import { ListIcon, EditIcon, SparklesIcon, SpinnerIcon, PlusIcon, PlayIcon, PauseIcon, StopIcon, CloseIcon, BarsIcon, CogIcon, SlidersIcon, BackwardStepIcon, ForwardStepIcon, VolumeHighIcon, UserIcon, ClipboardIcon, BookmarkIcon, BookmarkSlashIcon, EyeIcon, EyeSlashIcon, CheckIcon } from './icons';
 
 type TtsStatus = 'idle' | 'loading' | 'playing' | 'paused' | 'error' | 'ready';
 
@@ -71,6 +71,9 @@ interface ChapterContentProps {
 
   // Header Visibility State
   isMainHeaderVisible?: boolean;
+
+  // Panel Open State (for Back button logic)
+  isPanelOpen?: boolean;
 }
 
 // Helper format thời gian mm:ss
@@ -98,7 +101,8 @@ const ChapterContent: React.FC<ChapterContentProps> = ({
     isBookmarked, onToggleBookmark,
     pcLayout = 'default',
     onOpenAddChapterModal,
-    isMainHeaderVisible = true
+    isMainHeaderVisible = true,
+    isPanelOpen = false
 }) => {
   const [isListVisible, setIsListVisible] = useState(false);
   const [isNavBarVisible, setIsNavBarVisible] = useState(true);
@@ -147,6 +151,9 @@ const ChapterContent: React.FC<ChapterContentProps> = ({
   // Ref để theo dõi giá trị cuộn hiện tại realtime (dùng cho cleanup)
   // FIX: Khởi tạo bằng initialScrollPercentage để nếu người dùng không cuộn tí nào mà thoát ra, vẫn lưu đúng vị trí cũ
   const latestScrollPercentRef = useRef(initialScrollPercentage);
+
+  // Ref để lưu lại layout trước đó khi chuyển sang chế độ tập trung
+  const lastNonMinimalLayoutRef = useRef<ReadingSettings['pcLayout']>('default');
 
   // Cập nhật ref khi prop thay đổi (phòng trường hợp component không remount nhưng prop đổi)
   useEffect(() => {
@@ -537,7 +544,23 @@ const ChapterContent: React.FC<ChapterContentProps> = ({
       }
   };
   
-  // No internal create chapter modal anymore
+  // Logic to toggle focus mode (Minimal Layout)
+  const handleToggleFocusMode = () => {
+      if (settings.pcLayout === 'minimal') {
+          // Restore previous layout
+          onSettingsChange({
+              ...settings,
+              pcLayout: lastNonMinimalLayoutRef.current || 'default'
+          });
+      } else {
+          // Save current layout and switch to minimal
+          lastNonMinimalLayoutRef.current = settings.pcLayout;
+          onSettingsChange({
+              ...settings,
+              pcLayout: 'minimal'
+          });
+      }
+  };
   
   const handleTtsButtonClick = () => {
       if (isAudioPlayerVisible) {
@@ -560,6 +583,23 @@ const ChapterContent: React.FC<ChapterContentProps> = ({
       setIsTtsSetupVisible(false);
       setIsAudioPlayerVisible(true);
       onTtsRequest();
+  };
+
+  // Logic Copy to Clipboard
+  const handleCopyContent = () => {
+      navigator.clipboard.writeText(content).then(() => {
+          setCopySuccess(true);
+          setTimeout(() => setCopySuccess(false), 2000);
+      });
+  };
+
+  // Logic Nút Back (Header): Nếu panel đang mở thì đóng panel, ngược lại thì back
+  const handleHeaderBack = () => {
+      if (isPanelOpen && onToggleStats) {
+          onToggleStats();
+      } else {
+          onBack();
+      }
   };
 
   const entityMapData = useMemo(() => {
@@ -700,15 +740,15 @@ const ChapterContent: React.FC<ChapterContentProps> = ({
         };
 
         return (
-            <div className="container mx-auto px-2 flex flex-col xl:flex-row justify-between items-center gap-2">
-                <div className="flex items-center gap-1 sm:gap-2 w-full xl:w-auto justify-center xl:justify-start">
-                    <div className="xl:hidden flex gap-1">
+            <div className="container mx-auto px-2 flex flex-col lg:flex-row justify-between items-center gap-2">
+                <div className="flex items-center gap-1 sm:gap-2 w-full lg:w-auto justify-center lg:justify-start">
+                    <div className="lg:hidden flex gap-1">
                         <button onClick={() => setIsSettingsVisible(true)} className="bg-[var(--theme-bg-surface)] brightness-125 hover:brightness-150 text-[var(--theme-text-primary)] p-2 rounded-lg transition-all duration-300" title="Cài đặt"><CogIcon className="w-6 h-6" /></button>
                     </div>
                     <button onClick={onPrev} disabled={isFirstChapter} className="bg-[var(--theme-bg-surface)] brightness-125 hover:brightness-150 text-[var(--theme-text-primary)] font-bold py-2 px-3 rounded-lg transition-all duration-300 disabled:opacity-50"><span className="md:hidden"><BackwardStepIcon className="w-6 h-6" /></span><span className="hidden md:inline">Trước</span></button>
                     <button onClick={() => setIsListVisible(true)} className="flex-shrink-0 bg-[var(--theme-text-primary)] text-[var(--theme-bg-surface)] hover:brightness-90 font-bold p-2 rounded-lg transition-all duration-300"><ListIcon className="h-6 w-6" /></button>
                     <button onClick={onNext} disabled={isLastChapter} className="bg-[var(--theme-bg-surface)] brightness-125 hover:brightness-150 text-[var(--theme-text-primary)] font-bold py-2 px-3 rounded-lg transition-all duration-300 disabled:opacity-50"><span className="md:hidden"><ForwardStepIcon className="w-6 h-6" /></span><span className="hidden md:inline">Sau</span></button>
-                    <button onClick={onToggleStats} disabled={isBusy && !isAnalyzing} className="xl:hidden flex-shrink-0 text-white font-bold p-2 rounded-lg transition-all duration-300 disabled:opacity-50 border" style={{ backgroundColor: '#8170ff', borderColor: '#8170ff' }}><UserIcon className="h-6 w-6" /></button>
+                    <button onClick={onToggleStats} disabled={isBusy && !isAnalyzing} className="lg:hidden flex-shrink-0 text-white font-bold p-2 rounded-lg transition-all duration-300 disabled:opacity-50 border" style={{ backgroundColor: '#8170ff', borderColor: '#8170ff' }}><UserIcon className="h-6 w-6" /></button>
                 </div>
 
                 <div className="flex flex-1 flex-col items-center justify-center bg-transparent rounded-none px-0 py-0 border-none shadow-none mx-0 max-w-full w-full relative">
@@ -731,7 +771,7 @@ const ChapterContent: React.FC<ChapterContentProps> = ({
                         </div>
                     </div>
                 </div>
-                <div className="hidden xl:block"><button onClick={() => setIsSettingsVisible(true)} className="bg-[var(--theme-bg-surface)] brightness-125 hover:brightness-150 text-[var(--theme-text-primary)] p-2 rounded-lg transition-all duration-300"><CogIcon className="w-6 h-6" /></button></div>
+                <div className="hidden lg:block"><button onClick={() => setIsSettingsVisible(true)} className="bg-[var(--theme-bg-surface)] brightness-125 hover:brightness-150 text-[var(--theme-text-primary)] p-2 rounded-lg transition-all duration-300"><CogIcon className="w-6 h-6" /></button></div>
             </div>
         );
     }
@@ -739,21 +779,21 @@ const ChapterContent: React.FC<ChapterContentProps> = ({
     // 3. BOTTOM NAV (Default)
     return (
         <div className="container mx-auto px-2 flex justify-center items-center gap-1 sm:gap-2">
-          <button onClick={() => setIsSettingsVisible(true)} disabled={isBusy && !isAnalyzing} className="flex-shrink-0 xl:hidden bg-[var(--theme-bg-surface)] brightness-125 hover:brightness-150 text-[var(--theme-text-primary)] p-2 rounded-lg transition-all duration-300 disabled:opacity-50"><CogIcon className="w-6 h-6" /></button>
+          <button onClick={() => setIsSettingsVisible(true)} disabled={isBusy && !isAnalyzing} className="flex-shrink-0 lg:hidden bg-[var(--theme-bg-surface)] brightness-125 hover:brightness-150 text-[var(--theme-text-primary)] p-2 rounded-lg transition-all duration-300 disabled:opacity-50"><CogIcon className="w-6 h-6" /></button>
           <button onClick={onPrev} disabled={isFirstChapter || (isBusy && !isAnalyzing)} className="whitespace-nowrap bg-[var(--theme-bg-surface)] brightness-125 hover:brightness-150 text-[var(--theme-text-primary)] font-bold text-xs sm:text-sm py-2 px-3 sm:px-4 rounded-lg transition-all duration-300 disabled:opacity-50"><span className="md:hidden"><BackwardStepIcon className="w-6 h-6" /></span><span className="hidden md:inline">Chương trước</span></button>
           <button onClick={() => setIsListVisible(true)} disabled={isBusy && !isAnalyzing} className="flex-shrink-0 bg-[var(--theme-text-primary)] text-[var(--theme-bg-surface)] hover:brightness-90 font-bold p-2 rounded-lg transition-all duration-300 disabled:opacity-50"><ListIcon className="h-6 w-6" /></button>
           <button onClick={onNext} disabled={isLastChapter || (isBusy && !isAnalyzing)} className="whitespace-nowrap bg-[var(--theme-bg-surface)] brightness-125 hover:brightness-150 text-[var(--theme-text-primary)] font-bold text-xs sm:text-sm py-2 px-3 sm:px-4 rounded-lg transition-all duration-300 disabled:opacity-50"><span className="md:hidden"><ForwardStepIcon className="w-6 h-6" /></span><span className="hidden md:inline">Chương sau</span></button>
           
-          {/* Toggle Stats Button: Hidden on XL unless in 'minimal' layout */}
-          <button onClick={onToggleStats} disabled={isBusy && !isAnalyzing} className={`flex-shrink-0 text-white font-bold p-2 rounded-lg transition-all duration-300 disabled:opacity-50 border ${pcLayout === 'minimal' ? '' : 'xl:hidden'}`} style={{ backgroundColor: '#8170ff', borderColor: '#8170ff' }}><UserIcon className="h-6 w-6" /></button>
+          {/* Toggle Stats Button: Hidden on LG unless in 'minimal' layout */}
+          <button onClick={onToggleStats} disabled={isBusy && !isAnalyzing} className={`flex-shrink-0 text-white font-bold p-2 rounded-lg transition-all duration-300 disabled:opacity-50 border ${pcLayout === 'minimal' ? '' : 'lg:hidden'}`} style={{ backgroundColor: '#8170ff', borderColor: '#8170ff' }}><UserIcon className="h-6 w-6" /></button>
           
           <div className="hidden md:flex items-center gap-2 pl-2 sm:pl-3">
-             <button onClick={handleTtsButtonClick} className={`flex-shrink-0 text-white p-2 rounded-lg transition-colors duration-200 bg-[var(--theme-accent-primary)] hover:brightness-110 disabled:opacity-50`} disabled={isRewriting}>{ttsStatus === 'loading' ? <SpinnerIcon className="h-6 w-6 animate-spin" /> : <PlayIcon className="h-6 w-6" />}</button>
+             <button onClick={handleTtsButtonClick} className={`flex-shrink-0 p-2 rounded-lg transition-colors duration-200 bg-[var(--theme-bg-surface)] brightness-125 hover:brightness-150 text-[var(--theme-text-primary)] disabled:opacity-50`} disabled={isRewriting}>{ttsStatus === 'loading' ? <SpinnerIcon className="h-6 w-6 animate-spin" /> : <PlayIcon className="h-6 w-6" />}</button>
           </div>
           <div ref={autoScrollButtonRefBottom} className="relative flex-shrink-0 pl-2 sm:pl-3 hidden md:block">
             <button onClick={() => handleAutoScrollButtonClick('bottom')} className={`p-2 rounded-lg transition-all duration-300 ${isAutoScrolling ? 'bg-[var(--theme-accent-primary)] text-white' : 'bg-[var(--theme-bg-surface)] brightness-125 hover:brightness-150 text-[var(--theme-text-primary)]'}`}>{isAutoScrolling ? <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M10 9v6m4-6v6m7-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg> : <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M19 13l-7 7-7-7m14-8l-7 7-7-7" /></svg>}</button>
           </div>
-           <button onClick={() => setIsSettingsVisible(true)} disabled={isBusy && !isAnalyzing} className="flex-shrink-0 hidden xl:block bg-[var(--theme-bg-surface)] brightness-125 hover:brightness-150 text-[var(--theme-text-primary)] p-2 rounded-lg transition-all duration-300 disabled:opacity-50"><CogIcon className="w-6 h-6" /></button>
+           <button onClick={() => setIsSettingsVisible(true)} disabled={isBusy && !isAnalyzing} className="flex-shrink-0 hidden lg:block bg-[var(--theme-bg-surface)] brightness-125 hover:brightness-150 text-[var(--theme-text-primary)] p-2 rounded-lg transition-all duration-300 disabled:opacity-50"><CogIcon className="w-6 h-6" /></button>
         </div>
       );
     };
@@ -763,19 +803,39 @@ const ChapterContent: React.FC<ChapterContentProps> = ({
       {/* --- CHAPTER HEADER (FIXED BELOW MAIN HEADER) --- */}
       {/* Dynamic top position based on Main Header visibility */}
       <div className={`fixed left-0 right-0 z-[100] h-16 bg-[var(--theme-bg-surface)] border-b border-[var(--theme-border)] shadow-lg flex items-center justify-between px-4 transition-all duration-300 ${isMainHeaderVisible ? 'top-16' : 'top-0'}`}>
-          <button onClick={onBack} disabled={isBusy && !isAnalyzing} className="p-2 text-[var(--theme-text-secondary)] hover:text-[var(--theme-text-primary)] hover:bg-[var(--theme-border)] rounded-full transition-colors disabled:opacity-50"><svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M10 19l-7-7m0 0l7-7m-7 7h18" /></svg></button>
+          <button onClick={handleHeaderBack} disabled={isBusy && !isAnalyzing} className="p-2 text-[var(--theme-text-secondary)] hover:text-[var(--theme-text-primary)] hover:bg-[var(--theme-border)] rounded-full transition-colors disabled:opacity-50"><svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M10 19l-7-7m0 0l7-7m-7 7h18" /></svg></button>
           <div className="flex-1 text-center px-4 overflow-hidden"><h2 className="text-sm font-bold text-[var(--theme-text-primary)] truncate">{story.title}</h2><p className="text-xs text-[var(--theme-text-secondary)] truncate">{story.chapters?.[currentChapterIndex]?.title ?? 'Đang tải...'}</p></div>
           <div className="flex items-center gap-1">
               <button onClick={onToggleBookmark} className="p-2 text-[var(--theme-text-secondary)] hover:text-[var(--theme-accent-primary)] hover:bg-[var(--theme-border)] rounded-full transition-colors">{isBookmarked ? <BookmarkIcon className="h-6 w-6 text-[var(--theme-accent-primary)]" /> : <BookmarkSlashIcon className="h-6 w-6" />}</button>
-              <button onClick={() => { navigator.clipboard.writeText(content).then(() => { setCopySuccess(true); setTimeout(() => setCopySuccess(false), 2000); }); }} className="p-2 text-[var(--theme-text-secondary)] hover:text-[var(--theme-text-primary)] hover:bg-[var(--theme-border)] rounded-full transition-colors relative"><ClipboardIcon className="h-6 w-6" />{copySuccess && <span className="absolute top-10 right-0 bg-green-600 text-white text-[10px] px-2 py-1 rounded shadow-lg animate-fade-in whitespace-nowrap">Đã chép!</span>}</button>
+              
+              {/* Copy Button with Tick Animation */}
+              <button 
+                onClick={handleCopyContent} 
+                className={`p-2 rounded-full transition-all duration-300 ${copySuccess ? 'text-green-500 bg-green-500/10' : 'text-[var(--theme-text-secondary)] hover:text-[var(--theme-text-primary)] hover:bg-[var(--theme-border)]'}`}
+                title={copySuccess ? 'Đã sao chép' : 'Sao chép nội dung'}
+              >
+                  {copySuccess ? <CheckIcon className="h-6 w-6" /> : <ClipboardIcon className="h-6 w-6" />}
+              </button>
+
               {onContentUpdate && !isEditingContent && <button onClick={() => setIsEditingContent(true)} disabled={isBusy && !isAnalyzing} className="p-2 text-[var(--theme-text-secondary)] hover:text-[var(--theme-accent-primary)] hover:bg-[var(--theme-border)] rounded-full transition-colors disabled:opacity-50"><EditIcon className="w-6 h-6" /></button>}
+              
+              {/* FOCUS MODE TOGGLE BUTTON - HIDDEN ON MOBILE (md:block) */}
+              <button 
+                  onClick={handleToggleFocusMode}
+                  className={`hidden md:block p-2 rounded-full transition-colors ${settings.pcLayout === 'minimal' ? 'text-[var(--theme-accent-primary)] hover:brightness-110' : 'text-[var(--theme-text-secondary)] hover:text-[var(--theme-text-primary)] hover:bg-[var(--theme-border)]'}`}
+                  title={settings.pcLayout === 'minimal' ? "Hiện các bảng dữ liệu" : "Ẩn các bảng dữ liệu (Chế độ tập trung)"}
+              >
+                  {settings.pcLayout === 'minimal' ? <EyeSlashIcon className="w-6 h-6" /> : <EyeIcon className="w-6 h-6" />}
+              </button>
+
               {onCreateChapter && <button onClick={() => onOpenAddChapterModal?.()} disabled={isBusy && !isAnalyzing} className="p-2 text-[var(--theme-text-secondary)] hover:text-green-500 hover:bg-[var(--theme-border)] rounded-full transition-colors disabled:opacity-50"><PlusIcon className="w-6 h-6" /></button>}
           </div>
       </div>
 
       {/* Main Content Area - Added top margin to compensate for fixed headers (Main Header + Chapter Header usually) */}
       {/* Dynamic top margin: 36 (~144px, 64+64+padding) when both headers visible, 20 (~80px, 64+padding) when only sub-header */}
-      <div className={`flex-grow bg-[var(--theme-bg-base)] rounded-lg shadow-xl p-4 sm:p-8 lg:p-12 w-full animate-fade-in border border-[var(--theme-border)] pb-24 mx-auto max-w-screen-xl transition-all duration-300 ${isMainHeaderVisible ? 'mt-36' : 'mt-20'}`}>
+      {/* UPDATE: Reduced padding on lg (p-6) to save space, increased on xl (p-12) */}
+      <div className={`flex-grow bg-[var(--theme-bg-base)] rounded-lg shadow-xl p-4 sm:p-8 lg:p-6 xl:p-12 w-full animate-fade-in border border-[var(--theme-border)] pb-24 mx-auto max-w-screen-xl transition-all duration-300 ${isMainHeaderVisible ? 'mt-36' : 'mt-20'}`}>
         {ttsError && isAudioPlayerVisible && <div className="my-2 p-2 bg-rose-900/50 text-rose-300 text-center rounded text-sm border border-rose-700">Lỗi Audio: {ttsError}</div>}
         {isEditingContent ? (
             <div className="mt-6">

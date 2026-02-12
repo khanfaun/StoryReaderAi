@@ -1,3 +1,4 @@
+
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 
@@ -107,9 +108,11 @@ const EntityTooltip: React.FC<EntityTooltipProps> = ({ entity, children, noUnder
     popoverRoot
   ) : null;
   
+  // FIX DOUBLE TAP: Chỉ áp dụng hover style trên màn hình lớn (xl:hover).
+  // Trên mobile/tablet, khi click -> isPopoverVisible = true -> áp dụng style 'border-solid' ngay lập tức.
   const className = noUnderline
     ? "cursor-pointer"
-    : "cursor-pointer border-b border-dashed border-[var(--theme-accent-primary)]/70 hover:border-solid hover:border-[var(--theme-accent-primary)] transition-colors";
+    : `cursor-pointer border-b border-dashed border-[var(--theme-accent-primary)]/70 transition-colors ${isPopoverVisible ? 'border-solid border-[var(--theme-accent-primary)]' : 'xl:hover:border-solid xl:hover:border-[var(--theme-accent-primary)]'}`;
 
   return (
     <>

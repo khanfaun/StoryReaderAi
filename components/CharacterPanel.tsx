@@ -17,6 +17,7 @@ interface CharacterPanelProps {
   onClose: () => void;
   isAnalyzing: boolean;
   isSidebar?: boolean;
+  unifiedMode?: boolean; // New prop: Force show all tabs even in sidebar
   onStatsChange: (newStats: CharacterStats) => void;
   onDataLoaded: () => void;
   onReanalyze: () => void;
@@ -25,6 +26,8 @@ interface CharacterPanelProps {
   chatMessages?: ChatMessage[];
   onSendMessage?: (message: string) => void;
   isChatLoading?: boolean;
+  // Header Visibility for padding adjustment
+  isHeaderVisible?: boolean;
 }
 
 type Tab = 'status' | 'realmSystem' | 'inventory' | 'skills' | 'equipment' | 'npcs' | 'relationships' | 'factions' | 'locations' | 'data' | 'chat';
@@ -184,23 +187,23 @@ const RelationshipGraph: React.FC<RelationshipGraphProps> = ({ relations, mainCh
     const handleMouseUp = () => setIsPanning(false);
 
     if (relations.length === 0) {
-        return <p className="text-[var(--theme-text-secondary)] italic">Chưa có thông tin quan hệ để hiển thị. Hãy chọn một nhân vật phụ và tick vào ô "Hiển thị trên sơ đồ quan hệ".</p>;
+        return <p className="text-[var(--theme-text-secondary)] italic text-sm">Chưa có thông tin quan hệ.</p>;
     }
     
     if (nodeNames.length < 1 && focusedCharacter) {
         return (
              <div className="flex flex-col items-center">
                 <p className="font-bold text-lg text-[var(--theme-accent-primary)] mb-2">{focusedCharacter}</p>
-                <p className="text-[var(--theme-text-secondary)] italic">Nhân vật này chưa có mối quan hệ nào được ghi nhận.</p>
+                <p className="text-[var(--theme-text-secondary)] italic">Chưa có mối quan hệ nào.</p>
              </div>
         )
     }
     
     return (
         <div className="flex flex-col items-center">
-            <div className="mb-4 text-center">
-                <p className="text-sm text-[var(--theme-text-secondary)]">Đang xem quan hệ của:</p>
-                <p className="font-bold text-lg text-[var(--theme-accent-primary)]">{focusedCharacter || '...'}</p>
+            <div className="mb-2 text-center">
+                <p className="text-xs text-[var(--theme-text-secondary)]">Đang xem quan hệ của:</p>
+                <p className="font-bold text-sm text-[var(--theme-accent-primary)]">{focusedCharacter || '...'}</p>
             </div>
             <div className="relative w-full">
                 <svg 
@@ -281,60 +284,32 @@ const RelationshipGraph: React.FC<RelationshipGraphProps> = ({ relations, mainCh
                 <div className="absolute bottom-2 right-2 flex flex-col gap-2 z-10">
                     <button 
                         onClick={() => handleZoom('in')} 
-                        className="w-8 h-8 flex items-center justify-center bg-[var(--theme-bg-surface)] hover:bg-[var(--theme-border)] text-[var(--theme-text-primary)] rounded-md text-xl font-bold transition-colors"
+                        className="w-6 h-6 flex items-center justify-center bg-[var(--theme-bg-surface)] hover:bg-[var(--theme-border)] text-[var(--theme-text-primary)] rounded-md text-lg font-bold transition-colors"
                         aria-label="Phóng to"
                     >+</button>
                     <button 
                         onClick={() => handleZoom('out')} 
-                        className="w-8 h-8 flex items-center justify-center bg-[var(--theme-bg-surface)] hover:bg-[var(--theme-border)] text-[var(--theme-text-primary)] rounded-md text-xl font-bold transition-colors"
+                        className="w-6 h-6 flex items-center justify-center bg-[var(--theme-bg-surface)] hover:bg-[var(--theme-border)] text-[var(--theme-text-primary)] rounded-md text-lg font-bold transition-colors"
                         aria-label="Thu nhỏ"
                     >-</button>
                 </div>
             </div>
             {focusedCharacter && focusedCharacter !== mainCharacterName && (
-                 <button onClick={() => setFocusedCharacter(mainCharacterName)} className="mt-4 px-4 py-2 text-sm bg-[var(--theme-bg-base)] border border-[var(--theme-border)] text-[var(--theme-text-primary)] font-semibold rounded-lg hover:border-[var(--theme-accent-primary)] transition-all">
+                 <button onClick={() => setFocusedCharacter(mainCharacterName)} className="mt-2 px-3 py-1 text-xs bg-[var(--theme-bg-base)] border border-[var(--theme-border)] text-[var(--theme-text-primary)] font-semibold rounded-lg hover:border-[var(--theme-accent-primary)] transition-all">
                     Xem nhân vật chính
                 </button>
             )}
-            <div className="w-full mt-4 p-3 border border-[var(--theme-border)] rounded-md bg-[var(--theme-bg-base)] text-sm">
-                <h4 className="font-semibold text-[var(--theme-text-primary)] mb-2 text-center">Chú giải mức độ thân thiết</h4>
-                <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs">
-                    <div className="flex items-center">
-                        <span className="w-3 h-3 rounded-full mr-2 shrink-0" style={{ backgroundColor: '#22c55e' }}></span>
-                        <span className="text-[var(--theme-text-secondary)]">Thân Thiết Tột Cùng</span>
-                    </div>
-                    <div className="flex items-center">
-                        <span className="w-3 h-3 rounded-full mr-2 shrink-0" style={{ backgroundColor: '#eab308' }}></span>
-                        <span className="text-[var(--theme-text-secondary)]">Mâu Thuẫn</span>
-                    </div>
-                    <div className="flex items-center">
-                        <span className="w-3 h-3 rounded-full mr-2 shrink-0" style={{ backgroundColor: '#22d3ee' }}></span>
-                        <span className="text-[var(--theme-text-secondary)]">Đồng Minh / Tích Cực</span>
-                    </div>
-                    <div className="flex items-center">
-                        <span className="w-3 h-3 rounded-full mr-2 shrink-0" style={{ backgroundColor: '#f97316' }}></span>
-                        <span className="text-[var(--theme-text-secondary)]">Thù Địch</span>
-                    </div>
-                    <div className="flex items-center">
-                        <span className="w-3 h-3 rounded-full mr-2 shrink-0" style={{ backgroundColor: '#e2e8f0' }}></span>
-                        <span className="text-[var(--theme-text-secondary)]">Trung Lập</span>
-                    </div>
-                    <div className="flex items-center">
-                        <span className="w-3 h-3 rounded-full mr-2 shrink-0" style={{ backgroundColor: '#991b1b' }}></span>
-                        <span className="text-[var(--theme-text-secondary)]">Sinh Tử Đại Địch</span>
-                    </div>
-                </div>
-            </div>
         </div>
     );
 };
 
 
 const CharacterPanel: React.FC<CharacterPanelProps> = ({ 
-    stats, story, isOpen, onClose, isAnalyzing, isSidebar = false, onStatsChange, onDataLoaded, onReanalyze, onStopAnalysis,
-    chatMessages, onSendMessage, isChatLoading 
+    stats, story, isOpen, onClose, isAnalyzing, isSidebar = false, unifiedMode = false, onStatsChange, onDataLoaded, onReanalyze, onStopAnalysis,
+    chatMessages, onSendMessage, isChatLoading, isHeaderVisible = true
 }) => {
-  const [activeTab, setActiveTab] = useState<Tab>(isSidebar ? 'npcs' : 'status');
+  // If unifiedMode is active, default to 'status' tab, otherwise check if sidebar (World only) or Mobile (All)
+  const [activeTab, setActiveTab] = useState<Tab>(isSidebar && !unifiedMode ? 'npcs' : 'status');
   const [modalState, setModalState] = useState<{ isOpen: boolean; type: EntityType | null; data: any | null }>({ isOpen: false, type: null, data: null });
   const [deleteConfirmation, setDeleteConfirmation] = useState<{ type: EntityType; entity: any; } | null>(null);
   const loadInputRef = useRef<HTMLInputElement>(null);
@@ -520,46 +495,46 @@ const CharacterPanel: React.FC<CharacterPanelProps> = ({
     
     if (activeTab === 'chat') {
         return (
-            <div className="flex flex-col h-[60vh] max-h-[500px]">
+            <div className="flex flex-col h-[400px] lg:h-[calc(100vh-24rem)] min-h-[300px] max-h-[60vh]">
                 <div 
                     ref={chatContainerRef} 
-                    className="flex-grow overflow-y-auto mb-4 space-y-4 pr-2 custom-scrollbar"
+                    className="flex-grow overflow-y-auto mb-3 pr-1 custom-scrollbar scroll-smooth"
                 >
                     {(!chatMessages || chatMessages.length === 0) && (
-                        <div className="text-center text-[var(--theme-text-secondary)] p-4 italic">
+                        <div className="text-center text-[var(--theme-text-secondary)] p-4 italic text-sm">
                             <p>Hãy hỏi tôi bất cứ điều gì về cốt truyện, nhân vật hoặc các chi tiết trong chương này.</p>
                         </div>
                     )}
                     {chatMessages?.map((msg, index) => (
-                        <div key={index} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-                            <div className={`max-w-[85%] px-3 py-2 rounded-2xl text-sm ${msg.role === 'user' ? 'bg-[var(--theme-accent-primary)] text-white' : 'bg-[var(--theme-bg-base)] text-[var(--theme-text-primary)] border border-[var(--theme-border)]'}`}>
+                        <div key={index} className={`flex mb-3 ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+                            <div className={`max-w-[90%] lg:max-w-[85%] px-3 py-2 rounded-2xl text-sm lg:text-xs xl:text-sm ${msg.role === 'user' ? 'bg-[var(--theme-accent-primary)] text-white rounded-br-none' : 'bg-[var(--theme-bg-base)] text-[var(--theme-text-primary)] border border-[var(--theme-border)] rounded-bl-none'}`}>
                                 <p className="whitespace-pre-wrap break-words">{msg.content}</p>
                             </div>
                         </div>
                     ))}
                     {isChatLoading && (
-                        <div className="flex justify-start">
-                            <div className="px-3 py-2 rounded-2xl bg-[var(--theme-bg-base)] border border-[var(--theme-border)] flex items-center">
+                        <div className="flex justify-start mb-3">
+                            <div className="px-3 py-2 rounded-2xl bg-[var(--theme-bg-base)] border border-[var(--theme-border)] rounded-bl-none flex items-center">
                                 <SpinnerIcon className="animate-spin w-4 h-4 text-[var(--theme-accent-primary)]" />
                             </div>
                         </div>
                     )}
                 </div>
-                <form onSubmit={handleChatSubmit} className="flex gap-2 pt-2 border-t border-[var(--theme-border)]">
+                <form onSubmit={handleChatSubmit} className="flex-shrink-0 flex gap-2 pt-2 border-t border-[var(--theme-border)]">
                     <input 
                         type="text" 
                         value={chatInput}
                         onChange={(e) => setChatInput(e.target.value)}
                         placeholder="Hỏi AI..." 
-                        className="flex-grow bg-[var(--theme-bg-base)] border border-[var(--theme-border)] rounded-full px-4 py-2 text-sm text-[var(--theme-text-primary)] focus:outline-none focus:ring-1 focus:ring-[var(--theme-accent-primary)] disabled:opacity-50"
+                        className="flex-grow bg-[var(--theme-bg-base)] border border-[var(--theme-border)] rounded-full px-3 py-1.5 text-sm lg:text-xs xl:text-sm text-[var(--theme-text-primary)] focus:outline-none focus:ring-1 focus:ring-[var(--theme-accent-primary)] disabled:opacity-50"
                         disabled={isChatLoading}
                     />
                     <button 
                         type="submit" 
                         disabled={!chatInput.trim() || isChatLoading}
-                        className="w-9 h-9 rounded-full bg-[var(--theme-accent-primary)] hover:brightness-110 text-white flex items-center justify-center disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                        className="w-8 h-8 rounded-full bg-[var(--theme-accent-primary)] hover:brightness-110 text-white flex items-center justify-center disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                     >
-                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-5 h-5 transform rotate-90">
+                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-4 h-4 transform rotate-90">
                             <path d="M10.894 2.553a1 1 0 00-1.788 0l-7 14a1 1 0 001.169 1.409l5-1.429A1 1 0 009 15.571V11a1 1 0 112 0v4.571a1 1 0 00.725.962l5 1.428a1 1 0 001.17-1.408l-7-14z" />
                         </svg>
                     </button>
@@ -579,7 +554,7 @@ const CharacterPanel: React.FC<CharacterPanelProps> = ({
              return (
                 <div className="flex flex-col items-center justify-center h-48">
                     <LoadingSpinner />
-                    <p className="text-[var(--theme-accent-primary)] mt-2">Đang phân tích chương...</p>
+                    <p className="text-[var(--theme-accent-primary)] mt-2 text-sm lg:text-xs">Đang phân tích chương...</p>
                 </div>
             );
         }
@@ -589,21 +564,21 @@ const CharacterPanel: React.FC<CharacterPanelProps> = ({
         const list = items || [];
         return (
             <div>
-                <div className="flex justify-between items-center mb-4">
-                    <h3 className="text-xl font-bold text-[var(--theme-accent-primary)]">{title}</h3>
+                <div className="flex justify-between items-center mb-4 lg:mb-2">
+                    <h3 className="text-xl lg:text-lg xl:text-xl font-bold text-[var(--theme-accent-primary)]">{title}</h3>
                     <button 
                         onClick={() => handleOpenModal(type)}
                         className="flex items-center gap-1 px-2 py-1 text-xs bg-slate-600 hover:bg-slate-500 text-white font-semibold rounded-md transition-colors"
                         aria-label={`Thêm ${title} mới`}
                     >
-                        <PlusIcon className="w-4 h-4" />
+                        <PlusIcon className="w-4 h-4 lg:w-3 lg:h-3" />
                         Thêm
                     </button>
                 </div>
                 {list.length === 0 ? (
-                    <p className="text-[var(--theme-text-secondary)] italic text-sm">Chưa có thông tin. Nhấn "Thêm" để nhập tay.</p>
+                    <p className="text-[var(--theme-text-secondary)] italic text-sm lg:text-xs">Chưa có thông tin.</p>
                 ) : (
-                     <div className="flex flex-col gap-2">
+                     <div className="flex flex-col gap-2 lg:gap-1">
                         {list.map((item, index) => {
                             const isString = typeof item === 'string';
                             const displayItem = isString ? { ten: item, moTa: '' } : item;
@@ -630,12 +605,22 @@ const CharacterPanel: React.FC<CharacterPanelProps> = ({
         const r = stats?.trangThai;
         return (
           <div>
-            <h3 className="text-xl font-bold text-[var(--theme-accent-primary)] mb-4">Trạng Thái & Cảnh Giới</h3>
-            <div className="space-y-4">
-                <p className="text-lg"><strong>Tên:</strong> {r?.ten || 'Chưa cập nhật'}</p>
-                 <p className="text-lg">
+            <div className="flex justify-between items-center mb-4 lg:mb-2">
+                <h3 className="text-xl lg:text-lg xl:text-xl font-bold text-[var(--theme-accent-primary)]">Trạng Thái & Cảnh Giới</h3>
+                <button
+                    onClick={() => handleOpenModal('mainCharacter', { ten: stats?.trangThai?.ten, canhGioi: stats?.canhGioi })}
+                    className="flex items-center gap-1 px-2 py-1 text-xs bg-slate-600 hover:bg-slate-500 text-white font-semibold rounded-md transition-colors"
+                    aria-label="Sửa thông tin nhân vật chính"
+                >
+                    <EditIcon className="w-4 h-4 lg:w-3 lg:h-3" />
+                    Sửa
+                </button>
+            </div>
+            <div className="space-y-4 lg:space-y-2 text-lg lg:text-sm xl:text-lg">
+                <p><strong>Tên:</strong> {r?.ten || 'Chưa cập nhật'}</p>
+                 <p>
                     <strong>Cảnh giới:</strong> 
-                    <span className="text-2xl ml-2 text-[var(--theme-accent-secondary)] font-semibold">{stats?.canhGioi || 'Chưa rõ'}</span>
+                    <span className="text-2xl lg:text-xl xl:text-2xl ml-2 text-[var(--theme-accent-secondary)] font-semibold">{stats?.canhGioi || 'Chưa rõ'}</span>
                 </p>
                 {renderInfoList('Tư chất / Đặc tính', r?.tuChat, 'tuChat')}
               </div>
@@ -655,21 +640,21 @@ const CharacterPanel: React.FC<CharacterPanelProps> = ({
         const npcs = stats?.npcs || [];
         return (
             <div>
-                <div className="flex justify-between items-center mb-4">
-                    <h3 className="text-xl font-bold text-[var(--theme-accent-primary)]">Nhân Vật Phụ</h3>
+                <div className="flex justify-between items-center mb-4 lg:mb-2">
+                    <h3 className="text-xl lg:text-lg xl:text-xl font-bold text-[var(--theme-accent-primary)]">Nhân Vật Phụ</h3>
                     <button 
                         onClick={() => handleOpenModal('npcs')}
                         className="flex items-center gap-1 px-2 py-1 text-xs bg-slate-600 hover:bg-slate-500 text-white font-semibold rounded-md transition-colors"
                         aria-label="Thêm Nhân Vật Phụ mới"
                     >
-                        <PlusIcon className="w-4 h-4" />
+                        <PlusIcon className="w-4 h-4 lg:w-3 lg:h-3" />
                         Thêm
                     </button>
                 </div>
                 {npcs.length === 0 ? (
-                    <p className="text-[var(--theme-text-secondary)] italic text-sm">Chưa có thông tin. Nhấn "Thêm" để nhập tay.</p>
+                    <p className="text-[var(--theme-text-secondary)] italic text-sm lg:text-xs">Chưa có thông tin.</p>
                 ) : (
-                     <div className="flex flex-col gap-2">
+                     <div className="flex flex-col gap-2 lg:gap-1">
                         {npcs.map((npc) => (
                            <div key={npc.ten} className="flex items-center gap-2">
                                 <div className="w-3 h-3 flex-shrink-0" title={`Quan hệ với NVC: ${npc.mucDoThanThiet || 'Chưa rõ'}`}>
@@ -695,8 +680,8 @@ const CharacterPanel: React.FC<CharacterPanelProps> = ({
       case 'relationships':
         return (
           <div>
-             <div className="flex justify-between items-center mb-4">
-                <h3 className="text-xl font-bold text-[var(--theme-accent-primary)]">Sơ đồ Quan hệ</h3>
+             <div className="flex justify-between items-center mb-4 lg:mb-2">
+                <h3 className="text-xl lg:text-lg xl:text-xl font-bold text-[var(--theme-accent-primary)]">Sơ đồ Quan hệ</h3>
             </div>
             <RelationshipGraph 
                 relations={allRelations}
@@ -709,14 +694,14 @@ const CharacterPanel: React.FC<CharacterPanelProps> = ({
       case 'locations':
         return (
             <div>
-              <div className="flex justify-between items-center mb-4">
-                  <h3 className="text-xl font-bold text-[var(--theme-accent-primary)]">Sơ đồ Địa Điểm</h3>
+              <div className="flex justify-between items-center mb-4 lg:mb-2">
+                  <h3 className="text-xl lg:text-lg xl:text-xl font-bold text-[var(--theme-accent-primary)]">Sơ đồ Địa Điểm</h3>
                   <button 
                       onClick={() => handleOpenModal('diaDiem')}
                       className="flex items-center gap-1 px-2 py-1 text-xs bg-slate-600 hover:bg-slate-500 text-white font-semibold rounded-md transition-colors"
                       aria-label="Thêm Địa điểm mới"
                   >
-                      <PlusIcon className="w-4 h-4" />
+                      <PlusIcon className="w-4 h-4 lg:w-3 lg:h-3" />
                       Thêm
                   </button>
               </div>
@@ -728,34 +713,34 @@ const CharacterPanel: React.FC<CharacterPanelProps> = ({
                     onDelete={handleRequestDelete}
                   />
               ) : (
-                 <p className="text-[var(--theme-text-secondary)] italic text-sm">Chưa có thông tin. Nhấn "Thêm" để nhập tay.</p>
+                 <p className="text-[var(--theme-text-secondary)] italic text-sm lg:text-xs">Chưa có thông tin.</p>
               )}
             </div>
         );
       case 'data':
         return (
             <div>
-                <h3 className="text-xl font-bold text-[var(--theme-accent-primary)] mb-4">Quản lý Dữ liệu AI</h3>
-                <div className="space-y-6">
-                    <div className="p-4 border border-[var(--theme-border)] rounded-lg bg-[var(--theme-bg-base)]">
-                        <h4 className="text-sm font-bold text-[var(--theme-text-primary)] mb-2">1. Xuất Dữ Liệu (Truyện Này)</h4>
-                        <p className="text-xs text-[var(--theme-text-secondary)] mb-3">Lưu trữ file .json chứa toàn bộ thông tin AI và tiến độ đọc của truyện này.</p>
+                <h3 className="text-xl lg:text-lg xl:text-xl font-bold text-[var(--theme-accent-primary)] mb-4 lg:mb-2">Quản lý Dữ liệu AI</h3>
+                <div className="space-y-6 lg:space-y-4">
+                    <div className="p-4 lg:p-3 border border-[var(--theme-border)] rounded-lg bg-[var(--theme-bg-base)]">
+                        <h4 className="text-sm lg:text-xs xl:text-sm font-bold text-[var(--theme-text-primary)] mb-2">1. Xuất Dữ Liệu (Truyện Này)</h4>
+                        <p className="text-xs lg:text-[10px] xl:text-xs text-[var(--theme-text-secondary)] mb-3">Lưu trữ file .json chứa toàn bộ thông tin AI.</p>
                         <button 
                             onClick={handleSaveData}
-                            className="flex items-center gap-2 px-4 py-2 bg-slate-700 hover:bg-slate-600 text-white rounded-md text-sm font-semibold transition-colors w-full justify-center"
+                            className="flex items-center gap-2 px-4 py-2 bg-slate-700 hover:bg-slate-600 text-white rounded-md text-sm lg:text-xs font-semibold transition-colors w-full justify-center"
                         >
                             <DownloadIcon className="w-4 h-4" />
                             Tải file JSON
                         </button>
                     </div>
 
-                    <div className="p-4 border border-[var(--theme-border)] rounded-lg bg-[var(--theme-bg-base)]">
-                        <h4 className="text-sm font-bold text-[var(--theme-text-primary)] mb-2">2. Nhập Dữ Liệu (Truyện Này)</h4>
-                        <p className="text-xs text-[var(--theme-text-secondary)] mb-3">Khôi phục dữ liệu phân tích từ file .json đã lưu.</p>
+                    <div className="p-4 lg:p-3 border border-[var(--theme-border)] rounded-lg bg-[var(--theme-bg-base)]">
+                        <h4 className="text-sm lg:text-xs xl:text-sm font-bold text-[var(--theme-text-primary)] mb-2">2. Nhập Dữ Liệu (Truyện Này)</h4>
+                        <p className="text-xs lg:text-[10px] xl:text-xs text-[var(--theme-text-secondary)] mb-3">Khôi phục dữ liệu phân tích từ file .json.</p>
                         <div className="flex gap-2">
                             <button 
                                 onClick={() => loadInputRef.current?.click()}
-                                className="flex items-center gap-2 px-4 py-2 bg-[var(--theme-accent-primary)] hover:brightness-110 text-white rounded-md text-sm font-semibold transition-colors w-full justify-center"
+                                className="flex items-center gap-2 px-4 py-2 bg-[var(--theme-accent-primary)] hover:brightness-110 text-white rounded-md text-sm lg:text-xs font-semibold transition-colors w-full justify-center"
                             >
                                 <UploadIcon className="w-4 h-4" />
                                 Chọn file và Nhập
@@ -785,10 +770,9 @@ const CharacterPanel: React.FC<CharacterPanelProps> = ({
       if (customColor) {
           if (isActive) {
               styleClass = 'text-white';
-              inlineStyle = { backgroundColor: 'var(--theme-accent-primary)' }; // Use theme accent instead of hardcoded
+              inlineStyle = { backgroundColor: 'var(--theme-accent-primary)' }; 
           } else {
               styleClass = 'hover:bg-opacity-20';
-              // Use theme text color for inactive state instead of customColor to blend better
               inlineStyle = { color: 'var(--theme-text-secondary)', backgroundColor: 'transparent' }; 
           }
       } else {
@@ -798,7 +782,7 @@ const CharacterPanel: React.FC<CharacterPanelProps> = ({
       return (
         <button 
             onClick={() => setActiveTab(tab)}
-            className={`px-3 py-2 text-sm font-medium rounded-md transition-colors ${styleClass}`}
+            className={`px-3 py-2 lg:px-2 lg:py-1.5 xl:px-3 xl:py-2 text-sm lg:text-[10px] xl:text-sm font-medium rounded-md transition-colors ${styleClass}`}
             style={inlineStyle}
         >
             {label}
@@ -808,13 +792,13 @@ const CharacterPanel: React.FC<CharacterPanelProps> = ({
 
   const panelInnerContent = (
     <>
-        <div className="flex justify-between items-center p-4 border-b border-[var(--theme-border)]">
-          <div className="flex items-center gap-3">
-             <h2 className="text-xl font-bold text-[var(--theme-text-primary)]">
-               {isSidebar ? 'Thông Tin Thế Giới' : 'Bảng Nhân Vật'}
+        <div className="flex justify-between items-center p-4 lg:p-3 xl:p-4 border-b border-[var(--theme-border)]">
+          <div className="flex items-center gap-3 lg:gap-2 xl:gap-3">
+             <h2 className="text-xl lg:text-lg xl:text-xl font-bold text-[var(--theme-text-primary)]">
+               {isSidebar ? (unifiedMode ? 'Dữ liệu Truyện' : 'Thế Giới') : 'Bảng Nhân Vật'}
              </h2>
             {isAnalyzing && (
-                <svg className="animate-spin h-5 w-5 text-[var(--theme-accent-primary)]" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                <svg className="animate-spin h-5 w-5 lg:h-4 lg:w-4 xl:h-5 xl:w-5 text-[var(--theme-accent-primary)]" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
                     <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
                     <path className="opacity-75" fill="currentColor" d="M4 12a8 8
  0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
@@ -825,16 +809,16 @@ const CharacterPanel: React.FC<CharacterPanelProps> = ({
               {isAnalyzing ? (
                 <button 
                   onClick={onStopAnalysis} 
-                  className="bg-rose-600 text-white font-semibold text-xs px-3 py-1 rounded-md hover:bg-rose-500 transition-colors animate-pulse"
+                  className="bg-rose-600 text-white font-semibold text-xs lg:text-[10px] xl:text-xs px-3 py-1 rounded-md hover:bg-rose-500 transition-colors animate-pulse"
                   aria-label="Dừng phân tích"
                   title="Dừng phân tích"
                 >
-                  Dừng phân tích
+                  Dừng
                 </button>
               ) : (
                 <button 
                   onClick={onReanalyze} 
-                  className="bg-[var(--theme-accent-secondary)] text-slate-900 font-semibold text-xs px-3 py-1 rounded-md hover:brightness-110 transition-colors"
+                  className="bg-[var(--theme-accent-secondary)] text-slate-900 font-semibold text-xs lg:text-[10px] xl:text-xs px-3 py-1 rounded-md hover:brightness-110 transition-colors"
                   aria-label="Phân tích lại thông tin thế giới"
                   title="Phân tích lại"
                 >
@@ -847,8 +831,8 @@ const CharacterPanel: React.FC<CharacterPanelProps> = ({
           </div>
         </div>
         
-        <div className="p-4 flex flex-wrap gap-2 border-b border-[var(--theme-border)] bg-[var(--theme-bg-base)]/50">
-          {isSidebar ? (
+        <div className="p-4 lg:p-2 xl:p-4 flex flex-wrap gap-2 lg:gap-1 border-b border-[var(--theme-border)] bg-[var(--theme-bg-base)]/50">
+          {isSidebar && !unifiedMode ? (
              <>
                <TabButton tab="npcs" label="Nhân Vật" />
                <TabButton tab="relationships" label="Quan hệ" />
@@ -874,7 +858,7 @@ const CharacterPanel: React.FC<CharacterPanelProps> = ({
           )}
         </div>
         
-        <div className="p-6 min-h-[200px]">
+        <div className="p-6 lg:p-3 xl:p-6 min-h-[200px]">
           {renderContent()}
         </div>
     </>
@@ -910,6 +894,9 @@ const CharacterPanel: React.FC<CharacterPanelProps> = ({
       )
   }
 
+  // Adjust padding based on header visibility for Mobile/Tablet Portrait
+  const paddingTopClass = isHeaderVisible ? 'pt-36' : 'pt-20';
+
   return createPortal(
     <>
     <div 
@@ -917,7 +904,7 @@ const CharacterPanel: React.FC<CharacterPanelProps> = ({
       onClick={onClose}
     >
       <div 
-        className={`fixed top-0 bottom-0 right-0 w-full max-w-md bg-[var(--theme-bg-surface)] shadow-2xl transition-transform duration-300 ease-in-out border-l border-[var(--theme-border)] flex flex-col ${isOpen ? 'translate-x-0' : 'translate-x-full'}`}
+        className={`fixed top-0 bottom-0 right-0 w-full max-w-md bg-[var(--theme-bg-surface)] shadow-2xl transition-transform duration-300 ease-in-out border-l border-[var(--theme-border)] flex flex-col ${paddingTopClass} ${isOpen ? 'translate-x-0' : 'translate-x-full'}`}
         onClick={e => e.stopPropagation()}
         role="dialog"
         aria-modal="true"
@@ -984,7 +971,7 @@ const LocationTree: React.FC<{
 
     if (locations.length > 0 && tree.length === 0) {
         return (
-            <div className="text-[var(--theme-text-secondary)] italic mt-4">
+            <div className="text-[var(--theme-text-secondary)] italic mt-4 text-sm lg:text-xs xl:text-sm">
                 <p>Không thể dựng cây phả hệ, hiển thị dạng danh sách:</p>
                 {locations.map(loc => (
                     <p key={loc.ten} className="ml-4">- {loc.ten} {loc.ten === currentLocation ? ' (hiện tại)' : ''}</p>
@@ -1025,10 +1012,10 @@ const TreeNode: React.FC<{
     
     return (
         <div className="flex flex-col">
-            <div className="flex items-center relative h-10">
+            <div className="flex items-center relative h-10 lg:h-8 xl:h-10">
                 <TreeBranch level={level + 1} isLast={isLast} parentIsLast={parentIsLast} />
                 <div className="flex items-center ml-1 group flex-1 min-w-0">
-                  <div className={`px-3 py-1 rounded-md text-sm font-medium truncate max-w-full ${isCurrent ? 'bg-[var(--theme-accent-secondary)] text-slate-900 ring-2 ring-offset-2 ring-offset-[var(--theme-bg-surface)] ring-[var(--theme-accent-secondary)]' : 'bg-[var(--theme-bg-base)]'}`}>
+                  <div className={`px-3 py-1 lg:px-2 lg:py-0.5 xl:px-3 xl:py-1 rounded-md text-sm lg:text-xs xl:text-sm font-medium truncate max-w-full ${isCurrent ? 'bg-[var(--theme-accent-secondary)] text-slate-900 ring-2 ring-offset-2 ring-offset-[var(--theme-bg-surface)] ring-[var(--theme-accent-secondary)]' : 'bg-[var(--theme-bg-base)]'}`}>
                       <EntityTooltip entity={node} noUnderline>{node.ten}</EntityTooltip>
                   </div>
                   {isCurrent && (
@@ -1037,19 +1024,19 @@ const TreeNode: React.FC<{
                   <div className="ml-2 hidden group-hover:flex items-center gap-1 shrink-0">
                       <button
                         onClick={(e) => { e.stopPropagation(); onEdit('diaDiem', node); }}
-                        className="p-1.5 text-slate-300 hover:text-cyan-400 rounded-full transition-colors bg-slate-700/90"
+                        className="p-1.5 lg:p-1 xl:p-1.5 text-slate-300 hover:text-cyan-400 rounded-full transition-colors bg-slate-700/90"
                         aria-label={`Sửa ${node.ten}`}
                         title="Sửa"
                       >
-                        <EditIcon className="w-4 h-4" />
+                        <EditIcon className="w-4 h-4 lg:w-3 lg:h-3" />
                       </button>
                       <button
                         onClick={(e) => { e.stopPropagation(); onDelete('diaDiem', node); }}
-                        className="p-1.5 text-slate-300 hover:text-rose-500 rounded-full transition-colors bg-slate-700/90"
+                        className="p-1.5 lg:p-1 xl:p-1.5 text-slate-300 hover:text-rose-500 rounded-full transition-colors bg-slate-700/90"
                         aria-label={`Xóa ${node.ten}`}
                         title="Xóa"
                       >
-                        <TrashIcon className="w-4 h-4" />
+                        <TrashIcon className="w-4 h-4 lg:w-3 lg:h-3" />
                       </button>
                   </div>
                 </div>
