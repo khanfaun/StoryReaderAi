@@ -139,6 +139,6 @@ export interface DownloadConfig {
     target: 'download'; 
     preset: 'all' | '50' | '100' | 'custom';
     ranges: { start: number; end: number }[];
-    format: 'epub' | 'html';
+    format: 'epub' | 'html' | 'txt' | 'json';
     mergeCustom: boolean;
 }

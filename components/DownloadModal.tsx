@@ -1,3 +1,4 @@
+
 import React, { useEffect, useState, useRef } from 'react';
 import type { Story, CharacterStats, DownloadConfig } from '../types';
 import { CloseIcon, PlusIcon, TrashIcon, DownloadIcon, CheckIcon, SpinnerIcon, UploadIcon, SparklesIcon } from './icons';
@@ -34,12 +35,13 @@ const DownloadModal: React.FC<DownloadModalProps> = ({
   // Ebook State
   const [preset, setPreset] = useState<Preset>('all');
   const [ranges, setRanges] = useState<Range[]>([]);
-  const [format, setFormat] = useState<'epub' | 'html'>('epub');
+  const [format, setFormat] = useState<'epub' | 'html' | 'txt' | 'json'>('epub');
   const [mergeCustom, setMergeCustom] = useState(false);
   
   // AI Data State
   const fileInputRef = useRef<HTMLInputElement>(null);
   
+  // Không dùng totalChapters trong dependency array của useEffect để tránh reset form khi số chương thay đổi (do cào ngầm)
   const totalChapters = story?.chapters?.length || 0;
 
   useEffect(() => {
@@ -48,24 +50,29 @@ const DownloadModal: React.FC<DownloadModalProps> = ({
         setFormat('epub');
         setMergeCustom(false);
         setActiveTab('ebook'); // Reset to default tab
-        handlePresetChange('all', totalChapters); 
+        
+        // Khởi tạo range mặc định dựa trên story hiện tại
+        if (story?.chapters) {
+             setRanges([{ id: 'all', start: 1, end: story.chapters.length }]);
+        }
     }
-  }, [isOpen, totalChapters]);
+  }, [isOpen]); // Chỉ chạy khi isOpen thay đổi, bỏ totalChapters khỏi deps
 
   // --- EBOOK LOGIC ---
-  const handlePresetChange = (newPreset: Preset, total: number = totalChapters) => {
+  const handlePresetChange = (newPreset: Preset) => {
+      const currentTotal = story?.chapters?.length || 0;
       setPreset(newPreset);
       let newRanges: Range[] = [];
       
       if (newPreset === 'all') {
-          newRanges = [{ id: 'all', start: 1, end: total }];
+          newRanges = [{ id: 'all', start: 1, end: currentTotal }];
       } else if (newPreset === '50' || newPreset === '100') {
           const size = parseInt(newPreset);
-          for (let i = 1; i <= total; i += size) {
+          for (let i = 1; i <= currentTotal; i += size) {
               newRanges.push({
                   id: `chunk-${i}`,
                   start: i,
-                  end: Math.min(i + size - 1, total)
+                  end: Math.min(i + size - 1, currentTotal)
               });
           }
       } else {
@@ -151,7 +158,7 @@ const DownloadModal: React.FC<DownloadModalProps> = ({
                     className={`flex-1 py-3 text-sm font-bold transition-colors border-b-2 ${activeTab === 'ebook' ? 'text-[var(--theme-accent-primary)] border-[var(--theme-accent-primary)] bg-[var(--theme-bg-base)]' : 'text-[var(--theme-text-secondary)] border-transparent hover:text-[var(--theme-text-primary)]'}`}
                     onClick={() => setActiveTab('ebook')}
                 >
-                    Tải truyện (Ebook/HTML)
+                    Tải truyện (Ebook/Text/JSON)
                 </button>
                 <button 
                     className={`flex-1 py-3 text-sm font-bold transition-colors border-b-2 ${activeTab === 'ai_data' ? 'text-[var(--theme-accent-primary)] border-[var(--theme-accent-primary)] bg-[var(--theme-bg-base)]' : 'text-[var(--theme-text-secondary)] border-transparent hover:text-[var(--theme-text-primary)]'}`}
@@ -173,7 +180,7 @@ const DownloadModal: React.FC<DownloadModalProps> = ({
                                 <div>
                                     <h3 className="font-bold text-yellow-200 text-sm">Hệ thống đang tải dữ liệu...</h3>
                                     <p className="text-xs text-yellow-100/80">
-                                        Vui lòng đợi quá trình đồng bộ hoàn tất (100%) trước khi xuất file để đảm bảo đầy đủ nội dung.
+                                        Bạn vẫn có thể tải truyện ngay, nhưng các chương chưa tải xong sẽ không có nội dung.
                                     </p>
                                 </div>
                             </div>
@@ -191,7 +198,7 @@ const DownloadModal: React.FC<DownloadModalProps> = ({
                             </div>
                         )}
 
-                        <div className={`space-y-6 transition-opacity duration-300 ${isBackgroundDownloading ? 'opacity-50 pointer-events-none' : 'opacity-100'}`}>
+                        <div className="space-y-6">
                             {/* Preset Selection */}
                             <div>
                                 <label className="block text-sm font-semibold text-[var(--theme-text-secondary)] mb-2">Chọn chương:</label>
@@ -269,11 +276,13 @@ const DownloadModal: React.FC<DownloadModalProps> = ({
                                 <label className="block text-sm font-semibold text-[var(--theme-text-secondary)] mb-2">Định dạng file:</label>
                                 <select 
                                     value={format} 
-                                    onChange={(e) => setFormat(e.target.value as 'epub' | 'html')}
+                                    onChange={(e) => setFormat(e.target.value as any)}
                                     className="w-full bg-[var(--theme-bg-base)] border border-[var(--theme-border)] rounded-md p-2 text-[var(--theme-text-primary)] focus:ring-[var(--theme-accent-primary)] text-sm"
                                 >
                                     <option value="epub">EPUB (Khuyên dùng - Đọc trên mọi app)</option>
                                     <option value="html">HTML (Để in sang PDF)</option>
+                                    <option value="txt">TXT (Văn bản thuần)</option>
+                                    <option value="json">JSON (Để nhập liệu hoặc Dev)</option>
                                 </select>
                             </div>
                         </div>
@@ -345,7 +354,6 @@ const DownloadModal: React.FC<DownloadModalProps> = ({
                 {activeTab === 'ebook' && (
                     <button 
                         onClick={handleConfirmDownload} 
-                        disabled={isBackgroundDownloading}
                         className="flex items-center gap-2 px-6 py-2 rounded-md bg-[var(--theme-accent-primary)] hover:brightness-110 text-white font-bold transition-colors shadow-lg disabled:opacity-50 disabled:cursor-not-allowed"
                     >
                         <DownloadIcon className="w-5 h-5" />

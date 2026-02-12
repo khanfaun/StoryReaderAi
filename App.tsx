@@ -1064,6 +1064,43 @@ const App: React.FC = () => {
                 <p>Hệ thống phát hiện {overwriteConfirmation?.chapters.filter(ch => ch.number <= (overwriteConfirmation?.story.chapters?.length || 0)).length} chương có số thứ tự trùng với chương đã tồn tại.</p>
                 <p className="text-sm mt-2 text-[var(--theme-text-secondary)]">Bạn có muốn <strong>ghi đè</strong> nội dung mới vào các chương cũ không?</p>
               </ConfirmationModal>
+
+              {/* OVERLAY DOWNLOAD PROGRESS */}
+              {downloadStatus.isProcessing && (
+                  <div className="fixed inset-0 z-[300] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+                      <div className="bg-[var(--theme-bg-surface)] w-full max-w-md p-6 rounded-xl border border-[var(--theme-border)] shadow-2xl animate-fade-in-up">
+                          <h3 className="text-lg font-bold text-[var(--theme-text-primary)] mb-4 flex items-center gap-3">
+                              <SpinnerIcon className="w-6 h-6 animate-spin text-[var(--theme-accent-primary)]" />
+                              Đang xử lý tải xuống...
+                          </h3>
+                          
+                          <div className="mb-4">
+                              <div className="flex justify-between text-xs text-[var(--theme-text-secondary)] mb-1">
+                                  <span>{downloadStatus.message}</span>
+                                  <span>{Math.round(downloadStatus.total > 0 ? (downloadStatus.current / downloadStatus.total) * 100 : 0)}%</span>
+                              </div>
+                              <div className="w-full bg-[var(--theme-bg-base)] rounded-full h-3 overflow-hidden border border-[var(--theme-border)]">
+                                  <div 
+                                      className="bg-[var(--theme-accent-primary)] h-full transition-all duration-300 relative" 
+                                      style={{ width: `${downloadStatus.total > 0 ? (downloadStatus.current / downloadStatus.total) * 100 : 0}%` }}
+                                  >
+                                      <div className="absolute inset-0 bg-white/20 animate-pulse"></div>
+                                  </div>
+                              </div>
+                          </div>
+
+                          <div className="flex justify-end">
+                              <button 
+                                  onClick={handleCancelDownload}
+                                  className="px-4 py-2 bg-rose-600 hover:bg-rose-500 text-white text-sm font-bold rounded-lg transition-colors flex items-center gap-2"
+                              >
+                                  <StopIcon className="w-4 h-4" />
+                                  Hủy bỏ
+                              </button>
+                          </div>
+                      </div>
+                  </div>
+              )}
           </div>
       )
   }
@@ -1071,28 +1108,39 @@ const App: React.FC = () => {
   // Dashboard / Home View
   return (
     <div className="flex flex-col min-h-screen bg-[var(--theme-bg-base)] text-[var(--theme-text-primary)] font-sans transition-colors duration-300 relative">
+      {/* Overlay Download Progress */}
       {downloadStatus.isProcessing && (
-          <div className="fixed bottom-14 left-4 z-[200] max-w-sm w-full bg-[var(--theme-bg-surface)] border border-[var(--theme-border)] rounded-lg shadow-2xl p-4 animate-fade-in-up">
-              <div className="flex justify-between items-center mb-2">
-                  <h4 className="font-bold text-[var(--theme-text-primary)] text-sm flex items-center gap-2">
-                      <SpinnerIcon className="w-4 h-4 animate-spin text-[var(--theme-accent-primary)]" />
-                      Đang xử lý tải xuống (EPUB)
-                  </h4>
-                  <button onClick={handleCancelDownload} className="text-rose-400 hover:text-rose-300 p-1 rounded-md hover:bg-rose-900/20" title="Hủy tải xuống">
-                      <StopIcon className="w-4 h-4" />
-                  </button>
-              </div>
-              <div className="w-full bg-[var(--theme-bg-base)] rounded-full h-2 mb-2 overflow-hidden">
-                  <div 
-                      className="bg-[var(--theme-accent-primary)] h-full transition-all duration-300 relative" 
-                      style={{ width: `${downloadStatus.total > 0 ? (downloadStatus.current / downloadStatus.total) * 100 : 0}%` }}
-                  >
-                      <div className="absolute inset-0 bg-white/20 animate-pulse"></div>
+          <div className="fixed inset-0 z-[300] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+              <div className="bg-[var(--theme-bg-surface)] w-full max-w-md p-6 rounded-xl border border-[var(--theme-border)] shadow-2xl animate-fade-in-up">
+                  <h3 className="text-lg font-bold text-[var(--theme-text-primary)] mb-4 flex items-center gap-3">
+                      <SpinnerIcon className="w-6 h-6 animate-spin text-[var(--theme-accent-primary)]" />
+                      Đang xử lý tải xuống...
+                  </h3>
+                  
+                  <div className="mb-4">
+                      <div className="flex justify-between text-xs text-[var(--theme-text-secondary)] mb-1">
+                          <span>{downloadStatus.message}</span>
+                          <span>{Math.round(downloadStatus.total > 0 ? (downloadStatus.current / downloadStatus.total) * 100 : 0)}%</span>
+                      </div>
+                      <div className="w-full bg-[var(--theme-bg-base)] rounded-full h-3 overflow-hidden border border-[var(--theme-border)]">
+                          <div 
+                              className="bg-[var(--theme-accent-primary)] h-full transition-all duration-300 relative" 
+                              style={{ width: `${downloadStatus.total > 0 ? (downloadStatus.current / downloadStatus.total) * 100 : 0}%` }}
+                          >
+                              <div className="absolute inset-0 bg-white/20 animate-pulse"></div>
+                          </div>
+                      </div>
                   </div>
-              </div>
-              <div className="flex justify-between text-xs text-[var(--theme-text-secondary)]">
-                  <span className="truncate max-w-[70%]">{downloadStatus.message}</span>
-                  <span>{Math.round(downloadStatus.total > 0 ? (downloadStatus.current / downloadStatus.total) * 100 : 0)}%</span>
+
+                  <div className="flex justify-end">
+                      <button 
+                          onClick={handleCancelDownload}
+                          className="px-4 py-2 bg-rose-600 hover:bg-rose-500 text-white text-sm font-bold rounded-lg transition-colors flex items-center gap-2"
+                      >
+                          <StopIcon className="w-4 h-4" />
+                          Hủy bỏ
+                      </button>
+                  </div>
               </div>
           </div>
       )}

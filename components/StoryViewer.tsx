@@ -833,7 +833,6 @@ const StoryViewer: React.FC<StoryViewerProps> = ({
                 onSearch={onSearch}
                 isSearchLoading={isSearchLoading}
                 onOpenHelpModal={onOpenHelpModal}
-                onCreateStory={onCreateStory}
                 // Pass ADD CHAPTERS HANDLER
                 onAddChapters={onAddChapters}
             />

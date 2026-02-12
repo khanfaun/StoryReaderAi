@@ -1,3 +1,4 @@
+
 import { useState, useRef } from 'react';
 import type { Story, DownloadConfig } from '../types';
 import { getStoryDetails } from '../services/truyenfullService';
@@ -33,6 +34,15 @@ export const useDownloader = (onError: (msg: string) => void) => {
         }
     };
 
+    const getExtension = (format: string) => {
+        switch(format) {
+            case 'html': return 'html';
+            case 'txt': return 'txt';
+            case 'json': return 'json';
+            default: return 'epub';
+        }
+    };
+
     const handleStartDownload = async (config: DownloadConfig) => {
         let storyToDownload = config.story;
         try {
@@ -46,6 +56,7 @@ export const useDownloader = (onError: (msg: string) => void) => {
 
         const { ranges, preset, format, mergeCustom } = config;
         const totalChapters = storyToDownload.chapters!.length;
+        const fileExt = getExtension(format);
 
         setDownloadStatus({ isProcessing: true, current: 0, total: 0, message: 'Đang khởi tạo...' });
         downloadAbortRef.current = false;
@@ -85,7 +96,7 @@ export const useDownloader = (onError: (msg: string) => void) => {
                 );
                 
                 if (!downloadAbortRef.current) {
-                    triggerFileDownload(blob, `${storyToDownload.title} - Full.${format === 'html' ? 'html' : 'epub'}`);
+                    triggerFileDownload(blob, `${storyToDownload.title} - Full.${fileExt}`);
                 }
 
             } else {
@@ -110,7 +121,7 @@ export const useDownloader = (onError: (msg: string) => void) => {
                         () => downloadAbortRef.current
                     );
 
-                    const filename = `${storyToDownload.title} - ${start}-${end}.${format === 'html' ? 'html' : 'epub'}`;
+                    const filename = `${storyToDownload.title} - ${start}-${end}.${fileExt}`;
                     zip.file(filename, blob);
                     hasFiles = true;
                 }

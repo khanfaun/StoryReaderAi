@@ -164,6 +164,9 @@ const ApiKeyModal: React.FC<ApiKeyModalProps> = ({ isOpen, onClose, onValidateKe
           <div className="p-6 overflow-y-auto max-h-[85vh]">
             <div className="sync-modal__description !p-0 !pb-4">
                 <p>Chọn một key để kích hoạt. Bạn có thể thêm nhiều key cùng lúc và hệ thống sẽ tự động xác thực chúng.</p>
+                <p className="text-xs text-[var(--theme-text-secondary)] mt-2 italic border-l-2 border-[var(--theme-text-secondary)] pl-2">
+                    * Lưu ý: API Key của bạn chỉ được lưu trữ cục bộ trên trình duyệt để đảm bảo riêng tư. Hệ thống không thu thập hay lưu trữ key trên máy chủ.
+                </p>
                 {!inAiStudio && (
                     <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noopener noreferrer" className="text-[var(--theme-accent-primary)] hover:underline font-semibold block mt-2">
                         Nhận API Key của bạn tại đây

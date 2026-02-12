@@ -38,6 +38,12 @@ const cleanHtmlForXhtml = (html: string) => {
     return clean;
 };
 
+// Helper: Clean Text for TXT
+const cleanTextForTxt = (html: string) => {
+    const doc = new DOMParser().parseFromString(html, 'text/html');
+    return (doc.body.textContent || "").trim();
+};
+
 // Delay helper
 const wait = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
@@ -58,7 +64,8 @@ async function fetchChaptersContent(
     onProgress: DownloadProgressCallback,
     isCancelled: CheckCancelledCallback
 ) {
-    const chaptersData: { index: number; title: string; content: string; fileName: string }[] = [];
+    // Tìm index thực tế của chương trong danh sách gốc để đảm bảo số thứ tự đúng
+    const chaptersData: { index: number; number: number; title: string; content: string; fileName: string }[] = [];
     const total = chaptersToDownload.length;
     let downloaded = 0;
 
@@ -73,9 +80,17 @@ async function fetchChaptersContent(
 
         const batch = chaptersToDownload.slice(i, i + BATCH_SIZE);
         const batchPromises = batch.map(async (chapter, indexInBatch) => {
-            // Tìm index thực tế trong story gốc để hiển thị đúng số chương (nếu cần) hoặc dùng index trong mảng tải về
-            // Ở đây ta dùng index trong mảng tải về để đảm bảo tính liên tục trong file EPUB
-            const globalIndex = i + indexInBatch; 
+            const globalIndex = i + indexInBatch;
+            
+            // Tìm số thứ tự chương dựa trên index trong mảng gốc của truyện (nếu có thể)
+            // Hoặc fallback về số thứ tự trong mảng download
+            let chapterNumber = globalIndex + 1;
+            if (story.chapters) {
+                const foundIndex = story.chapters.findIndex(c => c.url === chapter.url);
+                if (foundIndex !== -1) {
+                    chapterNumber = foundIndex + 1;
+                }
+            }
             
             try {
                 let content = '';
@@ -93,17 +108,19 @@ async function fetchChaptersContent(
                 
                 return {
                     index: globalIndex,
+                    number: chapterNumber,
                     title: chapter.title,
                     content: content,
-                    fileName: `chapter_${globalIndex + 1}.xhtml`
+                    fileName: `chapter_${chapterNumber}.xhtml`
                 };
             } catch (e) {
                 onProgress(downloaded, total, `Lỗi tải chương "${chapter.title}": ${(e as Error).message}`);
                 return {
                     index: globalIndex,
+                    number: chapterNumber,
                     title: chapter.title,
                     content: `<p><em>Lỗi tải nội dung chương này.</em></p>`,
-                    fileName: `chapter_${globalIndex + 1}.xhtml`
+                    fileName: `chapter_${chapterNumber}.xhtml`
                 };
             }
         });
@@ -289,12 +306,57 @@ async function generateHtmlBlob(
 }
 
 /**
+ * Tạo file TXT (Văn bản thuần)
+ */
+async function generateTxtBlob(
+    story: Story,
+    chaptersData: { title: string; content: string }[],
+    onProgress: DownloadProgressCallback
+): Promise<Blob> {
+    onProgress(chaptersData.length, chaptersData.length, "Đang tạo file TXT...", "Đang đóng gói...");
+    
+    let txtContent = `${story.title}\nTác giả: ${story.author}\nNguồn: ${story.source}\n\n`;
+    txtContent += "====================================\n\n";
+
+    chaptersData.forEach(chap => {
+        // Định dạng phân tách này quan trọng để import lại
+        txtContent += `${chap.title}\n`;
+        txtContent += "------------------------------------\n";
+        txtContent += `${cleanTextForTxt(chap.content)}\n\n`;
+        txtContent += "====================================\n\n";
+    });
+
+    return new Blob([txtContent], { type: "text/plain;charset=utf-8" });
+}
+
+/**
+ * Tạo file JSON (Dữ liệu cấu trúc)
+ */
+async function generateJsonBlob(
+    story: Story,
+    chaptersData: { number: number; title: string; content: string }[],
+    onProgress: DownloadProgressCallback
+): Promise<Blob> {
+    onProgress(chaptersData.length, chaptersData.length, "Đang tạo file JSON...", "Đang đóng gói...");
+    
+    // Structure compatible with MultiChapterAddModal import
+    // Thêm trường 'number' để import lại chính xác vị trí
+    const jsonContent = chaptersData.map(chap => ({
+        number: chap.number, 
+        title: chap.title,
+        content: chap.content
+    }));
+
+    return new Blob([JSON.stringify(jsonContent, null, 2)], { type: "application/json" });
+}
+
+/**
  * Hàm chính để tải truyện (đã được cập nhật để trả về Blob)
  */
 export async function downloadStoryAsEpub(
     story: Story, 
     chaptersToDownload: Chapter[],
-    format: 'epub' | 'html',
+    format: 'epub' | 'html' | 'txt' | 'json',
     onProgress: DownloadProgressCallback,
     isCancelled: CheckCancelledCallback
 ): Promise<Blob> {
@@ -306,9 +368,15 @@ export async function downloadStoryAsEpub(
     const chaptersData = await fetchChaptersContent(story, chaptersToDownload, onProgress, isCancelled);
 
     // 2. Generate File based on format
-    if (format === 'html') {
-        return generateHtmlBlob(story, chaptersData, onProgress);
-    } else {
-        return generateEpubBlob(story, chaptersData, onProgress);
+    switch (format) {
+        case 'html':
+            return generateHtmlBlob(story, chaptersData, onProgress);
+        case 'txt':
+            return generateTxtBlob(story, chaptersData, onProgress);
+        case 'json':
+            return generateJsonBlob(story, chaptersData, onProgress);
+        case 'epub':
+        default:
+            return generateEpubBlob(story, chaptersData, onProgress);
     }
 }
