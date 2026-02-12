@@ -20,6 +20,7 @@ import ScrollToTopButton from './ScrollToTopButton';
 import CharacterPrimaryPanel from './CharacterPrimaryPanel';
 import ChatPanel from './ChatPanel'; 
 import ManualImportModal from './ManualImportModal';
+import MultiChapterAddModal from './MultiChapterAddModal';
 
 interface EbookHandler {
   zip: any;
@@ -140,6 +141,9 @@ const StoryViewer: React.FC<StoryViewerProps> = ({
     
     // Bookmark State
     const [isBookmarked, setIsBookmarked] = useState(true);
+    
+    // Multi Chapter Add Modal State
+    const [isMultiAddModalOpen, setIsMultiAddModalOpen] = useState(false);
 
     const operationIdRef = useRef<number>(0);
     const { availableSystemVoices } = useTts(settings, onSettingsChange);
@@ -636,6 +640,13 @@ const StoryViewer: React.FC<StoryViewerProps> = ({
             alert(`Lỗi khi đọc file: ${(e as Error).message}`);
         }
     };
+    
+    // --- Add Chapters Handler Wrapper ---
+    const handleAddChaptersInternal = async (newChapters: { number: number; title: string; content: string }[]) => {
+        if (onAddChapters) {
+            await onAddChapters(story, newChapters);
+        }
+    };
 
     // Loading State specifically for initial navigation or pending selection
     // FIX: Using selectedChapterIndex instead of initialChapterIndex to allow going back
@@ -762,8 +773,8 @@ const StoryViewer: React.FC<StoryViewerProps> = ({
                         onOpenHelpModal={onOpenHelpModal}
                         // Layout prop
                         pcLayout={layout}
-                        // Pass create modal trigger
-                        onOpenAddChapterModal={onOpenAddChapterModal}
+                        // Pass create modal trigger - Updated to use MultiChapterAddModal
+                        onOpenAddChapterModal={() => setIsMultiAddModalOpen(true)}
                         // Pass Global Header Visibility
                         isMainHeaderVisible={isHeaderVisible}
                         // Add panel status for back button logic
@@ -806,6 +817,12 @@ const StoryViewer: React.FC<StoryViewerProps> = ({
                 
                 {/* Modals needed during reading */}
                 <ManualImportModal isOpen={manualImportState.isOpen} onClose={() => setManualImportState(prev => ({ ...prev, isOpen: false }))} urlToImport={manualImportState.url} message={manualImportState.message} onFileSelected={handleManualImportFile} />
+                <MultiChapterAddModal 
+                    isOpen={isMultiAddModalOpen}
+                    onClose={() => setIsMultiAddModalOpen(false)}
+                    onSave={handleAddChaptersInternal}
+                    nextChapterIndex={selectedChapterIndex !== null ? selectedChapterIndex + 2 : (story.chapters?.length || 0) + 1}
+                />
             </div>
         );
     }

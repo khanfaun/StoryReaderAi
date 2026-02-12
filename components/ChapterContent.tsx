@@ -828,7 +828,7 @@ const ChapterContent: React.FC<ChapterContentProps> = ({
                   {settings.pcLayout === 'minimal' ? <EyeSlashIcon className="w-6 h-6" /> : <EyeIcon className="w-6 h-6" />}
               </button>
 
-              {onCreateChapter && <button onClick={() => onOpenAddChapterModal?.()} disabled={isBusy && !isAnalyzing} className="p-2 text-[var(--theme-text-secondary)] hover:text-green-500 hover:bg-[var(--theme-border)] rounded-full transition-colors disabled:opacity-50"><PlusIcon className="w-6 h-6" /></button>}
+              {onOpenAddChapterModal && <button onClick={onOpenAddChapterModal} disabled={isBusy && !isAnalyzing} className="p-2 text-[var(--theme-text-secondary)] hover:text-green-500 hover:bg-[var(--theme-border)] rounded-full transition-colors disabled:opacity-50"><PlusIcon className="w-6 h-6" /></button>}
           </div>
       </div>
 

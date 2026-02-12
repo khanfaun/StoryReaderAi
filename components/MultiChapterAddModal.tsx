@@ -49,6 +49,7 @@ const MultiChapterAddModal: React.FC<MultiChapterAddModalProps> = ({ isOpen, onC
   
   // AI Config States
   const [aiModel, setAiModel] = useState('gemini-flash');
+  const [translationMode, setTranslationMode] = useState('vi-vi'); // Default to Edit Mode
   const [translationTone, setTranslationTone] = useState('tien-hiep');
   const [batchSize, setBatchSize] = useState(5);
   const [context, setContext] = useState('');
@@ -552,7 +553,7 @@ const MultiChapterAddModal: React.FC<MultiChapterAddModalProps> = ({ isOpen, onC
           return;
       }
 
-      alert(`Hệ thống sẽ xử lý ${selectedCount} chương đã chọn với cấu hình: Model=${aiModel}, Tone=${translationTone}. (Tính năng đang phát triển)`);
+      alert(`Hệ thống sẽ xử lý ${selectedCount} chương đã chọn với cấu hình:\n- Model: ${aiModel}\n- Chế độ: ${translationMode}\n- Văn phong: ${translationTone}\n(Tính năng đang phát triển)`);
   };
 
   if (!isOpen) return null;
@@ -687,6 +688,22 @@ const MultiChapterAddModal: React.FC<MultiChapterAddModalProps> = ({ isOpen, onC
                                 >
                                     <option value="gemini-flash">Gemini 2.5 Flash (Nhanh)</option>
                                     <option value="gemini-pro">Gemini 3 Pro (Chất lượng cao)</option>
+                                </select>
+                            </div>
+
+                            {/* Translation Mode Select */}
+                            <div>
+                                <label className="block text-xs font-medium text-[var(--theme-text-secondary)] mb-1">Chế độ dịch thuật</label>
+                                <select 
+                                    value={translationMode}
+                                    onChange={(e) => setTranslationMode(e.target.value)}
+                                    className="w-full bg-[var(--theme-bg-surface)] border border-[var(--theme-border)] rounded px-3 py-2 text-sm text-[var(--theme-text-primary)] outline-none focus:border-[var(--theme-accent-primary)]"
+                                >
+                                    <option value="zh-vi">Trung ➜ Việt</option>
+                                    <option value="en-vi">Anh ➜ Việt</option>
+                                    <option value="vi-vi">Việt ➜ Việt (Biên tập Convert)</option>
+                                    <option value="vi-en">Việt ➜ Anh</option>
+                                    <option value="vi-zh">Việt ➜ Trung</option>
                                 </select>
                             </div>
                             

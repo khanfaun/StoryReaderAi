@@ -631,16 +631,10 @@ const App: React.FC = () => {
                   chapUrl = `${targetStory.url}/chapter-${timestamp}-${index}`;
                   // Chèn vào đúng vị trí hoặc push
                   if (targetIndex < finalChapters.length) {
-                      // Insert at specific index (rare usage but possible logic)
-                      // Tuy nhiên logic Modal thường là Append nếu number > length.
-                      // Nếu number <= length mà không overwrite thì là chèn? 
-                      // Hiện tại để đơn giản: Nếu không overwrite mà trùng index -> Chèn hoặc báo lỗi?
-                      // Logic hiện tại của modal: Add Card luôn +1.
-                      // Ta chỉ xử lý Insert/Overwrite dựa trên index.
                       finalChapters.splice(targetIndex, 0, { title: ch.title, url: chapUrl });
                   } else {
-                      // Append
-                      finalChapters[targetIndex] = { title: ch.title, url: chapUrl };
+                      // Append: push vào cuối mảng, không tạo hole
+                      finalChapters.push({ title: ch.title, url: chapUrl });
                   }
               }
 
@@ -652,13 +646,6 @@ const App: React.FC = () => {
                   syncService.saveChapterContentToDrive(targetStory.url, chapUrl, data).catch(console.error);
               }
           }));
-
-          // Fill empty slots if any (in case user added Chapter 10 but skipped 9)
-          for(let i=0; i<finalChapters.length; i++) {
-              if(!finalChapters[i]) {
-                  finalChapters[i] = { title: `Chương ${i+1} (Trống)`, url: `${targetStory.url}/empty-${i}` };
-              }
-          }
 
           const updatedStory = { ...targetStory, chapters: finalChapters };
           await dbService.saveStory(updatedStory);
@@ -958,7 +945,7 @@ const App: React.FC = () => {
                     onOpenUpdateModal={() => setIsUpdateModalOpen(true)} 
                     onGoHome={handleBackToMain} 
                     onOpenSyncModal={() => setIsSyncModalOpen(true)} 
-                    isVisible={isGlobalHeaderVisible} 
+                    isVisible={!isReadingMode && isGlobalHeaderVisible} 
                     // Enable mobile buttons
                     onOpenMobileSearch={() => setIsMobileSearchModalOpen(true)}
                     onCreateStory={() => setIsCreateStoryModalOpen(true)}
@@ -1018,7 +1005,7 @@ const App: React.FC = () => {
                     onAddChapters={handleBatchAddChapters}
 
                     // Pass Global Header Visibility State
-                    isHeaderVisible={isGlobalHeaderVisible}
+                    isHeaderVisible={!isReadingMode && isGlobalHeaderVisible}
                 />
                 
                 {!isReadingMode && (
