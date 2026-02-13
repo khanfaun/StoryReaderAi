@@ -23,12 +23,14 @@ const SyncModal: React.FC<SyncModalProps> = ({ onClose }) => {
   };
 
   const progressPercent = getProgressPercentage(status);
+  // Indeterminate khi đang làm việc nhưng chưa có % cụ thể
   const isIndeterminate = isWorking && progressPercent === 0;
 
   useEffect(() => {
-      const unsubscribe = subscribeToSyncState((newStatus, newIsSyncing) => {
-          setStatus(newStatus);
-          setIsWorking(newIsSyncing);
+      // Subscribe to global sync state to reflect background/manual sync progress
+      const unsubscribe = subscribeToSyncState((state) => {
+          setStatus(state.status);
+          setIsWorking(state.isSyncing || state.isBackgroundSyncing);
       });
       return unsubscribe;
   }, []);
@@ -69,8 +71,6 @@ const SyncModal: React.FC<SyncModalProps> = ({ onClose }) => {
       if (isWorking) return;
       try {
           await syncData();
-          // Nếu thành công, có thể reload để cập nhật UI chính nếu cần thiết
-          // setTimeout(() => window.location.reload(), 1500);
       } catch (e: any) {
           console.error(e);
       }
@@ -148,7 +148,7 @@ const SyncModal: React.FC<SyncModalProps> = ({ onClose }) => {
                         title="Đồng bộ ngay"
                     >
                         {isWorking ? <SpinnerIcon className="w-6 h-6 animate-spin" /> : <SyncIcon className="w-6 h-6" />}
-                        <span className="text-lg">Đồng bộ ngay</span>
+                        <span className="text-lg">{isWorking ? 'Đang xử lý...' : 'Đồng bộ ngay'}</span>
                     </button>
                     <p className="text-center text-xs text-[var(--theme-text-secondary)]">
                         Hệ thống sẽ tự động tải về nội dung mới và sao lưu các thay đổi của bạn.
