@@ -2,6 +2,7 @@
 import type { Story, ReadingHistoryItem, Chapter } from '../types';
 
 const HISTORY_KEY = 'novel_reader_history';
+const HISTORY_DIRTY_KEY = 'novel_reader_history_dirty';
 const MAX_HISTORY_ITEMS = 20;
 
 export function getReadingHistory(): ReadingHistoryItem[] {
@@ -18,6 +19,15 @@ export function getReadingHistory(): ReadingHistoryItem[] {
   }
 }
 
+// Helper to check if history is dirty (needs sync)
+export function isHistoryDirty(): boolean {
+    return localStorage.getItem(HISTORY_DIRTY_KEY) === 'true';
+}
+
+export function markHistorySynced(): void {
+    localStorage.removeItem(HISTORY_DIRTY_KEY);
+}
+
 export function saveReadingHistory(history: ReadingHistoryItem[]): void {
   try {
     const sortedHistory = history.sort((a, b) => b.lastReadTimestamp - a.lastReadTimestamp);
@@ -27,6 +37,8 @@ export function saveReadingHistory(history: ReadingHistoryItem[]): void {
 
     const rawHistory = JSON.stringify(sortedHistory);
     localStorage.setItem(HISTORY_KEY, rawHistory);
+    // Mark as dirty whenever we save
+    localStorage.setItem(HISTORY_DIRTY_KEY, 'true');
   } catch (error) {
     console.error("Error saving history:", error);
   }
@@ -83,5 +95,7 @@ export function saveReadingPosition(storyUrl: string, scrollPercentage: number, 
         history[existingIndex].lastReadTimestamp = Date.now();
         // Direct save without re-sort to avoid performance hit on scroll
         localStorage.setItem(HISTORY_KEY, JSON.stringify(history));
+        // Mark dirty for sync
+        localStorage.setItem(HISTORY_DIRTY_KEY, 'true');
     }
 }

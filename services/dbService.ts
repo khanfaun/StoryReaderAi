@@ -34,11 +34,15 @@ function openDB(): Promise<IDBDatabase> {
         dbInstance.createObjectStore(EBOOK_STORE, { keyPath: 'id' });
       }
       if (!dbInstance.objectStoreNames.contains(STORY_STORE)) {
-        dbInstance.createObjectStore(STORY_STORE, { keyPath: 'url' });
+        const store = dbInstance.createObjectStore(STORY_STORE, { keyPath: 'url' });
+        // Index để tìm nhanh các item chưa đồng bộ (dirty)
+        store.createIndex('dirty', '_dirty', { unique: false });
       }
       // Store mới để lưu nội dung chương. Key là mảng [storyUrl, chapterUrl] để đảm bảo duy nhất
       if (!dbInstance.objectStoreNames.contains(CHAPTER_STORE)) {
-        dbInstance.createObjectStore(CHAPTER_STORE, { keyPath: ['storyUrl', 'chapterUrl'] });
+        const store = dbInstance.createObjectStore(CHAPTER_STORE, { keyPath: ['storyUrl', 'chapterUrl'] });
+        // Index dirty cho chapter. Lưu ý: IndexedDB không hỗ trợ boolean index tốt trên mọi trình duyệt cũ, nhưng hiện đại thì ổn.
+        // Tuy nhiên, vì keyPath là array, việc query index phức tạp hơn. Ta sẽ filter thủ công hoặc dùng cursor.
       }
     };
   });
@@ -75,15 +79,18 @@ export async function getEbookAsArrayBuffer(id: string): Promise<ArrayBuffer | n
 
 // --- STORY METADATA OPERATIONS ---
 
-export async function saveStory(story: Story): Promise<void> {
+export async function saveStory(story: Story, markDirty: boolean = true): Promise<void> {
     const db = await openDB();
     const transaction = db.transaction(STORY_STORE, 'readwrite');
     const store = transaction.objectStore(STORY_STORE);
     
-    // Ensure createdAt is present
-    const storyToSave = {
+    // Giữ nguyên _syncedAt nếu có, cập nhật _dirty = true
+    const storyToSave: Story = {
         ...story,
-        createdAt: story.createdAt || Date.now()
+        createdAt: story.createdAt || Date.now(),
+        _dirty: markDirty, // Tick vào checklist
+        // Nếu markDirty=false (khi sync về), giữ nguyên syncedAt từ server hoặc cập nhật mới
+        // Logic sync sẽ xử lý syncedAt riêng. Ở đây nếu user save -> dirty.
     };
 
     store.put(storyToSave);
@@ -123,16 +130,42 @@ export async function getAllStories(): Promise<Story[]> {
     });
 }
 
+// Lấy danh sách các truyện cần đồng bộ lên Drive (_dirty = true)
+export async function getDirtyStories(): Promise<Story[]> {
+    const stories = await getAllStories();
+    return stories.filter(s => s._dirty === true);
+}
+
+// Đánh dấu truyện đã được đồng bộ xong (bỏ tick dirty)
+export async function markStorySynced(story: Story): Promise<void> {
+    const db = await openDB();
+    const transaction = db.transaction(STORY_STORE, 'readwrite');
+    const store = transaction.objectStore(STORY_STORE);
+    
+    const cleanStory: Story = {
+        ...story,
+        _dirty: false,
+        _syncedAt: Date.now()
+    };
+    
+    store.put(cleanStory);
+    return new Promise((resolve, reject) => {
+        transaction.oncomplete = () => resolve();
+        transaction.onerror = () => reject(transaction.error);
+    });
+}
+
 // --- CHAPTER CONTENT OPERATIONS ---
 
-export async function saveChapterData(storyUrl: string, chapterUrl: string, data: CachedChapter): Promise<void> {
+export async function saveChapterData(storyUrl: string, chapterUrl: string, data: CachedChapter, markDirty: boolean = true): Promise<void> {
     const db = await openDB();
     const transaction = db.transaction(CHAPTER_STORE, 'readwrite');
     const store = transaction.objectStore(CHAPTER_STORE);
     store.put({ 
         storyUrl, 
         chapterUrl, 
-        ...data 
+        ...data,
+        _dirty: markDirty
     });
     
     return new Promise((resolve, reject) => {
@@ -150,7 +183,6 @@ export async function getChapterData(storyUrl: string, chapterUrl: string): Prom
     return new Promise((resolve, reject) => {
         request.onsuccess = () => {
             if (request.result) {
-                // Return the full object, which now includes audioChunks if available
                 const { storyUrl, chapterUrl, ...cachedData } = request.result;
                 resolve(cachedData as CachedChapter);
             } else {
@@ -159,6 +191,34 @@ export async function getChapterData(storyUrl: string, chapterUrl: string): Prom
         };
         request.onerror = () => reject(request.error);
     });
+}
+
+// Lấy tất cả chương bẩn cần đồng bộ
+// Lưu ý: Do DB có thể rất lớn, ta nên dùng Cursor hoặc lấy theo từng truyện nếu cần tối ưu
+// Ở đây dùng getAll đơn giản vì đây là app cá nhân
+export async function getAllDirtyChapters(): Promise<(CachedChapter & { storyUrl: string, chapterUrl: string })[]> {
+    const db = await openDB();
+    const transaction = db.transaction(CHAPTER_STORE, 'readonly');
+    const store = transaction.objectStore(CHAPTER_STORE);
+    const request = store.getAll();
+
+    return new Promise((resolve, reject) => {
+        request.onsuccess = () => {
+            const all = request.result || [];
+            // Filter in memory
+            const dirty = all.filter((c: any) => c._dirty === true);
+            resolve(dirty);
+        };
+        request.onerror = () => reject(request.error);
+    });
+}
+
+export async function markChapterSynced(storyUrl: string, chapterUrl: string, data: CachedChapter): Promise<void> {
+    // Để mark synced, ta cần lưu lại nhưng với _dirty = false
+    await saveChapterData(storyUrl, chapterUrl, {
+        ...data,
+        _syncedAt: Date.now()
+    }, false); // false = not dirty
 }
 
 export async function deleteChapterData(storyUrl: string, chapterUrl: string): Promise<void> {
@@ -173,16 +233,11 @@ export async function deleteChapterData(storyUrl: string, chapterUrl: string): P
     });
 }
 
-/**
- * Xóa toàn bộ nội dung chương đã cache của một truyện.
- * Dùng cho tính năng "Tải lại từ đầu".
- */
 export async function deleteAllStoryChapters(storyUrl: string): Promise<void> {
     const db = await openDB();
     const transaction = db.transaction(CHAPTER_STORE, 'readwrite');
     const store = transaction.objectStore(CHAPTER_STORE);
     
-    // Tạo range tìm kiếm tất cả record có storyUrl khớp
     const range = IDBKeyRange.bound([storyUrl, ''], [storyUrl, '\uffff']);
     const request = store.delete(range);
 
@@ -192,23 +247,17 @@ export async function deleteAllStoryChapters(storyUrl: string): Promise<void> {
     });
 }
 
-/**
- * Lấy tất cả dữ liệu chương (bao gồm stats snapshot) của một truyện.
- * Dùng cho tính năng Xuất/Backup dữ liệu.
- */
 export async function getAllChapterData(storyUrl: string): Promise<(CachedChapter & { chapterUrl: string })[]> {
     const db = await openDB();
     const transaction = db.transaction(CHAPTER_STORE, 'readonly');
     const store = transaction.objectStore(CHAPTER_STORE);
     
-    // Tạo range tìm kiếm tất cả record có storyUrl khớp
     const range = IDBKeyRange.bound([storyUrl, ''], [storyUrl, '\uffff']);
     const request = store.getAll(range);
 
     return new Promise((resolve, reject) => {
         request.onsuccess = () => {
             const results = request.result || [];
-            // Map kết quả về đúng format
             const mapped = results.map(item => {
                 const { storyUrl: sUrl, ...rest } = item;
                 return rest;
@@ -219,24 +268,17 @@ export async function getAllChapterData(storyUrl: string): Promise<(CachedChapte
     });
 }
 
-/**
- * Lấy danh sách URL các chương đã được cache của một truyện.
- * Dùng để hiển thị dấu tick "Đã tải" trên giao diện.
- */
 export async function getCachedChapterUrls(storyUrl: string): Promise<string[]> {
     const db = await openDB();
     const transaction = db.transaction(CHAPTER_STORE, 'readonly');
     const store = transaction.objectStore(CHAPTER_STORE);
     
     const range = IDBKeyRange.bound([storyUrl, ''], [storyUrl, '\uffff']);
-    // Dùng getAllKeys để tối ưu hiệu năng, không load nội dung
     const request = store.getAllKeys(range);
 
     return new Promise((resolve, reject) => {
         request.onsuccess = () => {
             const results = request.result || [];
-            // Kết quả là mảng các key: [storyUrl, chapterUrl]
-            // Ta chỉ cần lấy phần tử thứ 2 (chapterUrl)
             const urls = results.map((key: any) => key[1] as string);
             resolve(urls);
         };
@@ -250,20 +292,16 @@ export async function getCachedChapterUrls(storyUrl: string): Promise<string[]> 
 export async function deleteEbookAndStory(id: string): Promise<void> {
     const db = await openDB();
     
-    // 1. Delete Ebook File (if exists)
     const ebookTx = db.transaction(EBOOK_STORE, 'readwrite');
     ebookTx.objectStore(EBOOK_STORE).delete(id);
     await new Promise<void>((res, rej) => { ebookTx.oncomplete = () => res(); ebookTx.onerror = () => rej(ebookTx.error); });
     
-    // 2. Delete Story Metadata
     const storyTx = db.transaction(STORY_STORE, 'readwrite');
     storyTx.objectStore(STORY_STORE).delete(id);
     await new Promise<void>((res, rej) => { storyTx.oncomplete = () => res(); storyTx.onerror = () => rej(storyTx.error); });
 
-    // 3. Delete ALL Chapter Contents associated with this story
     const chapTx = db.transaction(CHAPTER_STORE, 'readwrite');
     const chapStore = chapTx.objectStore(CHAPTER_STORE);
-    
     const range = IDBKeyRange.bound([id, ''], [id, '\uffff']);
     const request = chapStore.delete(range);
 
@@ -278,7 +316,7 @@ export async function deleteEbookAndStory(id: string): Promise<void> {
 export interface FullBackupData {
     stories: Story[];
     chapters: any[];
-    ebooks: { id: string; data: ArrayBuffer }[]; // Warning: This can be huge
+    ebooks: { id: string; data: ArrayBuffer }[]; 
 }
 
 export async function exportDatabase(): Promise<FullBackupData> {
@@ -305,7 +343,6 @@ export async function importDatabase(data: FullBackupData): Promise<void> {
     const db = await openDB();
     const transaction = db.transaction([STORY_STORE, CHAPTER_STORE, EBOOK_STORE], 'readwrite');
     
-    // Clear existing data? Let's use put to overwrite/add
     const storyStore = transaction.objectStore(STORY_STORE);
     if (data.stories) {
         for (const s of data.stories) storyStore.put(s);

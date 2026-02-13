@@ -1,10 +1,15 @@
 
+export interface SyncMetadata {
+  _dirty?: boolean; // True nếu dữ liệu đã thay đổi trên thiết bị mà chưa lên Drive
+  _syncedAt?: number; // Thời điểm lần cuối đồng bộ thành công với Drive
+}
+
 export interface Chapter {
   title: string;
   url: string;
 }
 
-export interface Story {
+export interface Story extends SyncMetadata {
   title: string;
   author: string;
   imageUrl: string;
@@ -96,7 +101,7 @@ export interface CharacterStats {
   quanHe?: QuanHe[]; // Danh sách các mối quan hệ giữa các nhân vật
 }
 
-export interface CachedChapter {
+export interface CachedChapter extends SyncMetadata {
   content: string;
   stats: CharacterStats | null;
 }
