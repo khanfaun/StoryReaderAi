@@ -3,4 +3,4 @@
 // true: Hiển thị nút.
 // false: Ẩn nút.
 
-export const SHOW_DEV_TEST_BUTTON = true;
+export const SHOW_DEV_TEST_BUTTON = false;
