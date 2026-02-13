@@ -11,6 +11,7 @@ const SCOPES = 'https://www.googleapis.com/auth/drive.appdata';
 
 const INDEX_FILENAME = 'library_index.json';
 const HISTORY_FILENAME = 'reading_history.json';
+const DELETION_LOG_FILENAME = 'deletion_log.json'; // CHECKLIST XOÁ
 
 const STORAGE_KEY_TOKEN = 'gdrive_access_token';
 const STORAGE_KEY_EXPIRY = 'gdrive_token_expiry';
@@ -56,13 +57,10 @@ export const subscribeToSyncState = (listener: SyncListener) => {
 };
 
 // --- SYNC QUEUE SYSTEM (Hàng đợi xử lý đồng bộ nền) ---
-// Giúp tránh lỗi Rate Limit khi cào nhiều chương cùng lúc
 type SyncTask = () => Promise<void>;
 const syncQueue: SyncTask[] = [];
 let isQueueProcessing = false;
 
-// Hàm kiểm tra xem hệ thống có đang bận xử lý dữ liệu quan trọng không
-// Dùng để cảnh báo khi người dùng tắt tab
 export const hasPendingWork = (): boolean => {
     return syncQueue.length > 0 || isQueueProcessing || globalState.isSyncing;
 };
@@ -75,7 +73,6 @@ const enqueueSyncTask = (task: SyncTask) => {
 const processSyncQueue = async () => {
     if (isQueueProcessing) return;
     
-    // Bật trạng thái background syncing ngay lập tức, xóa lỗi cũ
     updateGlobalState({ isBackgroundSyncing: true, isDirty: false, isError: false, lastError: null });
     isQueueProcessing = true;
 
@@ -87,10 +84,8 @@ const processSyncQueue = async () => {
                     await task();
                 } catch (e: any) {
                     console.error("Background sync task failed:", e);
-                    // Nếu lỗi một task, đánh dấu là Lỗi
                     updateGlobalState({ isError: true, lastError: e.message || 'Lỗi đồng bộ' });
                 }
-                // Delay nhỏ giữa các request để an toàn cho quota Google Drive
                 await new Promise(resolve => setTimeout(resolve, 500)); 
             }
         }
@@ -98,28 +93,20 @@ const processSyncQueue = async () => {
         console.error("Critical Queue Error:", err);
         updateGlobalState({ isError: true, lastError: err.message || 'Lỗi hàng đợi' });
     } finally {
-        // LUÔN LUÔN TẮT TRẠNG THÁI BẬN DÙ CÓ LỖI HAY KHÔNG
         isQueueProcessing = false;
-        
-        // Kiểm tra lại trạng thái cuối cùng
-        // Nếu đã có lỗi (isError=true) thì giữ nguyên icon tam giác.
-        // Nếu không có lỗi, kiểm tra xem còn dirty item nào sót lại không.
         await checkDirtyStatus(true); 
     }
 };
 
-// Hàm mới: Tự động đẩy các dữ liệu dirty lên Drive (chạy ngầm)
 const uploadDirtyDataToDrive = async () => {
     if (!accessToken) return;
     
     try {
-        // 1. Check & Upload Reading History
         if (isHistoryDirty()) {
             const history = getReadingHistory();
             await saveReadingHistoryToDrive(history);
         }
 
-        // 2. Check & Upload Stories
         const dirtyStories = await dbService.getDirtyStories();
         if (dirtyStories.length > 0) {
             for (const story of dirtyStories) {
@@ -127,12 +114,10 @@ const uploadDirtyDataToDrive = async () => {
                 await saveStoryDetailsToDrive(cleanStoryData as Story);
                 await dbService.markStorySynced(story);
             }
-            // Update index if stories changed
             const allStories = await dbService.getAllStories();
             await saveLibraryIndexToDrive(allStories);
         }
 
-        // 3. Check & Upload Chapters
         const dirtyChapters = await dbService.getAllDirtyChapters();
         if (dirtyChapters.length > 0) {
             for (const chap of dirtyChapters) {
@@ -143,13 +128,10 @@ const uploadDirtyDataToDrive = async () => {
         }
     } catch (e) {
         console.error("Auto-sync failed", e);
-        throw e; // Để queue handler bắt lỗi
+        throw e;
     }
 };
 
-// Hàm kiểm tra nhanh xem còn file nào chưa sync không (chạy sau khi queue rỗng hoặc khi init)
-// updateUI: Có cập nhật globalState tắt spinner không
-// triggerAutoSync: Có tự động đẩy lên Drive không
 const checkDirtyStatus = async (updateUI: boolean = false) => {
     if (!accessToken) {
         if(updateUI) updateGlobalState({ isBackgroundSyncing: false });
@@ -159,8 +141,6 @@ const checkDirtyStatus = async (updateUI: boolean = false) => {
     try {
         const dirtyStories = await dbService.getDirtyStories();
         const isHistoryUnsynced = isHistoryDirty();
-        // Check dirty chapters cost heavy db read, maybe optimize later. 
-        // For now rely on story/history or assume queue cleared chapters.
         const dirtyChapters = await dbService.getAllDirtyChapters(); 
         
         const hasDirty = dirtyStories.length > 0 || isHistoryUnsynced || dirtyChapters.length > 0;
@@ -168,15 +148,11 @@ const checkDirtyStatus = async (updateUI: boolean = false) => {
         if (hasDirty) {
             updateGlobalState({ isDirty: true });
             
-            // AUTO SYNC LOGIC:
-            // Nếu phát hiện dirty, đang đăng nhập, và không đang trong trạng thái lỗi nghiêm trọng
-            // -> Tự động queue task để đồng bộ
             if (!globalState.isError && !globalState.isBackgroundSyncing) {
                 console.log("Auto-sync triggered due to dirty items...");
                 enqueueSyncTask(uploadDirtyDataToDrive);
             }
         } else {
-            // Nếu không còn gì dirty, và không có lỗi -> Icon Tick Xanh (Clean)
             if (!globalState.isError) {
                 updateGlobalState({ isDirty: false });
             }
@@ -345,9 +321,8 @@ async function findFileId(filename: string): Promise<string | null> {
     }
 }
 
-// Core Upload Function (Internal)
 async function performUpload(filename: string, content: any): Promise<void> {
-    if (!accessToken) return; // Silent fail if not logged in (will be marked dirty locally)
+    if (!accessToken) return;
 
     let fileId = await findFileId(filename);
     let url = 'https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart';
@@ -395,15 +370,13 @@ async function performUpload(filename: string, content: any): Promise<void> {
     if (result.id) fileIdCache.set(filename, result.id);
 }
 
-// Queue Wrapper for Upload
 async function queueUpload(filename: string, content: any): Promise<void> {
-    if (!accessToken) return; // Nếu chưa đăng nhập thì không queue
+    if (!accessToken) return;
     enqueueSyncTask(async () => {
         await performUpload(filename, content);
     });
 }
 
-// Internal Delete
 async function deleteFileById(fileId: string): Promise<void> {
     if (!accessToken) return;
     try { await gapi.client.drive.files.delete({ fileId: fileId }); } catch (e) {}
@@ -425,7 +398,6 @@ async function queueDelete(filename: string): Promise<void> {
     });
 }
 
-// Download function
 async function downloadFile<T>(filename: string): Promise<T | null> {
     if (!accessToken) return null;
     const fileId = await findFileId(filename);
@@ -443,6 +415,77 @@ async function downloadFile<T>(filename: string): Promise<T | null> {
         return await response.json();
     } catch (e) { return null; }
 }
+
+// --- DELETION LOG SYSTEM (CHECKLIST XOÁ) ---
+
+interface DeletionLogItem {
+    type: 'story' | 'history' | 'chapter';
+    id: string; // URL hoặc ID
+    timestamp: number;
+}
+
+interface DeletionLog {
+    deletedItems: DeletionLogItem[];
+}
+
+// Hàm append vào checklist xoá trên Drive
+async function appendToRemoteDeletionLog(item: DeletionLogItem): Promise<void> {
+    if (!accessToken) return;
+    
+    try {
+        // 1. Tải log hiện tại (nếu có)
+        const currentLog = await downloadFile<DeletionLog>(DELETION_LOG_FILENAME) || { deletedItems: [] };
+        
+        // 2. Thêm item mới (tránh trùng lặp)
+        const exists = currentLog.deletedItems.some(i => i.id === item.id && i.type === item.type);
+        if (!exists) {
+            currentLog.deletedItems.push(item);
+            
+            // 3. Upload lại
+            await performUpload(DELETION_LOG_FILENAME, currentLog);
+            console.log(`[Deletion Log] Added ${item.type}: ${item.id}`);
+        }
+    } catch (e) {
+        console.warn("Failed to update remote deletion log", e);
+    }
+}
+
+// Hàm xử lý checklist xoá: Tải log về và xoá dữ liệu local tương ứng
+async function processRemoteDeletions(): Promise<void> {
+    if (!accessToken) return;
+    
+    updateGlobalState({ status: "Đang kiểm tra dữ liệu đã xoá..." });
+    
+    try {
+        const log = await downloadFile<DeletionLog>(DELETION_LOG_FILENAME);
+        if (!log || !log.deletedItems || log.deletedItems.length === 0) return;
+        
+        console.log(`[Deletion Log] Found ${log.deletedItems.length} items to check.`);
+        
+        for (const item of log.deletedItems) {
+            if (item.type === 'story') {
+                // Kiểm tra xem local có truyện này không
+                const exists = await dbService.getStory(item.id);
+                if (exists) {
+                    console.log(`[Sync Pruning] Deleting story from checklist: ${exists.title}`);
+                    await dbService.deleteEbookAndStory(item.id);
+                }
+            } else if (item.type === 'history') {
+                // Xoá khỏi lịch sử đọc local
+                let history = getReadingHistory();
+                const initialLen = history.length;
+                history = history.filter(h => h.url !== item.id);
+                if (history.length !== initialLen) {
+                    saveReadingHistory(history);
+                    console.log(`[Sync Pruning] Removed history item: ${item.id}`);
+                }
+            }
+        }
+    } catch (e) {
+        console.warn("Error processing remote deletions:", e);
+    }
+}
+
 
 // --- PUBLIC API WITH AUTO-SYNC ---
 
@@ -473,21 +516,25 @@ export async function saveStoryDetailsToDrive(story: Story): Promise<void> {
 }
 
 // Auto-Sync: Gọi hàm này khi xóa Story
-// FIX: Phải cập nhật lại library_index.json ngay lập tức để tránh zombie
-// FIX 2: Cố gắng xóa tất cả các chương liên quan để làm sạch Drive
 export async function deleteStoryFromDrive(story: Story): Promise<void> {
     if (!accessToken) return;
     
     // Đưa vào queue để đảm bảo tuần tự
     enqueueSyncTask(async () => {
+        // 1. Ghi vào Checklist Xoá (Deletion Log) TRƯỚC TIÊN
+        await appendToRemoteDeletionLog({
+            type: 'story',
+            id: story.url,
+            timestamp: Date.now()
+        });
+
         const storyHash = hashUrl(story.url);
 
-        // 1. Xóa file truyện metadata
+        // 2. Xóa file truyện metadata
         const filename = getStoryFilename(story.url);
         await performDelete(filename);
         
-        // 2. Xóa tất cả các chương liên quan (chap_HASH_*)
-        // Tìm tất cả file có tên chứa 'chap_' + storyHash
+        // 3. Xóa tất cả các chương liên quan (chap_HASH_*)
         try {
             let pageToken = null;
             do {
@@ -499,7 +546,6 @@ export async function deleteStoryFromDrive(story: Story): Promise<void> {
                 });
                 const files = response.result.files;
                 if (files && files.length > 0) {
-                    // Using Promise.all for parallelism
                     await Promise.all(files.map((f: any) => deleteFileById(f.id)));
                 }
                 pageToken = response.result.nextPageToken;
@@ -508,21 +554,14 @@ export async function deleteStoryFromDrive(story: Story): Promise<void> {
             console.warn("Error cleaning up chapters from Drive (non-critical):", e);
         }
         
-        // 3. QUAN TRỌNG: Cập nhật lại Index file ngay lập tức
-        // Thay vì download, filter, upload (dễ conflict), ta lấy danh sách Local (đã xóa) làm chuẩn
-        // Tuy nhiên, để an toàn cho concurrency, flow chuẩn vẫn là: Pull Index -> Filter -> Push Index
+        // 4. Cập nhật lại Index file
         const remoteData = await downloadFile<{ stories: Story[] }>(INDEX_FILENAME);
         let remoteStories = remoteData?.stories || [];
-        
-        // Lọc bỏ truyện vừa xóa
         const newRemoteStories = remoteStories.filter(s => s.url !== story.url);
-        
-        // Upload Index mới lên ngay
         const minimalStories = newRemoteStories.map(s => ({
             title: s.title, author: s.author, imageUrl: s.imageUrl,
             source: s.source, url: s.url, createdAt: s.createdAt,
         }));
-        
         await performUpload(INDEX_FILENAME, { stories: minimalStories });
     });
 }
@@ -533,38 +572,37 @@ export async function fetchChapterContentFromDrive(storyUrl: string, chapterUrl:
     return await downloadFile<CachedChapter>(filename);
 }
 
-// Auto-Sync: Gọi hàm này khi cào chương hoặc sửa nội dung/stats
 export async function saveChapterContentToDrive(storyUrl: string, chapterUrl: string, data: CachedChapter): Promise<void> {
     const filename = getChapterFilename(storyUrl, chapterUrl);
     await queueUpload(filename, data);
 }
 
-// Auto-Sync: Gọi khi xóa chương
 export async function deleteChapterFromDrive(storyUrl: string, chapterUrl: string): Promise<void> {
     const filename = getChapterFilename(storyUrl, chapterUrl);
     await queueDelete(filename);
 }
 
 // 4. READING HISTORY
-// Auto-Sync: Gọi khi đọc chương mới (Merge/Update)
 export async function saveReadingHistoryToDrive(history: ReadingHistoryItem[]): Promise<void> {
     await queueUpload(HISTORY_FILENAME, { history });
-    markHistorySynced(); // Mark synced immediately in memory
+    markHistorySynced(); 
 }
 
-// Auto-Sync: Gọi khi xóa một mục khỏi lịch sử (Explicit Delete)
 export async function removeHistoryItemFromDrive(itemUrl: string): Promise<void> {
     if (!accessToken) return;
     
     enqueueSyncTask(async () => {
-        // 1. Tải History hiện tại từ Drive
+        // Ghi vào Checklist Xoá
+        await appendToRemoteDeletionLog({
+            type: 'history',
+            id: itemUrl,
+            timestamp: Date.now()
+        });
+
+        // Cập nhật file history
         const remoteData = await downloadFile<{ history: ReadingHistoryItem[] }>(HISTORY_FILENAME);
         let remoteHistory = remoteData?.history || [];
-        
-        // 2. Lọc bỏ item
         const newHistory = remoteHistory.filter(h => h.url !== itemUrl);
-        
-        // 3. Upload lại (Ghi đè)
         await performUpload(HISTORY_FILENAME, { history: newHistory });
         
         markHistorySynced();
@@ -603,16 +641,19 @@ export async function syncReadingProgress(): Promise<void> {
 export async function syncLibraryIndex(): Promise<Story[]> {
     if (!accessToken) return [];
     
-    // 1. Lấy danh sách từ Drive (Source of Truth)
+    // BƯỚC 1: QUÉT CHECKLIST XOÁ TRƯỚC (Deletions First)
+    // Để đảm bảo những gì đã bị xoá ở thiết bị khác sẽ biến mất khỏi thiết bị này
+    await processRemoteDeletions();
+
+    // BƯỚC 2: Tải danh sách truyện còn lại từ Drive
     const driveStories = await fetchLibraryIndexFromDrive();
-    const driveStoryUrls = new Set(driveStories.map(s => s.url));
     
     const localStories = await dbService.getAllStories();
     const mergedMap = new Map<string, Story>();
     
     localStories.forEach(s => mergedMap.set(s.url, s));
     
-    // 2. Xử lý tải về (Download): Có trên Drive, chưa có Local
+    // BƯỚC 3: Tải về (Download)
     for (const dStory of driveStories) {
         if (!mergedMap.has(dStory.url)) {
             const cleanStory = { ...dStory, _dirty: false, _syncedAt: Date.now() };
@@ -621,18 +662,21 @@ export async function syncLibraryIndex(): Promise<Story[]> {
         }
     }
 
-    // 3. Xử lý đồng bộ xóa (Pruning): Có Local, Mất trên Drive Index -> Xóa Local
-    // Điều kiện xóa: Truyện ở Local KHÔNG ở trạng thái Dirty (tức là đã sync trước đó)
-    // Nếu truyện ở Local là Dirty (mới thêm, chưa kịp sync) thì GIỮ LẠI để upload.
+    // BƯỚC 4: Upload các truyện mới từ Local lên Drive
+    // Lưu ý: Logic Pruning cũ dựa trên việc so sánh danh sách đã được thay thế bằng Checklist Xoá.
+    // Nếu truyện ở Local không có trên Drive nhưng cũng không nằm trong checklist xoá -> Có thể là truyện mới thêm Offline -> Upload lên.
+    const driveStoryUrls = new Set(driveStories.map(s => s.url));
+    
     for (const lStory of localStories) {
-        if (!lStory._dirty && !driveStoryUrls.has(lStory.url)) {
-            console.log(`[Sync Pruning] Story "${lStory.title}" not found in Drive Index. Deleting locally...`);
-            await dbService.deleteEbookAndStory(lStory.url);
-            mergedMap.delete(lStory.url);
+        // Nếu truyện ở Local là Dirty (mới thêm) hoặc chưa có trên Drive -> Upload
+        if (lStory._dirty || !driveStoryUrls.has(lStory.url)) {
+             // Chỉ upload nếu nó không vừa bị xoá (double check)
+             // Nhưng ở đây ta giả định processRemoteDeletions đã xoá nó rồi nếu cần.
+             // Nếu nó vẫn còn đây thì là truyện mới.
         }
     }
 
-    // 4. Cập nhật lại Drive Index (nếu có truyện Local mới chưa có trên Drive)
+    // Cập nhật lại Drive Index để bao gồm các truyện mới từ thiết bị này
     const finalStories = Array.from(mergedMap.values());
     await saveLibraryIndexToDrive(finalStories);
     
@@ -678,7 +722,6 @@ export async function uploadAllLocalData(finalize: boolean = true): Promise<void
             updateGlobalState({ status: "Đồng bộ hoàn tất!", isSyncing: false, isDirty: false, isError: false });
         }
     } catch (e: any) {
-        // Ensure spinner stops even on error
         updateGlobalState({ status: `Lỗi sao lưu: ${e.message}`, isSyncing: false, isError: true, lastError: e.message });
         throw e;
     }
@@ -689,7 +732,10 @@ export async function pullMissingDataFromDrive(finalize: boolean = true): Promis
     updateGlobalState({ status: "Đang quét dữ liệu trên Drive...", isSyncing: true, isError: false, lastError: null });
     
     try {
-        // 1. Đồng bộ Index (Tải mới + Xóa cũ)
+        // QUAN TRỌNG: Quét checklist xoá trước khi tải bất cứ thứ gì
+        await processRemoteDeletions();
+
+        // Sau đó mới đồng bộ Index
         const remoteIndex = await syncLibraryIndex();
         const validStoryUrls = new Set(remoteIndex.map(s => s.url));
 
@@ -782,7 +828,6 @@ export async function pullMissingDataFromDrive(finalize: boolean = true): Promis
         if (finalize) updateGlobalState({ status: "Đã hoàn tất tải dữ liệu mới!", isSyncing: false });
 
     } catch (e: any) {
-        // Ensure spinner stops even on error
         updateGlobalState({ status: `Lỗi tải dữ liệu: ${e.message}`, isSyncing: false, isError: true, lastError: e.message });
         throw e;
     }
