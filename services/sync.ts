@@ -236,11 +236,26 @@ async function uploadFile(filename: string, content: any): Promise<void> {
     // 1. Tìm ID file
     let fileId = await findFileId(filename);
     
-    const metadata = {
+    let url = 'https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart';
+    let method = 'POST';
+    
+    // Metadata cơ bản
+    const metadata: any = {
         name: filename,
         mimeType: 'application/json',
-        parents: ['appDataFolder']
     };
+
+    // 2. Quyết định Create hay Update
+    if (fileId) {
+        url = `https://www.googleapis.com/upload/drive/v3/files/${fileId}?uploadType=multipart`;
+        method = 'PATCH';
+        // QUAN TRỌNG: Khi UPDATE (PATCH), không được gửi field 'parents' trong metadata
+        // Trừ khi muốn di chuyển file (dùng addParents/removeParents query params)
+        // Nếu gửi 'parents' sẽ bị lỗi 403: "The parents field is not directly writable..."
+    } else {
+        // Khi CREATE (POST), phải chỉ định parent là appDataFolder để file ẩn đi
+        metadata.parents = ['appDataFolder'];
+    }
 
     // Construct multipart/related body manually
     const boundary = '-------314159265358979323846';
@@ -254,15 +269,6 @@ async function uploadFile(filename: string, content: any): Promise<void> {
         'Content-Type: application/json; charset=UTF-8\r\n\r\n' +
         JSON.stringify(content) +
         close_delim;
-
-    let url = 'https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart';
-    let method = 'POST';
-
-    // 2. Quyết định Create hay Update
-    if (fileId) {
-        url = `https://www.googleapis.com/upload/drive/v3/files/${fileId}?uploadType=multipart`;
-        method = 'PATCH';
-    }
 
     try {
         const response = await fetchWithRetry(url, {
