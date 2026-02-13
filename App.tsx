@@ -228,6 +228,9 @@ const App: React.FC = () => {
             // Lấy danh sách từ Drive
             const driveStories = await syncService.fetchLibraryIndexFromDrive();
             
+            // Đồng bộ Lịch sử đọc (Reading Progress) ngay khi khởi động
+            await syncService.syncReadingProgress();
+            
             // Hợp nhất: Thêm truyện từ Drive nếu Local chưa có
             const mergedStories = [...dbStories];
             const existingUrls = new Set(dbStories.map(s => s.url));
@@ -256,9 +259,10 @@ const App: React.FC = () => {
         setLocalStories(dbStories);
     }
     
-    // 3. Xây dựng lịch sử đọc
-    const historyMap = new Map(localHistory.map(item => [item.url, item]));
-    const currentStories = await dbService.getAllStories(); // Lấy lại bản mới nhất sau khi merge
+    // 3. Xây dựng lịch sử đọc (lấy lại bản mới nhất sau khi sync)
+    const currentHistory = getReadingHistory();
+    const historyMap = new Map(currentHistory.map(item => [item.url, item]));
+    const currentStories = await dbService.getAllStories(); 
 
     currentStories.forEach(dbStory => {
       if (!historyMap.has(dbStory.url)) {
@@ -278,6 +282,7 @@ const App: React.FC = () => {
         .sort((a, b) => b.lastReadTimestamp - a.lastReadTimestamp);
         
     setReadingHistory(combinedHistory);
+    
     const savedSettingsRaw = localStorage.getItem('truyenReaderSettings');
     if (savedSettingsRaw) {
         try {

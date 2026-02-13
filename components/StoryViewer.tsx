@@ -452,6 +452,12 @@ const StoryViewer: React.FC<StoryViewerProps> = ({
         // Auto-update history on chapter load -> effectively "Bookmarked"
         const newHistory = updateReadingHistory(storyToLoad, chapter);
         setReadingHistory(newHistory);
+        
+        // SYNC READING HISTORY TO DRIVE (Fire & Forget)
+        if (syncService.isAuthenticated()) {
+            syncService.saveReadingHistoryToDrive(newHistory).catch(console.error);
+        }
+        
         onReadChapterUpdate(chapter.url);
         setIsBookmarked(true);
         

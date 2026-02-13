@@ -2,7 +2,7 @@
 import React, { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { CloseIcon, SpinnerIcon, SyncIcon, CheckIcon, CloudIcon, LogoutIcon, UploadIcon, DownloadIcon } from './icons';
-import { initGoogleDrive, signInToDrive, isAuthenticated, syncLibraryIndex, signOut, uploadAllLocalData, pullMissingDataFromDrive } from '../services/sync';
+import { initGoogleDrive, signInToDrive, isAuthenticated, syncLibraryIndex, signOut, uploadAllLocalData, pullMissingDataFromDrive, subscribeToSyncState } from '../services/sync';
 import ConfirmationModal from './ConfirmationModal';
 
 interface SyncModalProps {
@@ -15,6 +15,25 @@ const SyncModal: React.FC<SyncModalProps> = ({ onClose }) => {
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [initError, setInitError] = useState<string | null>(null);
   const [isLogoutConfirmOpen, setIsLogoutConfirmOpen] = useState(false);
+
+  // Helper để trích xuất phần trăm từ chuỗi status (Ví dụ: "Đang tải... 70%")
+  const getProgressPercentage = (statusStr: string): number => {
+      const match = statusStr.match(/(\d+)%/);
+      return match ? parseInt(match[1], 10) : 0;
+  };
+
+  const progressPercent = getProgressPercentage(status);
+  // Nếu đang chạy mà chưa có phần trăm cụ thể -> Chế độ chờ (Indeterminate)
+  const isIndeterminate = isWorking && progressPercent === 0;
+
+  // Subscribe to Global Sync State
+  useEffect(() => {
+      const unsubscribe = subscribeToSyncState((newStatus, newIsSyncing) => {
+          setStatus(newStatus);
+          setIsWorking(newIsSyncing);
+      });
+      return unsubscribe;
+  }, []);
 
   useEffect(() => {
     const init = async () => {
@@ -30,6 +49,7 @@ const SyncModal: React.FC<SyncModalProps> = ({ onClose }) => {
   }, []);
 
   const handleSignIn = async () => {
+    // Local spinner just for sign-in process
     setIsWorking(true);
     setStatus('Đang kết nối Google Drive...');
     try {
@@ -49,37 +69,31 @@ const SyncModal: React.FC<SyncModalProps> = ({ onClose }) => {
     } catch (error: any) {
         setStatus('Đăng nhập thất bại hoặc bị hủy.');
         console.error(error);
-    } finally {
         setIsWorking(false);
     }
   };
 
   const handleSmartPull = async () => {
-      setIsWorking(true);
-      setStatus("Đang kiểm tra dữ liệu trên Drive...");
+      if (isWorking) return;
       try {
-          await pullMissingDataFromDrive((msg) => setStatus(msg));
-          setStatus("Đã cập nhật toàn bộ dữ liệu mới từ Drive!");
-          // Delay reload để người dùng kịp đọc thông báo
-          setTimeout(() => window.location.reload(), 2000);
+          await pullMissingDataFromDrive();
+          // Nếu thành công, có thể reload để cập nhật UI chính
+          setTimeout(() => window.location.reload(), 1500);
       } catch (e: any) {
-          setStatus("Lỗi đồng bộ: " + e.message);
-          setIsWorking(false); // Only stop working spinner on error so user can retry, success reloads page
+          console.error(e);
+          // Lỗi đã được update vào global state status
       }
   }
 
   const handleForceUploadAll = async () => {
+      if (isWorking) return;
       if (!confirm("Hành động này sẽ tải toàn bộ dữ liệu từ máy này lên Google Drive (ghi đè nếu cần). Quá trình có thể mất vài phút tùy vào số lượng truyện. Bạn có muốn tiếp tục?")) return;
 
-      setIsWorking(true);
-      setStatus("Bắt đầu sao lưu...");
       try {
-          await uploadAllLocalData((msg) => setStatus(msg));
-          setStatus("Đã sao lưu thành công toàn bộ dữ liệu lên Drive!");
+          await uploadAllLocalData();
       } catch (e: any) {
-          setStatus("Lỗi sao lưu: " + e.message);
-      } finally {
-          setIsWorking(false);
+          console.error(e);
+          // Lỗi đã được update vào global state status
       }
   }
 
@@ -147,50 +161,59 @@ const SyncModal: React.FC<SyncModalProps> = ({ onClose }) => {
                     </div>
                 </div>
 
-                <div className="bg-[var(--theme-bg-base)] p-4 rounded-lg border border-[var(--theme-border)] text-sm space-y-3">
-                    <p className="font-semibold text-[var(--theme-text-primary)]">Cơ chế hoạt động:</p>
-                    <ul className="list-disc list-inside text-[var(--theme-text-secondary)] space-y-1 pl-1">
-                        <li><strong>Khi mở App:</strong> Tự động tải danh sách truyện từ Drive.</li>
-                        <li><strong>Khi mở Truyện:</strong> Nếu truyện chưa có đủ chương, sẽ tải từ Drive.</li>
-                        <li><strong>Khi đọc Chương:</strong> Nếu nội dung chưa có, sẽ tải từ Drive.</li>
-                        <li><strong>Khi lưu/tải:</strong> Dữ liệu sẽ tự động được đẩy lên Drive.</li>
-                    </ul>
-                </div>
-
                 <div className="flex flex-col gap-3">
-                    <button
-                        onClick={handleSmartPull}
-                        disabled={isWorking}
-                        className="w-full bg-[var(--theme-accent-primary)] hover:brightness-110 text-white font-bold py-3 px-4 rounded-lg flex items-center justify-center gap-2 transition-colors disabled:opacity-50"
-                    >
-                        {isWorking && status.includes('tải') ? <SpinnerIcon className="w-5 h-5 animate-spin" /> : <DownloadIcon className="w-5 h-5" />}
-                        <span>Tải dữ liệu mới từ Drive (Smart Pull)</span>
-                    </button>
+                    {/* Hàng nút thao tác chính */}
+                    <div className="flex gap-3">
+                        <button
+                            onClick={handleSmartPull}
+                            disabled={isWorking}
+                            className="flex-1 bg-[var(--theme-accent-primary)] hover:brightness-110 text-white font-bold py-3 px-2 rounded-lg flex flex-col items-center justify-center gap-1 transition-colors disabled:opacity-50"
+                            title="Tải dữ liệu mới từ Drive"
+                        >
+                            {isWorking && status.includes('tải') ? <SpinnerIcon className="w-5 h-5 animate-spin" /> : <DownloadIcon className="w-5 h-5" />}
+                            <span className="text-xs">Tải dữ liệu (Pull)</span>
+                        </button>
 
-                    <button
-                        onClick={handleForceUploadAll}
-                        disabled={isWorking}
-                        className="w-full bg-blue-600 hover:bg-blue-500 text-white font-bold py-3 px-4 rounded-lg flex items-center justify-center gap-2 transition-colors disabled:opacity-50"
-                    >
-                        <UploadIcon className="w-5 h-5" />
-                        <span>Sao lưu toàn bộ lên Drive (Force Push)</span>
-                    </button>
+                        <button
+                            onClick={handleForceUploadAll}
+                            disabled={isWorking}
+                            className="flex-1 bg-blue-600 hover:bg-blue-500 text-white font-bold py-3 px-2 rounded-lg flex flex-col items-center justify-center gap-1 transition-colors disabled:opacity-50"
+                            title="Sao lưu toàn bộ lên Drive"
+                        >
+                            <UploadIcon className="w-5 h-5" />
+                            <span className="text-xs">Sao lưu (Push)</span>
+                        </button>
+                    </div>
 
                     <button
                         onClick={handleLogoutClick}
                         disabled={isWorking}
-                        className="w-full bg-transparent border border-rose-500/50 hover:bg-rose-900/20 text-rose-400 font-bold py-3 px-4 rounded-lg flex items-center justify-center gap-2 transition-colors disabled:opacity-50"
+                        className="w-full bg-transparent border border-rose-500/50 hover:bg-rose-900/20 text-rose-400 font-bold py-2 px-4 rounded-lg flex items-center justify-center gap-2 transition-colors disabled:opacity-50 text-sm"
                     >
-                        <LogoutIcon className="w-5 h-5" />
+                        <LogoutIcon className="w-4 h-4" />
                         <span>Đăng xuất</span>
                     </button>
                 </div>
+
+                {/* --- PROGRESS BAR SECTION --- */}
+                {status && (
+                    <div className="mt-2 animate-fade-in">
+                        <div className="flex justify-between text-xs text-[var(--theme-text-secondary)] mb-1">
+                            <span className="truncate pr-2 font-medium">{status}</span>
+                            {progressPercent > 0 && <span className="text-[var(--theme-accent-primary)] font-bold">{progressPercent}%</span>}
+                        </div>
+                        <div className="w-full bg-[var(--theme-bg-base)] rounded-full h-3 overflow-hidden border border-[var(--theme-border)]">
+                            <div 
+                                className={`h-full transition-all duration-300 relative ${isIndeterminate ? 'w-full animate-pulse bg-[var(--theme-accent-primary)]/50' : 'bg-[var(--theme-accent-primary)]'}`} 
+                                style={{ width: isIndeterminate ? '100%' : `${progressPercent}%` }}
+                            >
+                                <div className="absolute inset-0 bg-white/20 animate-pulse"></div>
+                            </div>
+                        </div>
+                    </div>
+                )}
             </div>
           )}
-        </div>
-
-        <div className="sync-modal__status" aria-live="polite">
-          {status}
         </div>
       </div>
     </div>

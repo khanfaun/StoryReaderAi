@@ -1,6 +1,7 @@
 
-import { Story, CachedChapter } from '../types';
+import { Story, CachedChapter, ReadingHistoryItem } from '../types';
 import * as dbService from './dbService';
+import { getReadingHistory, saveReadingHistory } from './history';
 
 declare var gapi: any;
 declare var google: any;
@@ -12,6 +13,7 @@ const SCOPES = 'https://www.googleapis.com/auth/drive.appdata';
 
 // Tên file danh mục chính
 const INDEX_FILENAME = 'library_index.json';
+const HISTORY_FILENAME = 'reading_history.json';
 
 // Keys cho localStorage
 const STORAGE_KEY_TOKEN = 'gdrive_access_token';
@@ -25,6 +27,31 @@ let accessToken: string | null = null;
 // --- CACHING SYSTEM ---
 // Lưu trữ map Filename -> FileID để giảm request search và tránh độ trễ consistency
 const fileIdCache = new Map<string, string>();
+
+// --- GLOBAL PROCESS STATE MANAGEMENT (OBSERVER PATTERN) ---
+// Biến toàn cục lưu trạng thái hiện tại của tiến trình đồng bộ
+let globalSyncStatus: string = '';
+let globalIsSyncing: boolean = false;
+type SyncListener = (status: string, isSyncing: boolean) => void;
+const syncListeners: Set<SyncListener> = new Set();
+
+// Hàm cập nhật trạng thái và thông báo cho tất cả UI đang lắng nghe
+const updateGlobalState = (status: string, isSyncing: boolean) => {
+    globalSyncStatus = status;
+    globalIsSyncing = isSyncing;
+    syncListeners.forEach(listener => listener(status, isSyncing));
+};
+
+// Hàm đăng ký lắng nghe (dùng trong React Component)
+export const subscribeToSyncState = (listener: SyncListener) => {
+    // Gửi ngay trạng thái hiện tại khi mới đăng ký
+    listener(globalSyncStatus, globalIsSyncing);
+    syncListeners.add(listener);
+    // Trả về hàm hủy đăng ký (cleanup)
+    return () => syncListeners.delete(listener);
+};
+
+export const getSyncState = () => ({ status: globalSyncStatus, isSyncing: globalIsSyncing });
 
 // --- INITIALIZATION & AUTH ---
 
@@ -417,7 +444,48 @@ export async function deleteChapterFromDrive(storyUrl: string, chapterUrl: strin
     await deleteFile(filename);
 }
 
+// 4. READING HISTORY
+export async function saveReadingHistoryToDrive(history: ReadingHistoryItem[]): Promise<void> {
+    await uploadFile(HISTORY_FILENAME, { history });
+}
+
 // --- SYNC ACTIONS (Called by UI) ---
+
+// Synchronize Reading Progress (History)
+export async function syncReadingProgress(): Promise<void> {
+    if (!accessToken) return;
+    
+    // 1. Download Remote History
+    const remoteData = await downloadFile<{ history: ReadingHistoryItem[] }>(HISTORY_FILENAME);
+    const remoteHistory = remoteData?.history || [];
+    
+    // 2. Get Local History
+    const localHistory = getReadingHistory();
+    
+    // 3. Merge: Keep the item with the latest timestamp
+    const mergedMap = new Map<string, ReadingHistoryItem>();
+    
+    // Helper to merge item
+    const mergeItem = (item: ReadingHistoryItem) => {
+        const existing = mergedMap.get(item.url);
+        if (!existing || item.lastReadTimestamp > existing.lastReadTimestamp) {
+            mergedMap.set(item.url, item);
+        }
+    };
+    
+    localHistory.forEach(mergeItem);
+    remoteHistory.forEach(mergeItem);
+    
+    const mergedHistory = Array.from(mergedMap.values()).sort((a, b) => b.lastReadTimestamp - a.lastReadTimestamp);
+    
+    // 4. Save back to both
+    saveReadingHistory(mergedHistory); // Save Local
+    
+    // Check if remote needs update (simple length/timestamp check or just save)
+    if (JSON.stringify(remoteHistory) !== JSON.stringify(mergedHistory)) {
+        await saveReadingHistoryToDrive(mergedHistory); // Save Drive
+    }
+}
 
 export async function syncLibraryIndex(): Promise<Story[]> {
     if (!accessToken) return [];
@@ -453,104 +521,129 @@ export async function syncLibraryIndex(): Promise<Story[]> {
 
 // --- BULK UPLOAD ACTION ---
 
-export async function uploadAllLocalData(onProgress: (msg: string) => void): Promise<void> {
+export async function uploadAllLocalData(): Promise<void> {
+    if (globalIsSyncing) return; // Prevent concurrent syncs
     if (!accessToken) throw new Error("Chưa đăng nhập Google Drive");
 
-    // 1. Upload Library Index
-    const stories = await dbService.getAllStories();
-    onProgress(`Đang đồng bộ danh sách truyện (${stories.length})...`);
-    await saveLibraryIndexToDrive(stories);
+    updateGlobalState("Đang khởi tạo sao lưu...", true);
 
-    // 2. Upload Stories & Cached Chapters
-    for (let i = 0; i < stories.length; i++) {
-        const story = stories[i];
-        onProgress(`Đang xử lý truyện: ${story.title} (${i + 1}/${stories.length})...`);
+    try {
+        // 1. Upload Library Index
+        const stories = await dbService.getAllStories();
+        updateGlobalState(`Đang đồng bộ danh sách truyện (${stories.length})...`, true);
+        await saveLibraryIndexToDrive(stories);
         
-        // Upload Metadata
-        await saveStoryDetailsToDrive(story);
+        // 2. Upload Reading History
+        const history = getReadingHistory();
+        await saveReadingHistoryToDrive(history);
 
-        // Get Cached Chapters
-        const cachedChapters = await dbService.getAllChapterData(story.url);
-        
-        // Upload Chapters (Parallel Batching)
-        const BATCH_SIZE = 5;
-        for (let j = 0; j < cachedChapters.length; j += BATCH_SIZE) {
-            const batch = cachedChapters.slice(j, j + BATCH_SIZE);
-            const progressPercent = Math.round((j / cachedChapters.length) * 100);
-            onProgress(`Uploading ${story.title}: ${progressPercent}% (${j}/${cachedChapters.length} chương)...`);
+        // 3. Upload Stories & Cached Chapters
+        for (let i = 0; i < stories.length; i++) {
+            const story = stories[i];
+            updateGlobalState(`Đang xử lý truyện: ${story.title} (${i + 1}/${stories.length})...`, true);
             
-            await Promise.all(batch.map(chap => 
-                saveChapterContentToDrive(story.url, chap.chapterUrl, {
-                    content: chap.content,
-                    stats: chap.stats
-                })
-            ));
+            // Upload Metadata
+            await saveStoryDetailsToDrive(story);
+
+            // Get Cached Chapters
+            const cachedChapters = await dbService.getAllChapterData(story.url);
+            
+            // Upload Chapters (Parallel Batching)
+            const BATCH_SIZE = 5;
+            for (let j = 0; j < cachedChapters.length; j += BATCH_SIZE) {
+                const batch = cachedChapters.slice(j, j + BATCH_SIZE);
+                const progressPercent = Math.round((j / cachedChapters.length) * 100);
+                updateGlobalState(`Uploading ${story.title}: ${progressPercent}% (${j}/${cachedChapters.length} chương)...`, true);
+                
+                await Promise.all(batch.map(chap => 
+                    saveChapterContentToDrive(story.url, chap.chapterUrl, {
+                        content: chap.content,
+                        stats: chap.stats
+                    })
+                ));
+            }
         }
+        
+        updateGlobalState("Đồng bộ hoàn tất!", false);
+    } catch (e: any) {
+        updateGlobalState(`Lỗi sao lưu: ${e.message}`, false);
+        throw e;
     }
-    
-    onProgress("Đồng bộ hoàn tất!");
 }
 
 // --- SMART PULL ACTION (DOWNLOAD MISSING DATA) ---
 
-export async function pullMissingDataFromDrive(onProgress: (msg: string) => void): Promise<void> {
+export async function pullMissingDataFromDrive(): Promise<void> {
+    if (globalIsSyncing) return; // Prevent concurrent syncs
     if (!accessToken) throw new Error("Chưa đăng nhập Google Drive");
 
-    onProgress("Đang kiểm tra danh sách truyện trên Drive...");
-    
-    // 1. Tải và đồng bộ danh sách truyện (Index)
-    const driveStories = await fetchLibraryIndexFromDrive();
-    
-    // Cập nhật index vào local DB
-    for (const dStory of driveStories) {
-        // Chỉ lưu metadata cơ bản nếu chưa có, hoặc cập nhật đè để đảm bảo mới nhất
-        await dbService.saveStory(dStory);
-    }
+    updateGlobalState("Đang đồng bộ tiến độ đọc...", true);
+    await syncReadingProgress();
 
-    // 2. Duyệt qua từng truyện để tìm chương thiếu
-    for (let i = 0; i < driveStories.length; i++) {
-        const indexStory = driveStories[i];
-        onProgress(`Đang kiểm tra truyện: ${indexStory.title} (${i + 1}/${driveStories.length})...`);
-
-        // Tải chi tiết truyện đầy đủ (bao gồm danh sách chương mới nhất từ Drive)
-        const fullDriveStory = await fetchStoryDetailsFromDrive(indexStory.url);
+    updateGlobalState("Đang kiểm tra danh sách truyện trên Drive...", true);
+    
+    try {
+        // 1. Tải và đồng bộ danh sách truyện (Index)
+        const driveStories = await fetchLibraryIndexFromDrive();
         
-        if (!fullDriveStory || !fullDriveStory.chapters) continue;
-
-        // Lưu metadata truyện đầy đủ vào local
-        await dbService.saveStory(fullDriveStory);
-
-        // Lấy danh sách các chương đã có ở local (để không tải lại)
-        const localCachedUrls = await dbService.getCachedChapterUrls(indexStory.url);
-        const localUrlSet = new Set(localCachedUrls);
-
-        // Lọc ra các chương mà Drive có nhưng Local chưa có
-        const missingChapters = fullDriveStory.chapters.filter(ch => !localUrlSet.has(ch.url));
-
-        if (missingChapters.length > 0) {
-            onProgress(`Tìm thấy ${missingChapters.length} chương/dữ liệu mới cho "${indexStory.title}". Đang tải...`);
-            
-            // Tải về theo batch
-            const BATCH_SIZE = 5;
-            for (let j = 0; j < missingChapters.length; j += BATCH_SIZE) {
-                const batch = missingChapters.slice(j, j + BATCH_SIZE);
-                
-                await Promise.all(batch.map(async (chap) => {
-                    const data = await fetchChapterContentFromDrive(indexStory.url, chap.url);
-                    if (data) {
-                        // Lưu cả content và stats (AI data) vào cache
-                        await dbService.saveChapterData(indexStory.url, chap.url, data);
-                    }
-                }));
-                
-                // Cập nhật progress bar ảo nếu cần, hoặc log
-                const percent = Math.round(((j + batch.length) / missingChapters.length) * 100);
-                onProgress(`Đang tải "${indexStory.title}": ${percent}% (${j + batch.length}/${missingChapters.length})`);
-            }
-        } else {
-            // onProgress(`"${indexStory.title}" đã đồng bộ.`);
+        // Cập nhật index vào local DB
+        for (const dStory of driveStories) {
+            // Chỉ lưu metadata cơ bản nếu chưa có, hoặc cập nhật đè để đảm bảo mới nhất
+            await dbService.saveStory(dStory);
         }
-    }
 
-    onProgress("Đã hoàn tất tải dữ liệu mới từ Drive!");
+        // 2. Duyệt qua từng truyện để tìm chương thiếu
+        for (let i = 0; i < driveStories.length; i++) {
+            const indexStory = driveStories[i];
+            // Get local cache URLs first to avoid unnecessary metadata download
+            const localCachedUrls = await dbService.getCachedChapterUrls(indexStory.url);
+            
+            // Tải chi tiết truyện đầy đủ (bao gồm danh sách chương mới nhất từ Drive)
+            // Cần tải cái này để biết Drive có bao nhiêu chương
+            const fullDriveStory = await fetchStoryDetailsFromDrive(indexStory.url);
+            
+            if (!fullDriveStory || !fullDriveStory.chapters) continue;
+
+            // Save full metadata
+            await dbService.saveStory(fullDriveStory);
+
+            const localUrlSet = new Set(localCachedUrls);
+
+            // Lọc ra các chương mà Drive có nhưng Local chưa có
+            // IMPORTANT: Logic này đảm bảo nếu Local đã có chương (bất kể có stats hay không), sẽ KHÔNG tải lại.
+            // Điều này khớp với yêu cầu "đã có trên thiết bị rồi -> không tải lại".
+            const missingChapters = fullDriveStory.chapters.filter(ch => !localUrlSet.has(ch.url));
+
+            if (missingChapters.length > 0) {
+                updateGlobalState(`Đang kiểm tra truyện: ${indexStory.title} (${i + 1}/${driveStories.length})...`, true);
+                updateGlobalState(`Tìm thấy ${missingChapters.length} chương mới cho "${indexStory.title}". Đang tải...`, true);
+                
+                // Tải về theo batch
+                const BATCH_SIZE = 5;
+                for (let j = 0; j < missingChapters.length; j += BATCH_SIZE) {
+                    const batch = missingChapters.slice(j, j + BATCH_SIZE);
+                    
+                    await Promise.all(batch.map(async (chap) => {
+                        const data = await fetchChapterContentFromDrive(indexStory.url, chap.url);
+                        if (data) {
+                            // Lưu cả content và stats (AI data) vào cache
+                            await dbService.saveChapterData(indexStory.url, chap.url, data);
+                        }
+                    }));
+                    
+                    // Cập nhật progress bar
+                    const percent = Math.round(((j + batch.length) / missingChapters.length) * 100);
+                    updateGlobalState(`Đang tải "${indexStory.title}": ${percent}% (${j + batch.length}/${missingChapters.length})`, true);
+                }
+            } else {
+                // Skip log if nothing missing to reduce noise
+                // updateGlobalState(`Truyện "${indexStory.title}" đã đồng bộ.`, true);
+            }
+        }
+
+        updateGlobalState("Đã hoàn tất tải dữ liệu mới từ Drive!", false);
+    } catch (e: any) {
+        updateGlobalState(`Lỗi tải dữ liệu: ${e.message}`, false);
+        throw e;
+    }
 }
