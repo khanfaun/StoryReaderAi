@@ -22,6 +22,9 @@ let gapiInited = false;
 let gisInited = false;
 let accessToken: string | null = null;
 
+// Cờ kiểm soát việc quét log xóa chỉ 1 lần mỗi phiên
+let hasCheckedDeletionsSession = false;
+
 const fileIdCache = new Map<string, string>();
 
 // --- DEVICE ID MANAGEMENT ---
@@ -206,6 +209,7 @@ export async function initGoogleDrive(): Promise<void> {
                         localStorage.setItem(STORAGE_KEY_TOKEN, accessToken!);
                         localStorage.setItem(STORAGE_KEY_EXPIRY, expirationTime.toString());
                         updateGlobalState({ isDirty: false, isError: false }); // Reset status on login
+                        hasCheckedDeletionsSession = false; // Reset flag on login
                         checkDirtyStatus(); // Check and Auto-Sync
                     },
                 });
@@ -264,6 +268,7 @@ export function signOut() {
     fileIdCache.clear();
     if (gapi.client) gapi.client.setToken(null);
     updateGlobalState({ isDirty: false, isBackgroundSyncing: false, isError: false });
+    hasCheckedDeletionsSession = false; // Reset check flag
 }
 
 export function isAuthenticated(): boolean {
@@ -475,31 +480,37 @@ async function appendToRemoteDeletionLog(item: Omit<DeletionLogItem, 'deviceId'>
 async function processRemoteDeletions(): Promise<void> {
     if (!accessToken) return;
     
+    // Nếu đã kiểm tra trong phiên này rồi thì bỏ qua
+    if (hasCheckedDeletionsSession) {
+        console.log("[Sync] Skipping deletion log check (already done this session).");
+        return;
+    }
+    
     updateGlobalState({ status: "Đang kiểm tra dữ liệu đã xoá..." });
     const currentDeviceId = getDeviceId();
     
     try {
         const log = await downloadFile<DeletionLog>(DELETION_LOG_FILENAME);
-        if (!log || !log.deletedItems || log.deletedItems.length === 0) return;
+        if (!log || !log.deletedItems || log.deletedItems.length === 0) {
+            hasCheckedDeletionsSession = true; // Mark as checked
+            return;
+        }
         
         console.log(`[Deletion Log] Found ${log.deletedItems.length} items to check.`);
         
         for (const item of log.deletedItems) {
             // QUAN TRỌNG: Bỏ qua nếu lệnh xóa đến từ chính thiết bị này
-            // Điều này ngăn chặn vòng lặp vô tận hoặc việc cố gắng xóa dữ liệu vừa bị xóa
             if (item.deviceId === currentDeviceId) {
                 continue;
             }
 
             if (item.type === 'story') {
-                // Kiểm tra xem local có truyện này không
                 const exists = await dbService.getStory(item.id);
                 if (exists) {
                     console.log(`[Sync Pruning] Deleting story from checklist: ${exists.title}`);
                     await dbService.deleteEbookAndStory(item.id);
                 }
             } else if (item.type === 'history') {
-                // Xoá khỏi lịch sử đọc local
                 let history = getReadingHistory();
                 const initialLen = history.length;
                 history = history.filter(h => h.url !== item.id);
@@ -511,6 +522,8 @@ async function processRemoteDeletions(): Promise<void> {
         }
     } catch (e) {
         console.warn("Error processing remote deletions:", e);
+    } finally {
+        hasCheckedDeletionsSession = true; // Mark as checked regardless of success/fail to avoid loop
     }
 }
 
@@ -670,7 +683,7 @@ export async function syncLibraryIndex(): Promise<Story[]> {
     if (!accessToken) return [];
     
     // BƯỚC 1: QUÉT CHECKLIST XOÁ TRƯỚC (Deletions First)
-    // Để đảm bảo những gì đã bị xoá ở thiết bị khác sẽ biến mất khỏi thiết bị này
+    // Chỉ chạy nếu chưa chạy trong phiên này (kiểm tra bên trong processRemoteDeletions)
     await processRemoteDeletions();
 
     // BƯỚC 2: Tải danh sách truyện còn lại từ Drive
@@ -697,8 +710,6 @@ export async function syncLibraryIndex(): Promise<Story[]> {
         // Nếu truyện ở Local là Dirty (mới thêm) hoặc chưa có trên Drive -> Upload
         if (lStory._dirty || !driveStoryUrls.has(lStory.url)) {
              // Chỉ upload nếu nó không vừa bị xoá (double check)
-             // Nhưng ở đây ta giả định processRemoteDeletions đã xoá nó rồi nếu cần.
-             // Nếu nó vẫn còn đây thì là truyện mới.
         }
     }
 
