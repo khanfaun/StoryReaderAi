@@ -59,6 +59,12 @@ type SyncTask = () => Promise<void>;
 const syncQueue: SyncTask[] = [];
 let isQueueProcessing = false;
 
+// Hàm kiểm tra xem hệ thống có đang bận xử lý dữ liệu quan trọng không
+// Dùng để cảnh báo khi người dùng tắt tab
+export const hasPendingWork = (): boolean => {
+    return syncQueue.length > 0 || isQueueProcessing || globalState.isSyncing;
+};
+
 const enqueueSyncTask = (task: SyncTask) => {
     syncQueue.push(task);
     processSyncQueue();
@@ -67,49 +73,62 @@ const enqueueSyncTask = (task: SyncTask) => {
 const processSyncQueue = async () => {
     if (isQueueProcessing) return;
     
-    // Nếu có task, bật trạng thái background syncing
-    if (syncQueue.length > 0 && !globalState.isBackgroundSyncing) {
-        updateGlobalState({ isBackgroundSyncing: true, isDirty: false }); 
-    }
-
+    // Bật trạng thái background syncing ngay lập tức
+    updateGlobalState({ isBackgroundSyncing: true, isDirty: false });
     isQueueProcessing = true;
-    while (syncQueue.length > 0) {
-        const task = syncQueue.shift();
-        if (task) {
-            try {
-                await task();
-            } catch (e) {
-                console.error("Background sync task failed:", e);
-                // Nếu lỗi, đánh dấu là Dirty để người dùng biết cần đồng bộ lại
-                updateGlobalState({ isDirty: true });
+
+    try {
+        while (syncQueue.length > 0) {
+            const task = syncQueue.shift();
+            if (task) {
+                try {
+                    await task();
+                } catch (e) {
+                    console.error("Background sync task failed:", e);
+                    // Nếu lỗi một task, đánh dấu là Dirty để người dùng biết cần đồng bộ lại sau
+                    // Nhưng không dừng loop, tiếp tục xử lý các task khác
+                    updateGlobalState({ isDirty: true });
+                }
+                // Delay nhỏ giữa các request để an toàn cho quota Google Drive
+                await new Promise(resolve => setTimeout(resolve, 500)); 
             }
-            // Delay nhỏ giữa các request để an toàn cho quota
-            await new Promise(resolve => setTimeout(resolve, 500)); 
         }
+    } catch (err) {
+        console.error("Critical Queue Error:", err);
+    } finally {
+        // LUÔN LUÔN TẮT TRẠNG THÁI BẬN DÙ CÓ LỖI HAY KHÔNG
+        isQueueProcessing = false;
+        
+        // Kiểm tra lại dirty status lần cuối để cập nhật icon chính xác
+        // Nếu còn task (do lỗi logic nào đó) hoặc checkDirty thấy file chưa sync -> Dirty
+        // Ngược lại -> Synced (Tick xanh)
+        await checkDirtyStatus(true); 
     }
-    isQueueProcessing = false;
-    
-    // Khi hết task, tắt trạng thái
-    updateGlobalState({ isBackgroundSyncing: false });
-    
-    // Kiểm tra lại xem có gì dirty không (double check)
-    checkDirtyStatus();
 };
 
 // Hàm kiểm tra nhanh xem còn file nào chưa sync không (chạy sau khi queue rỗng)
-const checkDirtyStatus = async () => {
-    if (!accessToken) return;
+// updateUI: Có cập nhật globalState tắt spinner không
+const checkDirtyStatus = async (updateUI: boolean = false) => {
+    if (!accessToken) {
+        if(updateUI) updateGlobalState({ isBackgroundSyncing: false });
+        return;
+    }
     try {
         const dirtyStories = await dbService.getDirtyStories();
-        // Lưu ý: check dirty chapters có thể chậm nếu DB lớn, nên ta chỉ check stories hoặc history
-        // Hoặc chấp nhận logic: Nếu queue chạy xong và không lỗi -> Clean.
-        if (dirtyStories.length > 0 || isHistoryDirty()) {
+        const isHistoryUnsynced = isHistoryDirty();
+        const hasDirty = dirtyStories.length > 0 || isHistoryUnsynced;
+        
+        if (updateUI) {
+            updateGlobalState({ 
+                isDirty: hasDirty, 
+                isBackgroundSyncing: false // Đảm bảo tắt spinner
+            });
+        } else if (hasDirty) {
             updateGlobalState({ isDirty: true });
-        } else {
-            updateGlobalState({ isDirty: false });
         }
     } catch(e) {
         console.warn("Check dirty failed", e);
+        if(updateUI) updateGlobalState({ isBackgroundSyncing: false });
     }
 }
 
@@ -522,6 +541,7 @@ export async function uploadAllLocalData(finalize: boolean = true): Promise<void
             updateGlobalState({ status: "Đồng bộ hoàn tất!", isSyncing: false, isDirty: false });
         }
     } catch (e: any) {
+        // Ensure spinner stops even on error
         updateGlobalState({ status: `Lỗi sao lưu: ${e.message}`, isSyncing: false });
         throw e;
     }
@@ -616,6 +636,7 @@ export async function pullMissingDataFromDrive(finalize: boolean = true): Promis
         if (finalize) updateGlobalState({ status: "Đã hoàn tất tải dữ liệu mới!", isSyncing: false });
 
     } catch (e: any) {
+        // Ensure spinner stops even on error
         updateGlobalState({ status: `Lỗi tải dữ liệu: ${e.message}`, isSyncing: false });
         throw e;
     }

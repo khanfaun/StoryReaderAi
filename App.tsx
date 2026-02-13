@@ -192,6 +192,18 @@ const App: React.FC = () => {
       return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
+  // --- BROWSER CLOSE WARNING (SYNC PROTECTION) ---
+  useEffect(() => {
+      const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+          if (syncService.hasPendingWork()) {
+              e.preventDefault();
+              e.returnValue = ''; // Required for modern browsers to show the default warning
+          }
+      };
+      window.addEventListener('beforeunload', handleBeforeUnload);
+      return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+  }, []);
+
   const handleStartDownloadWrapper = async (config: DownloadConfig) => {
       setIsDownloadModalOpen(false);
       handleStartDownload(config);
