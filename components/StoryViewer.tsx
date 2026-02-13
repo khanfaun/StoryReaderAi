@@ -497,7 +497,10 @@ const StoryViewer: React.FC<StoryViewerProps> = ({
             if (syncService.isAuthenticated()) {
                 try {
                     console.log("Checking Drive for chapter content...");
-                    const driveData = await syncService.fetchChapterContentFromDrive(storyToLoad.url, chapter.url);
+                    
+                    // UPDATE: Pass chapterIndex to help find packed chunks
+                    const driveData = await syncService.fetchChapterContentFromDrive(storyToLoad.url, chapter.url, chapterIndex);
+                    
                     if (driveData && driveData.content) {
                         setChapterContent(driveData.content);
                         // Lưu lại vào Local Cache để lần sau đọc nhanh hơn
@@ -523,9 +526,6 @@ const StoryViewer: React.FC<StoryViewerProps> = ({
                 } catch (driveErr) {
                     // Nếu lỗi Mạng hoặc 404, chỉ log warning.
                     // Nếu là 404 thật thì mới nên fallback xuống web. 
-                    // Nhưng ở đây ta cứ fallback cho an toàn (trừ khi yêu cầu cấm tuyệt đối ngay cả khi 404).
-                    // Theo yêu cầu "tuyệt đối không phải fetch từ web gốc NẾU NHƯ ĐÃ CÓ trên Drive". 
-                    // Nghĩa là nếu Drive ko có thì vẫn được fetch web.
                     console.warn("Failed to fetch from Drive, falling back to Web/Ebook", driveErr);
                 }
             }

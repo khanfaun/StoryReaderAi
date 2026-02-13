@@ -193,6 +193,31 @@ export async function getChapterData(storyUrl: string, chapterUrl: string): Prom
     });
 }
 
+// Lấy nhiều chương cụ thể theo danh sách URL
+export async function getChaptersByUrls(storyUrl: string, chapterUrls: string[]): Promise<Record<string, CachedChapter>> {
+    const db = await openDB();
+    const transaction = db.transaction(CHAPTER_STORE, 'readonly');
+    const store = transaction.objectStore(CHAPTER_STORE);
+    
+    const results: Record<string, CachedChapter> = {};
+    
+    await Promise.all(chapterUrls.map(url => {
+        return new Promise<void>((resolve) => {
+            const req = store.get([storyUrl, url]);
+            req.onsuccess = () => {
+                if (req.result) {
+                    const { storyUrl: s, chapterUrl: c, ...data } = req.result;
+                    results[url] = data as CachedChapter;
+                }
+                resolve();
+            };
+            req.onerror = () => resolve(); // Ignore errors
+        });
+    }));
+    
+    return results;
+}
+
 // Lấy tất cả chương bẩn cần đồng bộ
 // Lưu ý: Do DB có thể rất lớn, ta nên dùng Cursor hoặc lấy theo từng truyện nếu cần tối ưu
 // Ở đây dùng getAll đơn giản vì đây là app cá nhân
