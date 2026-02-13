@@ -827,27 +827,37 @@ const App: React.FC = () => {
   };
 
   const handleDeleteStory = async (storyToDelete: Story) => {
-      try {
-          // 1. NGƯNG TẢI NGAY LẬP TỨC
-          handleStopBackgroundDownload(storyToDelete.url);
+      // 1. NGƯNG CÀO/TẢI NGAY LẬP TỨC
+      // Hàm này update state synchronously để loại bỏ khỏi UI Download Manager
+      // và set flag aborted=true để dừng loop fetch trong background
+      handleStopBackgroundDownload(storyToDelete.url);
 
-          // 2. Xóa dữ liệu local
+      // 2. CẬP NHẬT GIAO DIỆN NGAY LẬP TỨC (Optimistic UI Update)
+      // Xóa khỏi danh sách truyện hiển thị
+      setLocalStories(prev => prev.filter(s => s.url !== storyToDelete.url));
+      
+      // Xóa khỏi lịch sử đọc
+      const history = getReadingHistory().filter(item => item.url !== storyToDelete.url);
+      saveReadingHistory(history);
+      setReadingHistory(history);
+
+      // 3. VỀ TRANG CHỦ NGAY LẬP TỨC
+      // Việc này unmount StoryViewer/StoryDetail
+      handleBackToMain();
+
+      // 4. XỬ LÝ DỮ LIỆU NẶNG TRONG NỀN (Non-blocking)
+      // Không dùng await ở cấp độ top-level để tránh block UI
+      try {
+          // Xóa dữ liệu IndexedDB (có thể mất vài giây nếu truyện dài)
           await dbService.deleteEbookAndStory(storyToDelete.url);
           
-          const history = getReadingHistory().filter(item => item.url !== storyToDelete.url);
-          saveReadingHistory(history);
-          setReadingHistory(history);
-          setLocalStories(prev => prev.filter(s => s.url !== storyToDelete.url));
-          
-          // 3. Xóa trên Drive (Chạy ngầm và quét sạch)
+          // Xóa trên Drive (Sync)
           if (syncService.isAuthenticated()) {
-              syncService.deleteStoryFromDrive(storyToDelete).catch(console.error);
+              await syncService.deleteStoryFromDrive(storyToDelete);
           }
-          
-          // 4. Về trang chủ ngay
-          handleBackToMain();
       } catch (e) {
-          setError(`Lỗi xóa truyện: ${(e as Error).message}`);
+          // Log lỗi ngầm, không làm phiền user vì họ đã xóa xong trên UI
+          console.error(`Background delete error for ${storyToDelete.title}:`, (e as Error).message);
       }
   };
 
