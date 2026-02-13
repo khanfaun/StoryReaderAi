@@ -30,9 +30,13 @@ import ConfirmationModal from './components/ConfirmationModal';
 import GlobalDownloadManager from './components/GlobalDownloadManager';
 import SyncModal from './components/SyncModal'; 
 import MobileSearchModal from './components/MobileSearchModal';
-import { PlusIcon, StopIcon, SpinnerIcon, CheckIcon, CloseIcon, UploadIcon, DownloadIcon } from './components/icons';
+import { PlusIcon, StopIcon, SpinnerIcon, CheckIcon, CloseIcon, UploadIcon, DownloadIcon, WrenchScrewdriverIcon } from './components/icons';
 
 import StoryViewer from './components/StoryViewer';
+
+// Import Dev Config & Service
+import { SHOW_DEV_TEST_BUTTON } from './config/devConfig';
+import { injectDevStories } from './services/devTestStories';
 
 declare var JSZip: any;
 
@@ -918,6 +922,20 @@ const App: React.FC = () => {
       setFilterTags(prev => prev.includes(tag) ? prev.filter(t => t !== tag) : [...prev, tag]);
   };
 
+  // --- DEV TEST HANDLER ---
+  const handleLoadDevTest = async () => {
+      setIsDataLoading(true);
+      try {
+          await injectDevStories();
+          await reloadDataFromStorage(); // Reload to show new stories
+          alert("Đã nạp dữ liệu Dev Test thành công!");
+      } catch (e) {
+          alert("Lỗi nạp dữ liệu Dev Test: " + (e as Error).message);
+      } finally {
+          setIsDataLoading(false);
+      }
+  };
+
   // Main Render Logic
   const appContentClass = isApiKeyModalOpen || isUpdateModalOpen || isHelpModalOpen || manualImportState.isOpen || isCreateStoryModalOpen || isCreateChapterModalOpen || isDownloadModalOpen || isSyncModalOpen || isMobileSearchModalOpen || overwriteConfirmation ? 'blur-sm pointer-events-none' : '';
 
@@ -1187,6 +1205,19 @@ const App: React.FC = () => {
                 <SearchResultsList results={searchResults} onSelectStory={handleSelectStory} />
             ) : (
                 <div className="space-y-12">
+                    {/* DEV TEST BUTTON (CONDITIONAL) */}
+                    {SHOW_DEV_TEST_BUTTON && (
+                        <div className="flex justify-center mb-8">
+                            <button
+                                onClick={handleLoadDevTest}
+                                className="flex items-center gap-2 px-6 py-3 bg-[var(--theme-bg-surface)] border-2 border-dashed border-[var(--theme-accent-primary)] rounded-xl text-[var(--theme-accent-primary)] hover:bg-[var(--theme-accent-primary)] hover:text-white transition-all duration-300 shadow-sm hover:shadow-md font-bold"
+                            >
+                                <WrenchScrewdriverIcon className="w-5 h-5" />
+                                <span>Dev Test: Nạp Truyện Demo</span>
+                            </button>
+                        </div>
+                    )}
+
                     {readingHistory.length > 0 && ( <section><ReadingHistory items={readingHistory} onContinue={handleContinueFromHistory} onRequestDeleteEbook={handleRequestDeleteEbook} onRemoveItem={handleRemoveFromHistory} /></section> )}
                     
                     {localStories.length > 0 && (

@@ -829,7 +829,7 @@ const StoryViewer: React.FC<StoryViewerProps> = ({
 
     // Detail View
     return (
-        <div className="max-w-screen-2xl mx-auto px-4 py-8 sm:py-12 flex-grow mt-16">
+        <div className="w-full max-w-[96%] mx-auto px-4 py-8 sm:py-12 flex-grow mt-16 transition-all duration-300">
             <StoryDetail 
                 story={story} 
                 onSelectChapter={handleSelectChapter} readChapters={readChapters} lastReadChapterIndex={selectedChapterIndex} 
