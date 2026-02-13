@@ -21,6 +21,7 @@ import CharacterPrimaryPanel from './CharacterPrimaryPanel';
 import ChatPanel from './ChatPanel'; 
 import ManualImportModal from './ManualImportModal';
 import MultiChapterAddModal from './MultiChapterAddModal';
+import EntityEditModal, { EntityType } from './EntityEditModal';
 
 interface EbookHandler {
   zip: any;
@@ -145,6 +146,9 @@ const StoryViewer: React.FC<StoryViewerProps> = ({
     // Multi Chapter Add Modal State
     const [isMultiAddModalOpen, setIsMultiAddModalOpen] = useState(false);
 
+    // Entity Edit Modal State (Used for both panel and quick add)
+    const [entityModalState, setEntityModalState] = useState<{ isOpen: boolean; type: EntityType | null; data: any | null }>({ isOpen: false, type: null, data: null });
+
     const operationIdRef = useRef<number>(0);
     const { availableSystemVoices } = useTts(settings, onSettingsChange);
 
@@ -154,6 +158,14 @@ const StoryViewer: React.FC<StoryViewerProps> = ({
 
     // Reading Mode Detection
     const isReading = selectedChapterIndex !== null && chapterContent !== null;
+
+    // Computed for modal auto-complete
+    const allCharacterNames = useMemo(() => {
+        if (!cumulativeStats) return [];
+        const mainCharName = cumulativeStats.trangThai?.ten;
+        const npcNames = cumulativeStats.npcs?.map(npc => npc.ten) || [];
+        return [mainCharName, ...npcNames].filter((name): name is string => !!name);
+    }, [cumulativeStats]);
 
     useEffect(() => {
         onReadingModeChange(isReading);
@@ -211,6 +223,89 @@ const StoryViewer: React.FC<StoryViewerProps> = ({
             }
         }
     }, [story.url, persistStoryState, selectedChapterIndex, story.chapters, chapterContent]);
+
+    // --- SHARED ENTITY SAVE HANDLER ---
+    // Used by both Panels and Quick Add Modal
+    const handleSaveEntity = (entityData: any) => {
+        if (!entityModalState.type) return;
+
+        // Nếu stats null thì khởi tạo object rỗng, ngược lại deep copy
+        const newStats = cumulativeStats ? JSON.parse(JSON.stringify(cumulativeStats)) : {};
+        const type = entityModalState.type;
+
+        if (type === 'heThongCanhGioi') {
+            const list: string[] = newStats.heThongCanhGioi || [];
+            if (entityModalState.data && typeof entityModalState.data === 'string') { // Editing existing string
+                const index = list.indexOf(entityModalState.data);
+                if (index > -1) list[index] = entityData;
+            } else { // Adding
+                list.push(entityData);
+            }
+            newStats.heThongCanhGioi = list;
+        } else if (type === 'tuChat') {
+            const list = newStats.trangThai?.tuChat || [];
+            const index = list.findIndex((item: any) => item.ten === entityModalState.data?.ten);
+            if (index !== -1) list[index] = entityData; else list.push(entityData);
+            if (!newStats.trangThai) newStats.trangThai = { ten: '' };
+            newStats.trangThai.tuChat = list;
+        } else if (type === 'quanHe') {
+            const list = newStats.quanHe || [];
+            if (entityModalState.data) { // Editing
+                const index = list.findIndex((item: any) => item.nhanVat1 === entityModalState.data.nhanVat1 && item.nhanVat2 === entityModalState.data.nhanVat2);
+                if (index !== -1) list[index] = entityData;
+            } else { // Adding
+                list.push(entityData);
+            }
+            newStats.quanHe = list;
+        } else if (type === 'diaDiem') {
+            const { isCurrentLocation, ...locationDetails } = entityData;
+            const list = newStats.diaDiem || [];
+            const index = list.findIndex((item: any) => item.ten === entityModalState.data?.ten);
+            
+            if (index !== -1) list[index] = locationDetails; else list.push(locationDetails);
+            newStats.diaDiem = list;
+
+            if (isCurrentLocation) {
+                newStats.viTriHienTai = locationDetails.ten;
+            } else if (newStats.viTriHienTai === locationDetails.ten) {
+                // Unchecked the current location, so clear it
+                newStats.viTriHienTai = undefined;
+            }
+        } else if (type === 'mainCharacter') {
+            if (!newStats.trangThai) newStats.trangThai = { ten: '' };
+            newStats.trangThai.ten = entityData.ten;
+            newStats.canhGioi = entityData.canhGioi;
+        } else { // Handle other standard object arrays
+            const list = newStats[type as keyof CharacterStats] as any[] || [];
+            const index = list.findIndex((item: any) => item.ten === entityModalState.data?.ten);
+            if (index !== -1) list[index] = entityData; else list.push(entityData);
+            (newStats as any)[type] = list;
+        }
+        
+        handleStatsChange(newStats);
+        setEntityModalState({ isOpen: false, type: null, data: null });
+    };
+
+    const handleAddEntityFromSelection = (type: EntityType, name: string) => {
+        // Pre-fill data structure based on type
+        let initialData: any = { ten: name };
+        
+        if (type === 'heThongCanhGioi') {
+            initialData = name;
+        } else if (type === 'npcs') {
+            initialData = { ...initialData, moTa: '', status: 'active', mucDoThanThiet: 'Trung Lập' };
+        } else if (type === 'diaDiem') {
+            initialData = { ...initialData, moTa: '' };
+        } else {
+            initialData = { ...initialData, moTa: '', status: 'active' };
+        }
+
+        setEntityModalState({
+            isOpen: true,
+            type: type,
+            data: initialData // Passing as 'data' simulates editing an existing item but with just the name filled, user completes the rest
+        });
+    };
 
     const handleApiError = useCallback((error: unknown) => {
         const errorMessage = error instanceof Error ? error.message : "Đã xảy ra lỗi không xác định.";
@@ -779,6 +874,8 @@ const StoryViewer: React.FC<StoryViewerProps> = ({
                         isMainHeaderVisible={isHeaderVisible}
                         // Add panel status for back button logic
                         isPanelOpen={isPanelVisible}
+                        // Pass Add Entity Handler
+                        onAddEntity={handleAddEntityFromSelection}
                     />
                 </div>
 
@@ -823,6 +920,18 @@ const StoryViewer: React.FC<StoryViewerProps> = ({
                     onSave={handleAddChaptersInternal}
                     nextChapterIndex={selectedChapterIndex !== null ? selectedChapterIndex + 2 : (story.chapters?.length || 0) + 1}
                 />
+                {entityModalState.isOpen && entityModalState.type && (
+                    <EntityEditModal 
+                        isOpen={entityModalState.isOpen}
+                        onClose={() => setEntityModalState({ isOpen: false, type: null, data: null })}
+                        onSave={handleSaveEntity}
+                        entityType={entityModalState.type}
+                        entityData={entityModalState.data}
+                        allLocations={cumulativeStats?.diaDiem}
+                        currentLocationName={cumulativeStats?.viTriHienTai}
+                        allCharacters={allCharacterNames}
+                    />
+                )}
             </div>
         );
     }

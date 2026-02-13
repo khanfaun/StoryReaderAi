@@ -1,4 +1,3 @@
-
 import React, { useState, useCallback, useEffect, useRef, useMemo } from 'react';
 import type { Story, Chapter, ReadingHistoryItem, ApiKeyInfo, DownloadConfig } from './types';
 import { searchStory, getStoryDetails, getStoryFromUrl, parseHtml, parseStoryDetailsFromDoc } from './services/truyenfullService';
@@ -537,6 +536,14 @@ const App: React.FC = () => {
               
               await dbService.saveStory(fullStory);
 
+              // --- SYNC LOGIC FOR MANUAL IMPORT ---
+              if (syncService.isAuthenticated()) {
+                  console.log("Syncing manually imported story to Drive...");
+                  await syncService.saveStoryDetailsToDrive(fullStory);
+                  await syncService.syncLibraryIndex();
+              }
+              // ------------------------------------
+
               setStory(fullStory);
               const savedRead = localStorage.getItem(`readChapters_${fullStory.url}`);
               if (savedRead) setReadChapters(new Set(JSON.parse(savedRead)));
@@ -553,6 +560,7 @@ const App: React.FC = () => {
           }
       } catch (e) {
           alert(`Lỗi khi đọc file: ${(e as Error).message}`);
+          setIsDataLoading(false);
       }
   };
 
@@ -776,6 +784,8 @@ const App: React.FC = () => {
           
           if (syncService.isAuthenticated()) {
               syncService.saveStoryDetailsToDrive(updatedStory).catch(console.error);
+              // Also sync index to update title/author if changed
+              syncService.syncLibraryIndex().catch(console.error);
           }
 
           const history = getReadingHistory();

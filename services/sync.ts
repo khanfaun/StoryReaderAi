@@ -316,8 +316,14 @@ export async function syncLibraryIndex(): Promise<Story[]> {
         }
     }
     
+    // Check if we need to upload index back to Drive
+    // Điều kiện: Nếu Local có truyện mà Drive chưa có (URL không nằm trong danh sách Drive)
+    const driveUrls = new Set(driveStories.map(s => s.url));
+    const localHasNew = localStories.some(s => !driveUrls.has(s.url));
+
     // Nếu Local có truyện mới mà Drive chưa có -> Upload ngược lại index mới
-    if (localStories.length > driveStories.length) {
+    // HOẶC nếu số lượng khác nhau (ví dụ xóa truyện ở Drive nhưng Local vẫn còn -> giữ Local làm chuẩn trong trường hợp Merge)
+    if (localHasNew || localStories.length !== driveStories.length) {
         await saveLibraryIndexToDrive(Array.from(mergedMap.values()));
     }
 

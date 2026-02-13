@@ -5,6 +5,7 @@ import ChapterListModal from './ChapterListModal';
 import SettingsPanel from './SettingsPanel';
 import EntityTooltip from './EntityTooltip';
 import { ListIcon, EditIcon, SparklesIcon, SpinnerIcon, PlusIcon, PlayIcon, PauseIcon, StopIcon, CloseIcon, BarsIcon, CogIcon, SlidersIcon, BackwardStepIcon, ForwardStepIcon, VolumeHighIcon, UserIcon, ClipboardIcon, BookmarkIcon, BookmarkSlashIcon, EyeIcon, EyeSlashIcon, CheckIcon } from './icons';
+import type { EntityType } from './EntityEditModal';
 
 type TtsStatus = 'idle' | 'loading' | 'playing' | 'paused' | 'error' | 'ready';
 
@@ -74,6 +75,9 @@ interface ChapterContentProps {
 
   // Panel Open State (for Back button logic)
   isPanelOpen?: boolean;
+
+  // NEW: Manual Add Entity Trigger
+  onAddEntity?: (type: EntityType, name: string) => void;
 }
 
 // Helper format thời gian mm:ss
@@ -85,6 +89,19 @@ const formatTime = (seconds: number) => {
 
 // Ước tính thời gian dựa trên số ký tự (giả sử tốc độ 1x ~ 20 ký tự/giây cho tiếng Việt)
 const CHAR_PER_SEC = 20;
+
+// Mapping buttons for Quick Add Menu - Unified Style
+const QUICK_ADD_OPTIONS: { label: string; type: EntityType }[] = [
+    { label: 'NPC', type: 'npcs' },
+    { label: 'Vật Phẩm', type: 'balo' },
+    { label: 'Công Pháp', type: 'congPhap' },
+    { label: 'Cảnh Giới', type: 'heThongCanhGioi' },
+    { label: 'Thế Lực', type: 'theLuc' },
+    { label: 'Địa Điểm', type: 'diaDiem' },
+    { label: 'Quan Hệ', type: 'quanHe' },
+    { label: 'Tư Chất', type: 'tuChat' },
+    { label: 'Trang Bị', type: 'trangBi' },
+];
 
 const ChapterContent: React.FC<ChapterContentProps> = ({ 
     story, currentChapterIndex, content, onBack, onPrev, onNext, onSelectChapter, 
@@ -102,7 +119,8 @@ const ChapterContent: React.FC<ChapterContentProps> = ({
     pcLayout = 'default',
     onOpenAddChapterModal,
     isMainHeaderVisible = true,
-    isPanelOpen = false
+    isPanelOpen = false,
+    onAddEntity
 }) => {
   const [isListVisible, setIsListVisible] = useState(false);
   const [isNavBarVisible, setIsNavBarVisible] = useState(true);
@@ -116,6 +134,7 @@ const ChapterContent: React.FC<ChapterContentProps> = ({
 
   const activeChunkRef = useRef<HTMLDivElement>(null); // Ref to scroll to active highlighted text (TTS)
   const activeWordRef = useRef<HTMLSpanElement>(null); // Ref to scroll to the specific word
+  const contentAreaRef = useRef<HTMLDivElement>(null);
   
   // Flag to distinguish between user scroll and TTS auto-scroll
   const programmaticScrollRef = useRef(false);
@@ -155,6 +174,9 @@ const ChapterContent: React.FC<ChapterContentProps> = ({
   // Ref để lưu lại layout trước đó khi chuyển sang chế độ tập trung
   const lastNonMinimalLayoutRef = useRef<ReadingSettings['pcLayout']>('default');
 
+  // Text Selection State
+  const [selectionMenu, setSelectionMenu] = useState<{ x: number; y: number; text: string } | null>(null);
+
   // Cập nhật ref khi prop thay đổi (phòng trường hợp component không remount nhưng prop đổi)
   useEffect(() => {
       latestScrollPercentRef.current = initialScrollPercentage;
@@ -193,6 +215,7 @@ const ChapterContent: React.FC<ChapterContentProps> = ({
   useEffect(() => {
       setEditableContent(content);
       setIsEditingContent(false);
+      setSelectionMenu(null); // Clear selection menu on content change
   }, [content]);
 
   // Handle Manual Scroll Restoration Control
@@ -206,6 +229,68 @@ const ChapterContent: React.FC<ChapterContentProps> = ({
           }
       };
   }, []);
+
+  // Handle Text Selection
+  useEffect(() => {
+      // 1. Logic mở menu (chỉ khi kết thúc chọn)
+      const handleSelectionEnd = () => {
+          if (isEditingContent) return; 
+
+          const selection = window.getSelection();
+          if (!selection || selection.rangeCount === 0 || selection.isCollapsed) {
+              setSelectionMenu(null);
+              return;
+          }
+
+          const text = selection.toString().trim();
+          if (text.length === 0 || text.length > 200) { 
+              setSelectionMenu(null);
+              return;
+          }
+
+          // Check if selection is inside content area
+          if (contentAreaRef.current && !contentAreaRef.current.contains(selection.anchorNode)) {
+              return;
+          }
+
+          const range = selection.getRangeAt(0);
+          const rect = range.getBoundingClientRect();
+
+          setSelectionMenu({
+              x: rect.left + rect.width / 2,
+              y: rect.top - 10, // Base Position, offset handled in render
+              text: text
+          });
+      };
+
+      // 2. Logic đóng menu (ngay khi bỏ chọn)
+      const handleSelectionChange = () => {
+          const selection = window.getSelection();
+          if (!selection || selection.isCollapsed) {
+              setSelectionMenu(null);
+          }
+      };
+
+      document.addEventListener('mouseup', handleSelectionEnd);
+      document.addEventListener('touchend', handleSelectionEnd);
+      document.addEventListener('selectionchange', handleSelectionChange);
+
+      return () => {
+          document.removeEventListener('mouseup', handleSelectionEnd);
+          document.removeEventListener('touchend', handleSelectionEnd);
+          document.removeEventListener('selectionchange', handleSelectionChange);
+      };
+  }, [isEditingContent]);
+
+  // Clear selection menu on scroll (to avoid floating issues)
+  useEffect(() => {
+      const handleScroll = () => {
+          if (selectionMenu) setSelectionMenu(null);
+      };
+      window.addEventListener('scroll', handleScroll);
+      return () => window.removeEventListener('scroll', handleScroll);
+  }, [selectionMenu]);
+
 
   // --- LOGIC KHÔI PHỤC VỊ TRÍ ĐỌC (RESTORE) ---
   // Sử dụng useLayoutEffect để chạy ngay sau khi DOM cập nhật
@@ -602,6 +687,16 @@ const ChapterContent: React.FC<ChapterContentProps> = ({
       }
   };
 
+  // Handle Quick Add Entity from Menu
+  const handleQuickAdd = (type: EntityType) => {
+      if (onAddEntity && selectionMenu) {
+          onAddEntity(type, selectionMenu.text);
+          setSelectionMenu(null); // Close menu after action
+          // Clear selection from browser
+          window.getSelection()?.removeAllRanges();
+      }
+  };
+
   const entityMapData = useMemo(() => {
     if (!cumulativeStats) return { map: new Map(), regex: null };
     const map = new Map<string, any>();
@@ -835,7 +930,10 @@ const ChapterContent: React.FC<ChapterContentProps> = ({
       {/* Main Content Area - Added top margin to compensate for fixed headers (Main Header + Chapter Header usually) */}
       {/* Dynamic top margin: 36 (~144px, 64+64+padding) when both headers visible, 20 (~80px, 64+padding) when only sub-header */}
       {/* UPDATE: Reduced padding on lg (p-6) to save space, increased on xl (p-12) */}
-      <div className={`flex-grow bg-[var(--theme-bg-base)] rounded-lg shadow-xl p-4 sm:p-8 lg:p-6 xl:p-12 w-full animate-fade-in border border-[var(--theme-border)] pb-24 mx-auto max-w-screen-xl transition-all duration-300 ${isMainHeaderVisible ? 'mt-36' : 'mt-20'}`}>
+      <div 
+        ref={contentAreaRef}
+        className={`flex-grow bg-[var(--theme-bg-base)] rounded-lg shadow-xl p-4 sm:p-8 lg:p-6 xl:p-12 w-full animate-fade-in border border-[var(--theme-border)] pb-24 mx-auto max-w-screen-xl transition-all duration-300 ${isMainHeaderVisible ? 'mt-36' : 'mt-20'}`}
+      >
         {ttsError && isAudioPlayerVisible && <div className="my-2 p-2 bg-rose-900/50 text-rose-300 text-center rounded text-sm border border-rose-700">Lỗi Audio: {ttsError}</div>}
         {isEditingContent ? (
             <div className="mt-6">
@@ -862,6 +960,34 @@ const ChapterContent: React.FC<ChapterContentProps> = ({
         )}
       </div>
       
+      {/* QUICK ADD ENTITY FLOATING MENU */}
+      {selectionMenu && (
+          <div 
+            className="fixed z-[200] bg-[var(--theme-bg-surface)] border border-[var(--theme-border)] rounded-xl shadow-2xl p-2 animate-fade-in-up flex flex-col gap-2 min-w-[200px]"
+            style={{ 
+                left: Math.min(window.innerWidth - 220, Math.max(10, selectionMenu.x - 100)), // Clamp to screen
+                // Modified: Increased offset from 120 to 160 to push it higher above text
+                top: Math.max(70, selectionMenu.y - 160), 
+            }}
+            onMouseDown={e => e.preventDefault()} // Prevent losing selection focus immediately
+          >
+              <div className="text-[10px] text-[var(--theme-text-secondary)] uppercase font-bold text-center border-b border-[var(--theme-border)] pb-1 mb-1 truncate px-2">
+                  Thêm "{selectionMenu.text.length > 15 ? selectionMenu.text.substring(0, 15) + '...' : selectionMenu.text}" vào:
+              </div>
+              <div className="grid grid-cols-3 gap-1.5">
+                  {QUICK_ADD_OPTIONS.map(opt => (
+                      <button
+                        key={opt.type}
+                        onClick={() => handleQuickAdd(opt.type)}
+                        className="text-[10px] py-1.5 px-1 rounded border bg-[var(--theme-bg-base)] border-[var(--theme-border)] text-[var(--theme-text-primary)] hover:border-[var(--theme-accent-primary)] hover:text-[var(--theme-accent-primary)] transition-colors font-medium text-center"
+                      >
+                          {opt.label}
+                      </button>
+                  ))}
+              </div>
+          </div>
+      )}
+
       {/* Popovers ... (Same as previous) */}
       {isAudioPlayerVisible && isPlaylistOpen && (
         <div className="fixed bottom-24 left-4 right-4 md:bottom-28 md:left-1/2 md:-translate-x-1/2 md:w-96 md:max-w-none bg-[var(--theme-bg-surface)] border border-[var(--theme-border)] rounded-lg shadow-xl overflow-y-auto z-[100] p-2 animate-fade-in-up max-h-[50vh]">
