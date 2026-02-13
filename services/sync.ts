@@ -510,44 +510,67 @@ export async function saveStoryDetailsToDrive(story: Story): Promise<void> {
 export async function deleteStoryFromDrive(story: Story): Promise<void> {
     if (!accessToken) return;
     
+    // Sử dụng enqueueSyncTask để đảm bảo việc xoá diễn ra ở background và tuần tự
     enqueueSyncTask(async () => {
+        const storyHash = hashUrl(story.url);
+
+        // 1. Ghi log xoá để các thiết bị khác biết
         await appendToRemoteDeletionLog({
             type: 'story',
             id: story.url,
             timestamp: Date.now()
         });
 
-        const storyHash = hashUrl(story.url);
+        // 2. Xoá file Metadata của truyện
         const filename = getStoryFilename(story.url);
         await performDelete(filename);
         
-        // Clean up PACK files (containing multiple chapters)
+        // 3. Quét và Xoá TẤT CẢ các file nội dung liên quan (Pack & Chapter lẻ)
         try {
             let pageToken = null;
             do {
+                // Query tìm tất cả file có tên chứa hash của truyện (cả pack_HASH_... và chap_HASH_...)
+                // Điều này đảm bảo xoá sạch sẽ cả hệ thống mới (pack) và hệ thống cũ (chap)
+                const q = `(name contains 'pack_${storyHash}_' or name contains 'chap_${storyHash}_') and 'appDataFolder' in parents and trashed = false`;
+                
                 const response: any = await gapi.client.drive.files.list({
-                    q: `name contains 'pack_${storyHash}_' and 'appDataFolder' in parents and trashed = false`,
+                    q: q,
                     fields: 'nextPageToken, files(id)',
                     spaces: 'appDataFolder',
-                    pageToken: pageToken
+                    pageToken: pageToken,
+                    pageSize: 100 // Tăng tốc độ quét bằng cách lấy nhiều file một lúc
                 });
+
                 const files = response.result.files;
                 if (files && files.length > 0) {
+                    // Xoá song song các file trong batch này
                     await Promise.all(files.map((f: any) => deleteFileById(f.id)));
                 }
+                
                 pageToken = response.result.nextPageToken;
             } while (pageToken);
-        } catch (e) { console.warn("Error cleaning up packs", e); }
+        } catch (e) { 
+            console.warn("Error cleaning up story files on Drive", e); 
+        }
         
-        // Cập nhật lại Index file
-        const remoteData = await downloadFile<{ stories: Story[] }>(INDEX_FILENAME);
-        let remoteStories = remoteData?.stories || [];
-        const newRemoteStories = remoteStories.filter(s => s.url !== story.url);
-        const minimalStories = newRemoteStories.map(s => ({
-            title: s.title, author: s.author, imageUrl: s.imageUrl,
-            source: s.source, url: s.url, createdAt: s.createdAt,
-        }));
-        await performUpload(INDEX_FILENAME, { stories: minimalStories });
+        // 4. Cập nhật lại Index file (Danh sách truyện)
+        // Tải index mới nhất về, lọc bỏ truyện vừa xoá, rồi up lên lại
+        try {
+            const remoteData = await downloadFile<{ stories: Story[] }>(INDEX_FILENAME);
+            let remoteStories = remoteData?.stories || [];
+            const newRemoteStories = remoteStories.filter(s => s.url !== story.url);
+            
+            // Chỉ update nếu thực sự có sự thay đổi
+            if (newRemoteStories.length !== remoteStories.length) {
+                const minimalStories = newRemoteStories.map(s => ({
+                    title: s.title, author: s.author, imageUrl: s.imageUrl,
+                    source: s.source, url: s.url, createdAt: s.createdAt,
+                }));
+                await performUpload(INDEX_FILENAME, { stories: minimalStories });
+            }
+        } catch (e) {
+            console.warn("Error updating index after delete", e);
+        }
     });
 }
 

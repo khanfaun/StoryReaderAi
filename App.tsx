@@ -1,3 +1,4 @@
+
 import React, { useState, useCallback, useEffect, useRef, useMemo } from 'react';
 import type { Story, Chapter, ReadingHistoryItem, ApiKeyInfo, DownloadConfig } from './types';
 import { searchStory, getStoryDetails, getStoryFromUrl, parseHtml, parseStoryDetailsFromDoc } from './services/truyenfullService';
@@ -208,7 +209,7 @@ const App: React.FC = () => {
       handleStartDownload(config);
   }
 
-  const handleReadWithoutDownload = async () => {
+  const handleReadWithoutDownload = async (config: DownloadConfig) => {
       setIsDownloadModalOpen(false);
       setPendingStory(null);
   };
