@@ -15,8 +15,7 @@ const DELETION_LOG_FILENAME = 'deletion_log.json'; // CHECKLIST XOÁ
 
 const STORAGE_KEY_TOKEN = 'gdrive_access_token';
 const STORAGE_KEY_EXPIRY = 'gdrive_token_expiry';
-const STORAGE_KEY_DEVICE_ID = 'gdrive_sync_device_id'; // Key lưu ID thiết bị (LocalStorage - Bền vững)
-const SESSION_KEY_DELETION_CHECKED = 'gdrive_deletion_checked'; // Key lưu trạng thái đã quét (SessionStorage - Tạm thời)
+const STORAGE_KEY_DEVICE_ID = 'gdrive_sync_device_id'; // Key lưu ID thiết bị
 
 let tokenClient: any;
 let gapiInited = false;
@@ -24,6 +23,11 @@ let gisInited = false;
 let accessToken: string | null = null;
 
 const fileIdCache = new Map<string, string>();
+
+// Cờ kiểm soát việc quét log xóa. 
+// Sử dụng biến bộ nhớ (RAM) thay vì sessionStorage. 
+// Khi F5 (Reload trang), biến này sẽ reset về false -> Cho phép quét lại.
+let hasCheckedDeletionsSession = false;
 
 // --- DEVICE ID MANAGEMENT ---
 // Tạo hoặc lấy ID duy nhất cho trình duyệt này để tránh tự xoá dữ liệu vừa xoá
@@ -37,7 +41,7 @@ const getDeviceId = (): string => {
 };
 
 // --- GLOBAL SYNC STATE ---
-// status: Text hiển thị trong Modal
+// status: Text hiển thị trong Modal hoặc Tooltip
 // isSyncing: True khi đang chạy quy trình đồng bộ thủ công (Modal)
 // isBackgroundSyncing: True khi đang chạy đồng bộ ngầm (Icon Header xoay)
 // isDirty: True khi có thay đổi chưa được đẩy lên (Icon Header màu cam)
@@ -86,7 +90,8 @@ const enqueueSyncTask = (task: SyncTask) => {
 const processSyncQueue = async () => {
     if (isQueueProcessing) return;
     
-    updateGlobalState({ isBackgroundSyncing: true, isDirty: false, isError: false, lastError: null });
+    // Bắt đầu xử lý: Bật cờ Background, Xóa lỗi cũ
+    updateGlobalState({ isBackgroundSyncing: true, isError: false, lastError: null });
     isQueueProcessing = true;
 
     try {
@@ -97,7 +102,8 @@ const processSyncQueue = async () => {
                     await task();
                 } catch (e: any) {
                     console.error("Background sync task failed:", e);
-                    updateGlobalState({ isError: true, lastError: e.message || 'Lỗi đồng bộ' });
+                    // Không set isError toàn cục ở đây để tránh làm phiền người dùng nếu chỉ là lỗi mạng tạm thời
+                    // Chỉ log ra console. Nếu lỗi nghiêm trọng, task nên tự handle.
                 }
                 await new Promise(resolve => setTimeout(resolve, 500)); 
             }
@@ -107,7 +113,17 @@ const processSyncQueue = async () => {
         updateGlobalState({ isError: true, lastError: err.message || 'Lỗi hàng đợi' });
     } finally {
         isQueueProcessing = false;
-        await checkDirtyStatus(true); 
+        
+        // Check dirty lần cuối để đảm bảo trạng thái Icon đúng (Xanh hoặc Cam)
+        await checkDirtyStatus(false);
+        
+        // QUAN TRỌNG: Tắt spinner và xóa text status khi hoàn tất mọi việc trong hàng đợi
+        // Điều này sửa lỗi: Tick V nhưng text vẫn hiện "Đang kiểm tra..."
+        // Và sửa lỗi: Xong rồi nhưng spinner vẫn quay.
+        updateGlobalState({ 
+            isBackgroundSyncing: false, 
+            status: '' // Clear status text when background queue is empty
+        });
     }
 };
 
@@ -161,7 +177,8 @@ const checkDirtyStatus = async (updateUI: boolean = false) => {
         if (hasDirty) {
             updateGlobalState({ isDirty: true });
             
-            if (!globalState.isError && !globalState.isBackgroundSyncing) {
+            // Tự động trigger sync nếu chưa chạy và không lỗi
+            if (!globalState.isError && !globalState.isBackgroundSyncing && !isQueueProcessing) {
                 console.log("Auto-sync triggered due to dirty items...");
                 enqueueSyncTask(uploadDirtyDataToDrive);
             }
@@ -206,9 +223,11 @@ export async function initGoogleDrive(): Promise<void> {
                         const expirationTime = Date.now() + (resp.expires_in * 1000);
                         localStorage.setItem(STORAGE_KEY_TOKEN, accessToken!);
                         localStorage.setItem(STORAGE_KEY_EXPIRY, expirationTime.toString());
-                        updateGlobalState({ isDirty: false, isError: false }); 
-                        // Khi đăng nhập mới (hoặc đăng nhập lại), xóa cờ session để bắt buộc quét lại
-                        sessionStorage.removeItem(SESSION_KEY_DELETION_CHECKED);
+                        updateGlobalState({ isDirty: false, isError: false });
+                        
+                        // Reset cờ check xoá khi đăng nhập mới
+                        hasCheckedDeletionsSession = false;
+                        
                         checkDirtyStatus(); 
                     },
                 });
@@ -265,8 +284,8 @@ export function signOut() {
     localStorage.removeItem(STORAGE_KEY_TOKEN);
     localStorage.removeItem(STORAGE_KEY_EXPIRY);
     
-    // Xóa cờ kiểm tra session khi đăng xuất
-    sessionStorage.removeItem(SESSION_KEY_DELETION_CHECKED);
+    // Reset cờ check xoá khi đăng xuất
+    hasCheckedDeletionsSession = false;
     
     fileIdCache.clear();
     if (gapi.client) gapi.client.setToken(null);
@@ -482,10 +501,9 @@ async function appendToRemoteDeletionLog(item: Omit<DeletionLogItem, 'deviceId'>
 async function processRemoteDeletions(): Promise<void> {
     if (!accessToken) return;
     
-    // KIỂM TRA SESSION STORAGE
-    // Nếu trong phiên làm việc này (từ lúc mở tab) đã quét rồi thì thôi.
-    if (sessionStorage.getItem(SESSION_KEY_DELETION_CHECKED) === 'true') {
-        console.log("[Sync] Skipping deletion log check (Session Cached).");
+    // Nếu đã quét trong phiên chạy này rồi thì thôi (Biến bộ nhớ, F5 sẽ reset)
+    if (hasCheckedDeletionsSession) {
+        console.log("[Sync] Skipping deletion log check (Already done this session).");
         return;
     }
     
@@ -523,9 +541,8 @@ async function processRemoteDeletions(): Promise<void> {
     } catch (e) {
         console.warn("Error processing remote deletions:", e);
     } finally {
-        // LUÔN ĐÁNH DẤU LÀ ĐÃ QUÉT (Dù thành công hay lỗi)
-        // Để tránh bị kẹt ở bước này nếu mạng chập chờn
-        sessionStorage.setItem(SESSION_KEY_DELETION_CHECKED, 'true');
+        // Đánh dấu là đã quét trong phiên này
+        hasCheckedDeletionsSession = true;
     }
 }
 
@@ -890,5 +907,7 @@ export async function syncData(): Promise<void> {
     } catch (e: any) {
         updateGlobalState({ status: `Lỗi đồng bộ: ${e.message}`, isSyncing: false, isError: true, lastError: e.message });
         throw e;
+    } finally {
+        updateGlobalState({ isSyncing: false });
     }
 }
