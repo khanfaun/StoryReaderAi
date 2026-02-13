@@ -475,23 +475,49 @@ export async function saveStoryDetailsToDrive(story: Story): Promise<void> {
 
 // Auto-Sync: Gọi hàm này khi xóa Story
 // FIX: Phải cập nhật lại library_index.json ngay lập tức để tránh zombie
+// FIX 2: Cố gắng xóa tất cả các chương liên quan để làm sạch Drive
 export async function deleteStoryFromDrive(story: Story): Promise<void> {
     if (!accessToken) return;
     
     // Đưa vào queue để đảm bảo tuần tự
     enqueueSyncTask(async () => {
-        // 1. Xóa file truyện
+        const storyHash = hashUrl(story.url);
+
+        // 1. Xóa file truyện metadata
         const filename = getStoryFilename(story.url);
         await performDelete(filename);
         
-        // 2. Tải Index hiện tại từ Drive
+        // 2. [NEW] Xóa tất cả các chương liên quan (chap_HASH_*)
+        // Tìm tất cả file có tên chứa 'chap_' + storyHash
+        try {
+            let pageToken = null;
+            do {
+                const response: any = await gapi.client.drive.files.list({
+                    q: `name contains 'chap_${storyHash}_' and 'appDataFolder' in parents and trashed = false`,
+                    fields: 'nextPageToken, files(id)',
+                    spaces: 'appDataFolder',
+                    pageToken: pageToken
+                });
+                const files = response.result.files;
+                if (files && files.length > 0) {
+                    // Try to delete in batch if possible, or loop
+                    // Using Promise.all for parallelism
+                    await Promise.all(files.map((f: any) => deleteFileById(f.id)));
+                }
+                pageToken = response.result.nextPageToken;
+            } while (pageToken);
+        } catch (e) {
+            console.warn("Error cleaning up chapters from Drive (non-critical):", e);
+        }
+        
+        // 3. Tải Index hiện tại từ Drive
         const remoteData = await downloadFile<{ stories: Story[] }>(INDEX_FILENAME);
         let remoteStories = remoteData?.stories || [];
         
-        // 3. Lọc bỏ truyện vừa xóa
+        // 4. Lọc bỏ truyện vừa xóa
         const newRemoteStories = remoteStories.filter(s => s.url !== story.url);
         
-        // 4. Upload Index mới lên ngay
+        // 5. Upload Index mới lên ngay
         const minimalStories = newRemoteStories.map(s => ({
             title: s.title, author: s.author, imageUrl: s.imageUrl,
             source: s.source, url: s.url, createdAt: s.createdAt,

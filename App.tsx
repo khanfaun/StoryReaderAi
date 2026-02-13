@@ -1,4 +1,3 @@
-
 import React, { useState, useCallback, useEffect, useRef, useMemo } from 'react';
 import type { Story, Chapter, ReadingHistoryItem, ApiKeyInfo, DownloadConfig } from './types';
 import { searchStory, getStoryDetails, getStoryFromUrl, parseHtml, parseStoryDetailsFromDoc } from './services/truyenfullService';
@@ -523,7 +522,7 @@ const App: React.FC = () => {
            dbService.getCachedChapterUrls(existingStory.url).then(urls => setCachedChapters(new Set(urls)));
 
            // Sau đó chạy logic đồng bộ/check update trong yên lặng (Silent Mode)
-           // Điều này sửa lỗi "Re-initializing" gây khó chịu
+           // Điều này giải quyết vấn đề người dùng cuộn rồi bấm Back ngay (chưa hết 500ms)
            handleSelectStoryInternal(existingStory, false, true);
            return;
       }
@@ -829,18 +828,23 @@ const App: React.FC = () => {
 
   const handleDeleteStory = async (storyToDelete: Story) => {
       try {
+          // 1. NGƯNG TẢI NGAY LẬP TỨC
+          handleStopBackgroundDownload(storyToDelete.url);
+
+          // 2. Xóa dữ liệu local
           await dbService.deleteEbookAndStory(storyToDelete.url);
+          
           const history = getReadingHistory().filter(item => item.url !== storyToDelete.url);
           saveReadingHistory(history);
           setReadingHistory(history);
           setLocalStories(prev => prev.filter(s => s.url !== storyToDelete.url));
           
-          // Delete from Drive if authenticated
+          // 3. Xóa trên Drive (Chạy ngầm và quét sạch)
           if (syncService.isAuthenticated()) {
-              // Sử dụng lệnh xóa đặc biệt để cập nhật cả Index
               syncService.deleteStoryFromDrive(storyToDelete).catch(console.error);
           }
           
+          // 4. Về trang chủ ngay
           handleBackToMain();
       } catch (e) {
           setError(`Lỗi xóa truyện: ${(e as Error).message}`);
