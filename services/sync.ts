@@ -229,6 +229,7 @@ async function findFileId(filename: string): Promise<string | null> {
 }
 
 // Upload file (Create or Update) với logic xử lý lỗi mạnh mẽ
+// Sử dụng multipart/related thủ công để tương thích tốt nhất với Google Drive API
 async function uploadFile(filename: string, content: any): Promise<void> {
     if (!accessToken) throw new Error("Chưa đăng nhập Google Drive");
 
@@ -241,10 +242,18 @@ async function uploadFile(filename: string, content: any): Promise<void> {
         parents: ['appDataFolder']
     };
 
-    const blob = new Blob([JSON.stringify(content)], { type: 'application/json' });
-    const form = new FormData();
-    form.append('metadata', new Blob([JSON.stringify(metadata)], { type: 'application/json' }));
-    form.append('file', blob);
+    // Construct multipart/related body manually
+    const boundary = '-------314159265358979323846';
+    const delimiter = "\r\n--" + boundary + "\r\n";
+    const close_delim = "\r\n--" + boundary + "--";
+
+    const body = delimiter +
+        'Content-Type: application/json; charset=UTF-8\r\n\r\n' +
+        JSON.stringify(metadata) +
+        delimiter +
+        'Content-Type: application/json; charset=UTF-8\r\n\r\n' +
+        JSON.stringify(content) +
+        close_delim;
 
     let url = 'https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart';
     let method = 'POST';
@@ -258,11 +267,15 @@ async function uploadFile(filename: string, content: any): Promise<void> {
     try {
         const response = await fetchWithRetry(url, {
             method: method,
-            headers: new Headers({ 'Authorization': 'Bearer ' + accessToken }),
-            body: form
+            headers: new Headers({ 
+                'Authorization': 'Bearer ' + accessToken,
+                'Content-Type': 'multipart/related; boundary="' + boundary + '"'
+            }),
+            body: body
         });
 
         if (!response.ok) {
+            const errorText = await response.text();
             // Trường hợp đặc biệt: Đã tìm thấy ID nhưng khi PATCH lại báo 404 (File vừa bị xóa nơi khác)
             if (response.status === 404 && method === 'PATCH') {
                 console.warn(`File ${filename} not found during update. Retrying as CREATE.`);
@@ -271,7 +284,7 @@ async function uploadFile(filename: string, content: any): Promise<void> {
             }
             
             if (response.status === 401) signOut();
-            throw new Error(`Upload failed: ${response.statusText}`);
+            throw new Error(`Upload failed (${response.status}): ${errorText || response.statusText}`);
         }
 
         // 3. Cập nhật Cache sau khi thành công
