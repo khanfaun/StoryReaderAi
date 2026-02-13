@@ -373,8 +373,15 @@ const App: React.FC = () => {
           // 1. Không có chương nào (Local và Drive đều trống)
           // 2. Hoặc forceFetch được bật
           // 3. VÀ không phải là truyện Local/Ebook
-          const needsFetching = (!fullStory.chapters || fullStory.chapters.length === 0 || forceFetch) 
-                                && fullStory.source !== 'Local' && fullStory.source !== 'Ebook';
+          // FIX: Nếu đang silent mode (đã load từ cache) và đã có danh sách chương, 
+          // TUYỆT ĐỐI KHÔNG fetch lại trừ khi forceFetch = true.
+          
+          const hasChapters = fullStory.chapters && fullStory.chapters.length > 0;
+          const shouldSkipWebFetch = silent && hasChapters && !forceFetch;
+
+          const needsFetching = !shouldSkipWebFetch && 
+                                (!hasChapters || forceFetch) && 
+                                fullStory.source !== 'Local' && fullStory.source !== 'Ebook';
           
           if (needsFetching) {
               if (loadingAbortRef.current) throw new Error("Đã hủy quá trình tải.");
