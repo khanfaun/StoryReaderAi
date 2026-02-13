@@ -216,7 +216,7 @@ const StoryViewer: React.FC<StoryViewerProps> = ({
             // Cần content để lưu lại
             if (chapterContent) {
                 setCachedChapter(story.url, currentChapterUrl, { content: chapterContent, stats: newStats }).catch(console.error);
-                // Sync Drive nếu cần
+                // AUTO SYNC DRIVE: Khi người dùng sửa stats, đồng bộ ngay lên Drive
                 if (syncService.isAuthenticated()) {
                     syncService.saveChapterContentToDrive(story.url, currentChapterUrl, { content: chapterContent, stats: newStats }).catch(console.error);
                 }
@@ -605,7 +605,7 @@ const StoryViewer: React.FC<StoryViewerProps> = ({
         try {
             const dataToSave = { content: newContent, stats: cumulativeStats };
             await setCachedChapter(story.url, chapter.url, dataToSave);
-            // Sync update to Drive
+            // AUTO SYNC DRIVE: Nội dung chương thay đổi
             if(syncService.isAuthenticated()) {
                 syncService.saveChapterContentToDrive(story.url, chapter.url, dataToSave).catch(console.error);
             }
@@ -617,6 +617,7 @@ const StoryViewer: React.FC<StoryViewerProps> = ({
     // Wrapper for delete to sync with Drive
     const handleDeleteChapterContent = async (storyUrl: string, chapterUrl: string) => {
         await dbService.deleteChapterData(storyUrl, chapterUrl);
+        // AUTO SYNC DRIVE: Xóa nội dung
         if (syncService.isAuthenticated()) {
             await syncService.deleteChapterFromDrive(storyUrl, chapterUrl);
         }
@@ -657,6 +658,7 @@ const StoryViewer: React.FC<StoryViewerProps> = ({
                 if (selectedChapterIndex !== null && story.chapters) {
                     const dataToSave = { content: chapterContent, stats: fullChapterState };
                     await setCachedChapter(story.url, story.chapters[selectedChapterIndex].url, dataToSave);
+                    // AUTO SYNC DRIVE: Re-analyze update stats
                     if(syncService.isAuthenticated()) {
                         syncService.saveChapterContentToDrive(story.url, story.chapters[selectedChapterIndex].url, dataToSave).catch(console.error);
                     }

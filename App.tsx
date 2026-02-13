@@ -213,7 +213,8 @@ const App: React.FC = () => {
   };
 
   const reloadDataFromStorage = useCallback(async () => {
-    setIsDataLoading(true);
+    // Chỉ bật loading khi khởi tạo lần đầu, không bật khi refresh ngầm
+    if (localStories.length === 0) setIsDataLoading(true);
     
     // 1. Tải dữ liệu Local
     const localHistory = getReadingHistory();
@@ -337,8 +338,8 @@ const App: React.FC = () => {
     });
   }, []);
 
-  const handleSelectStoryInternal = async (selectedStory: Story, forceFetch: boolean = false) => {
-      setIsDataLoading(true);
+  const handleSelectStoryInternal = async (selectedStory: Story, forceFetch: boolean = false, silent: boolean = false) => {
+      if (!silent) setIsDataLoading(true);
       loadingAbortRef.current = false; 
       setError(null);
       try {
@@ -349,13 +350,11 @@ const App: React.FC = () => {
           
           // SYNC LOGIC: Check Drive Metadata First
           // Nếu đã đăng nhập, luôn kiểm tra xem trên Drive có bản cập nhật mới hơn của truyện này không (danh sách chương)
-          // Điều này giúp Máy B nhận được danh sách chương từ Máy A mà không cần cào lại Web.
           if (syncService.isAuthenticated()) {
               console.log("Checking Drive for story metadata...");
               try {
                   const driveStory = await syncService.fetchStoryDetailsFromDrive(fullStory.url);
                   if (driveStory) {
-                      console.log("Loaded story details from Drive.");
                       // Merge với thông tin local để đảm bảo nhất quán
                       fullStory = { ...fullStory, ...driveStory };
                       await dbService.saveStory(fullStory); // Cache lại local
@@ -386,6 +385,11 @@ const App: React.FC = () => {
                           return prev;
                       });
                       await dbService.saveStory(updatedStory);
+                      // Sync intermediate updates to Drive
+                      if (syncService.isAuthenticated()) {
+                          syncService.saveStoryDetailsToDrive(updatedStory).catch(() => {});
+                      }
+                      
                       setLocalStories(prev => {
                           if (prev.some(s => s.url === updatedStory.url)) {
                               return prev.map(s => s.url === updatedStory.url ? updatedStory : s);
@@ -421,7 +425,7 @@ const App: React.FC = () => {
               return [fullStory, ...prev];
           });
 
-          // Set story active
+          // Set story active if not already set (or update it)
           setStory(fullStory);
           setSearchResults(null); 
 
@@ -429,10 +433,10 @@ const App: React.FC = () => {
           if (savedRead) setReadChapters(new Set(JSON.parse(savedRead)));
           else setReadChapters(new Set());
           
-          window.scrollTo(0, 0);
+          // Only scroll if not silent reload
+          if (!silent) window.scrollTo(0, 0);
 
           // TỰ ĐỘNG TẢI NGẦM TOÀN BỘ (Nếu không phải Local/Ebook)
-          // Lưu ý: Logic tải ngầm cũng sẽ ưu tiên lấy từ Drive trước nếu có
           if (fullStory.chapters && fullStory.chapters.length > 0 && fullStory.source !== 'Local' && fullStory.source !== 'Ebook') {
               runBackgroundContentFetcher(fullStory, 0);
           }
@@ -447,16 +451,15 @@ const App: React.FC = () => {
               return next;
           });
       } finally {
-          setIsDataLoading(false);
+          if (!silent) setIsDataLoading(false);
       }
   };
 
   const handleSelectStory = useCallback(async (selectedStory: Story) => {
-      // Logic chọn truyện
+      // 1. Kiểm tra Local DB trước
       const existingStory = await dbService.getStory(selectedStory.url);
       
       // KIỂM TRA LỊCH SỬ ĐỂ KHÔI PHỤC VỊ TRÍ ĐỌC
-      // Thay vì reset về 0, ta kiểm tra xem truyện này có trong lịch sử không
       const history = getReadingHistory();
       const historyItem = history.find(h => h.url === selectedStory.url);
       
@@ -467,17 +470,27 @@ const App: React.FC = () => {
       }
       setInitialParagraphIndex(0);
       
+      // 2. Nếu có trong DB: Hiển thị ngay lập tức (Optimistic UI)
       if (existingStory) {
-           handleSelectStoryInternal(existingStory);
-           // Nếu local có, và là truyện Web, luôn kiểm tra/tải tiếp các chương còn thiếu
-           if (existingStory.chapters && existingStory.chapters.length > 0 && existingStory.source !== 'Local' && existingStory.source !== 'Ebook') {
-               runBackgroundContentFetcher(existingStory, 0);
-           }
+           // Set story state immediately so UI renders
+           setStory(existingStory);
+           setSearchResults(null);
+           const savedRead = localStorage.getItem(`readChapters_${existingStory.url}`);
+           if (savedRead) setReadChapters(new Set(JSON.parse(savedRead)));
+           else setReadChapters(new Set());
+           window.scrollTo(0, 0);
+           
+           // Fetch cached chapters tick status
+           dbService.getCachedChapterUrls(existingStory.url).then(urls => setCachedChapters(new Set(urls)));
+
+           // Sau đó chạy logic đồng bộ/check update trong yên lặng (Silent Mode)
+           // Điều này sửa lỗi "Re-initializing" gây khó chịu
+           handleSelectStoryInternal(existingStory, false, true);
            return;
       }
       
-      // Nếu không có local, gọi hàm internal để xử lý (nó sẽ check Drive -> Web)
-      handleSelectStoryInternal(selectedStory);
+      // 3. Nếu chưa có local: Chạy full flow với Loading Spinner
+      handleSelectStoryInternal(selectedStory, false, false);
 
   }, [runBackgroundContentFetcher]);
 
@@ -500,13 +513,7 @@ const App: React.FC = () => {
           setCachedChapters(new Set()); // Reset visual cache tick
           
           // 3. Force Fetch metadata lại từ đầu
-          await handleSelectStoryInternal(storyToReset, true);
-          
-          // 4. Bắt đầu tải ngầm lại từ đầu
-          // Lấy story mới nhất từ state (hoặc object đã update) để đảm bảo có danh sách chương
-          // handleSelectStoryInternal đã update state `story`, nhưng để chắc chắn ta dùng callback
-          // hoặc đơn giản gọi lại fetcher với đối tượng hiện tại
-          runBackgroundContentFetcher(storyToReset, 0);
+          await handleSelectStoryInternal(storyToReset, true, false); // Force fetch, show loading
           
       } catch(e) {
           setError(`Lỗi khi tải lại dữ liệu: ${(e as Error).message}`);
@@ -602,8 +609,8 @@ const App: React.FC = () => {
          
          // DRIVE SYNC: Lưu truyện mới tạo
          if (syncService.isAuthenticated()) {
-             await syncService.saveStoryDetailsToDrive(newStory);
-             await syncService.syncLibraryIndex();
+             syncService.saveStoryDetailsToDrive(newStory).catch(console.error);
+             syncService.syncLibraryIndex().catch(console.error);
          }
 
          setLocalStories(prev => [newStory, ...prev]);
@@ -654,7 +661,7 @@ const App: React.FC = () => {
               const data = { content: ch.content, stats: null };
               // Save content
               await setCachedChapter(targetStory.url, chapUrl, data);
-              // Sync content
+              // Sync content to Drive (Auto Sync)
               if(syncService.isAuthenticated()) {
                   syncService.saveChapterContentToDrive(targetStory.url, chapUrl, data).catch(console.error);
               }
@@ -662,7 +669,7 @@ const App: React.FC = () => {
 
           const updatedStory = { ...targetStory, chapters: finalChapters };
           await dbService.saveStory(updatedStory);
-          handleUpdateStory(updatedStory);
+          handleUpdateStory(updatedStory); // This will trigger metadata sync in handleUpdateStory
           
       } catch (e) {
           throw e; // Để modal bắt lỗi
@@ -762,9 +769,9 @@ const App: React.FC = () => {
           setLocalStories(prev => prev.map(s => s.url === updatedStory.url ? updatedStory : s));
           
           if (syncService.isAuthenticated()) {
-              await syncService.saveStoryDetailsToDrive(updatedStory);
+              syncService.saveStoryDetailsToDrive(updatedStory).catch(console.error);
               // Also sync index to update title/author if changed OR story is new
-              await syncService.syncLibraryIndex();
+              syncService.syncLibraryIndex().catch(console.error);
           }
 
           const history = getReadingHistory();
@@ -791,7 +798,7 @@ const App: React.FC = () => {
           
           // Delete from Drive if authenticated
           if (syncService.isAuthenticated()) {
-              await syncService.deleteStoryFromDrive(storyToDelete);
+              syncService.deleteStoryFromDrive(storyToDelete).catch(console.error);
           }
           
           handleBackToMain();
