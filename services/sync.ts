@@ -15,6 +15,7 @@ const DELETION_LOG_FILENAME = 'deletion_log.json'; // CHECKLIST XOÁ
 
 const STORAGE_KEY_TOKEN = 'gdrive_access_token';
 const STORAGE_KEY_EXPIRY = 'gdrive_token_expiry';
+const STORAGE_KEY_DEVICE_ID = 'gdrive_sync_device_id'; // Key lưu ID thiết bị
 
 let tokenClient: any;
 let gapiInited = false;
@@ -22,6 +23,17 @@ let gisInited = false;
 let accessToken: string | null = null;
 
 const fileIdCache = new Map<string, string>();
+
+// --- DEVICE ID MANAGEMENT ---
+// Tạo hoặc lấy ID duy nhất cho trình duyệt này để tránh tự xoá dữ liệu vừa xoá
+const getDeviceId = (): string => {
+    let deviceId = localStorage.getItem(STORAGE_KEY_DEVICE_ID);
+    if (!deviceId) {
+        deviceId = 'dev_' + Date.now() + '_' + Math.random().toString(36).substring(2, 9);
+        localStorage.setItem(STORAGE_KEY_DEVICE_ID, deviceId);
+    }
+    return deviceId;
+};
 
 // --- GLOBAL SYNC STATE ---
 // status: Text hiển thị trong Modal
@@ -422,6 +434,7 @@ interface DeletionLogItem {
     type: 'story' | 'history' | 'chapter';
     id: string; // URL hoặc ID
     timestamp: number;
+    deviceId: string; // ID thiết bị thực hiện xoá
 }
 
 interface DeletionLog {
@@ -429,21 +442,29 @@ interface DeletionLog {
 }
 
 // Hàm append vào checklist xoá trên Drive
-async function appendToRemoteDeletionLog(item: DeletionLogItem): Promise<void> {
+async function appendToRemoteDeletionLog(item: Omit<DeletionLogItem, 'deviceId'>): Promise<void> {
     if (!accessToken) return;
     
     try {
         // 1. Tải log hiện tại (nếu có)
         const currentLog = await downloadFile<DeletionLog>(DELETION_LOG_FILENAME) || { deletedItems: [] };
         
-        // 2. Thêm item mới (tránh trùng lặp)
-        const exists = currentLog.deletedItems.some(i => i.id === item.id && i.type === item.type);
+        // 2. Thêm item mới kèm Device ID
+        const newItem: DeletionLogItem = { ...item, deviceId: getDeviceId() };
+        
+        // Tránh trùng lặp (nếu cùng ID và type)
+        const exists = currentLog.deletedItems.some(i => i.id === newItem.id && i.type === newItem.type);
         if (!exists) {
-            currentLog.deletedItems.push(item);
+            currentLog.deletedItems.push(newItem);
+            
+            // Giới hạn log size (giữ lại 100 mục gần nhất) để tránh file quá lớn
+            if (currentLog.deletedItems.length > 100) {
+                currentLog.deletedItems = currentLog.deletedItems.slice(-100);
+            }
             
             // 3. Upload lại
             await performUpload(DELETION_LOG_FILENAME, currentLog);
-            console.log(`[Deletion Log] Added ${item.type}: ${item.id}`);
+            console.log(`[Deletion Log] Added ${item.type}: ${item.id} from device ${newItem.deviceId}`);
         }
     } catch (e) {
         console.warn("Failed to update remote deletion log", e);
@@ -455,6 +476,7 @@ async function processRemoteDeletions(): Promise<void> {
     if (!accessToken) return;
     
     updateGlobalState({ status: "Đang kiểm tra dữ liệu đã xoá..." });
+    const currentDeviceId = getDeviceId();
     
     try {
         const log = await downloadFile<DeletionLog>(DELETION_LOG_FILENAME);
@@ -463,6 +485,12 @@ async function processRemoteDeletions(): Promise<void> {
         console.log(`[Deletion Log] Found ${log.deletedItems.length} items to check.`);
         
         for (const item of log.deletedItems) {
+            // QUAN TRỌNG: Bỏ qua nếu lệnh xóa đến từ chính thiết bị này
+            // Điều này ngăn chặn vòng lặp vô tận hoặc việc cố gắng xóa dữ liệu vừa bị xóa
+            if (item.deviceId === currentDeviceId) {
+                continue;
+            }
+
             if (item.type === 'story') {
                 // Kiểm tra xem local có truyện này không
                 const exists = await dbService.getStory(item.id);
@@ -663,8 +691,6 @@ export async function syncLibraryIndex(): Promise<Story[]> {
     }
 
     // BƯỚC 4: Upload các truyện mới từ Local lên Drive
-    // Lưu ý: Logic Pruning cũ dựa trên việc so sánh danh sách đã được thay thế bằng Checklist Xoá.
-    // Nếu truyện ở Local không có trên Drive nhưng cũng không nằm trong checklist xoá -> Có thể là truyện mới thêm Offline -> Upload lên.
     const driveStoryUrls = new Set(driveStories.map(s => s.url));
     
     for (const lStory of localStories) {
