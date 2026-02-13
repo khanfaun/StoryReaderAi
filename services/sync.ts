@@ -484,12 +484,16 @@ export async function fetchLibraryIndexFromDrive(): Promise<Story[]> {
     return data?.stories || [];
 }
 
-export async function saveLibraryIndexToDrive(stories: Story[]): Promise<void> {
+export async function saveLibraryIndexToDrive(stories: Story[], immediate: boolean = false): Promise<void> {
     const minimalStories = stories.map(s => ({
         title: s.title, author: s.author, imageUrl: s.imageUrl,
         source: s.source, url: s.url, createdAt: s.createdAt,
     }));
-    await queueUpload(INDEX_FILENAME, { stories: minimalStories });
+    if (immediate) {
+        await performUpload(INDEX_FILENAME, { stories: minimalStories });
+    } else {
+        await queueUpload(INDEX_FILENAME, { stories: minimalStories });
+    }
 }
 
 // 2. STORY DETAILS
@@ -605,8 +609,12 @@ export async function deleteChapterFromDrive(storyUrl: string, chapterUrl: strin
 }
 
 // 4. READING HISTORY
-export async function saveReadingHistoryToDrive(history: ReadingHistoryItem[]): Promise<void> {
-    await queueUpload(HISTORY_FILENAME, { history });
+export async function saveReadingHistoryToDrive(history: ReadingHistoryItem[], immediate: boolean = false): Promise<void> {
+    if (immediate) {
+        await performUpload(HISTORY_FILENAME, { history });
+    } else {
+        await queueUpload(HISTORY_FILENAME, { history });
+    }
     markHistorySynced(); 
 }
 
@@ -628,7 +636,7 @@ export async function removeHistoryItemFromDrive(itemUrl: string): Promise<void>
 
 // --- SYNC ACTIONS ---
 
-export async function syncReadingProgress(): Promise<void> {
+export async function syncReadingProgress(immediate: boolean = false): Promise<void> {
     if (!accessToken) return;
     const remoteData = await downloadFile<{ history: ReadingHistoryItem[] }>(HISTORY_FILENAME);
     const localHistory = getReadingHistory();
@@ -646,7 +654,7 @@ export async function syncReadingProgress(): Promise<void> {
     
     const mergedHistory = Array.from(mergedMap.values()).sort((a, b) => b.lastReadTimestamp - a.lastReadTimestamp);
     saveReadingHistory(mergedHistory);
-    await saveReadingHistoryToDrive(mergedHistory);
+    await saveReadingHistoryToDrive(mergedHistory, immediate);
 }
 
 export async function syncLibraryIndex(): Promise<Story[]> {
@@ -668,7 +676,7 @@ export async function syncLibraryIndex(): Promise<Story[]> {
     }
 
     const finalStories = Array.from(mergedMap.values());
-    await saveLibraryIndexToDrive(finalStories);
+    await saveLibraryIndexToDrive(finalStories, true); // Immediate sync for index
     
     return finalStories;
 }
@@ -679,7 +687,8 @@ export async function uploadAllLocalData(finalize: boolean = true): Promise<void
     updateGlobalState({ status: "Đang kiểm tra thay đổi trên máy...", isSyncing: true, isError: false, lastError: null });
 
     try {
-        await syncReadingProgress();
+        // Sử dụng immediate = true để đảm bảo await thực sự chờ upload xong
+        await syncReadingProgress(true);
 
         // 1. Sync Stories Metadata
         const dirtyStories = await dbService.getDirtyStories();
@@ -687,7 +696,9 @@ export async function uploadAllLocalData(finalize: boolean = true): Promise<void
             updateGlobalState({ status: `Đang tải lên ${dirtyStories.length} truyện thay đổi...` });
             for (const story of dirtyStories) {
                 const { _dirty, ...cleanStoryData } = story;
-                await saveStoryDetailsToDrive(cleanStoryData as Story);
+                // Sử dụng performUpload trực tiếp thay vì queue để đảm bảo tuần tự và hoàn tất
+                const filename = getStoryFilename(story.url);
+                await performUpload(filename, cleanStoryData);
                 await dbService.markStorySynced(story);
             }
             await syncLibraryIndex(); 
@@ -708,7 +719,18 @@ export async function uploadAllLocalData(finalize: boolean = true): Promise<void
 
             for (const storyUrl of storyUrls) {
                 const story = await dbService.getStory(storyUrl);
-                if (!story || !story.chapters) continue; // Skip if metadata missing
+                
+                // --- XỬ LÝ DỮ LIỆU RÁC (ORPHANED CHAPTERS) ---
+                if (!story || !story.chapters) {
+                    console.warn(`Found dirty chapters for missing story ${storyUrl}. Cleaning up...`);
+                    // Đánh dấu các chương này là đã sync để không bị kẹt ở trạng thái dirty nữa
+                    // Hoặc xóa chúng nếu muốn triệt để hơn. Ở đây ta chọn mark synced để an toàn.
+                    const orphans = dirtyByStory[storyUrl];
+                    for (const orphan of orphans) {
+                        await dbService.markChapterSynced(orphan.storyUrl, orphan.chapterUrl, orphan);
+                    }
+                    continue; 
+                }
 
                 // Map chapters to Chunks
                 const chunksToUpdate = new Set<number>();
@@ -735,10 +757,6 @@ export async function uploadAllLocalData(finalize: boolean = true): Promise<void
                     // Fetch ALL existing data for this chunk from Local DB
                     // (This includes non-dirty chapters that are part of the same pack)
                     const localChunkData = await dbService.getChaptersByUrls(storyUrl, chapterUrlsInChunk);
-                    
-                    // Optional: Fetch existing pack from Drive to merge? 
-                    // No, assuming Local DB has the latest state or a valid subset. 
-                    // If we overwrite, we rely on Local being the master for *this user's edits*.
                     
                     // Create Pack Object
                     const packData: Record<string, CachedChapter> = {};
@@ -879,6 +897,8 @@ export async function syncData(): Promise<void> {
         await pullMissingDataFromDrive(false);
         updateGlobalState({ status: "Bắt đầu đồng bộ: Bước 2/2 - Tải lên..." });
         await uploadAllLocalData(false);
+        // Kiểm tra lại dirty status một lần nữa để chắc chắn UI cập nhật đúng
+        await checkDirtyStatus(true);
         updateGlobalState({ status: "Đồng bộ hoàn tất!", isSyncing: false, isDirty: false, isError: false });
         
         setTimeout(() => {
