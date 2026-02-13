@@ -1,4 +1,3 @@
-
 import { Story, CachedChapter, ReadingHistoryItem } from '../types';
 import * as dbService from './dbService';
 import { getReadingHistory, saveReadingHistory, isHistoryDirty, markHistorySynced } from './history';
@@ -487,7 +486,7 @@ export async function deleteStoryFromDrive(story: Story): Promise<void> {
         const filename = getStoryFilename(story.url);
         await performDelete(filename);
         
-        // 2. [NEW] Xóa tất cả các chương liên quan (chap_HASH_*)
+        // 2. Xóa tất cả các chương liên quan (chap_HASH_*)
         // Tìm tất cả file có tên chứa 'chap_' + storyHash
         try {
             let pageToken = null;
@@ -500,7 +499,6 @@ export async function deleteStoryFromDrive(story: Story): Promise<void> {
                 });
                 const files = response.result.files;
                 if (files && files.length > 0) {
-                    // Try to delete in batch if possible, or loop
                     // Using Promise.all for parallelism
                     await Promise.all(files.map((f: any) => deleteFileById(f.id)));
                 }
@@ -510,14 +508,16 @@ export async function deleteStoryFromDrive(story: Story): Promise<void> {
             console.warn("Error cleaning up chapters from Drive (non-critical):", e);
         }
         
-        // 3. Tải Index hiện tại từ Drive
+        // 3. QUAN TRỌNG: Cập nhật lại Index file ngay lập tức
+        // Thay vì download, filter, upload (dễ conflict), ta lấy danh sách Local (đã xóa) làm chuẩn
+        // Tuy nhiên, để an toàn cho concurrency, flow chuẩn vẫn là: Pull Index -> Filter -> Push Index
         const remoteData = await downloadFile<{ stories: Story[] }>(INDEX_FILENAME);
         let remoteStories = remoteData?.stories || [];
         
-        // 4. Lọc bỏ truyện vừa xóa
+        // Lọc bỏ truyện vừa xóa
         const newRemoteStories = remoteStories.filter(s => s.url !== story.url);
         
-        // 5. Upload Index mới lên ngay
+        // Upload Index mới lên ngay
         const minimalStories = newRemoteStories.map(s => ({
             title: s.title, author: s.author, imageUrl: s.imageUrl,
             source: s.source, url: s.url, createdAt: s.createdAt,
@@ -599,14 +599,20 @@ export async function syncReadingProgress(): Promise<void> {
     await saveReadingHistoryToDrive(mergedHistory);
 }
 
+// Hàm đồng bộ chính cho danh sách truyện (Xử lý 2 chiều: Thêm và Xóa)
 export async function syncLibraryIndex(): Promise<Story[]> {
     if (!accessToken) return [];
-    const driveStories = await fetchLibraryIndexFromDrive();
-    const localStories = await dbService.getAllStories();
     
+    // 1. Lấy danh sách từ Drive (Source of Truth)
+    const driveStories = await fetchLibraryIndexFromDrive();
+    const driveStoryUrls = new Set(driveStories.map(s => s.url));
+    
+    const localStories = await dbService.getAllStories();
     const mergedMap = new Map<string, Story>();
+    
     localStories.forEach(s => mergedMap.set(s.url, s));
     
+    // 2. Xử lý tải về (Download): Có trên Drive, chưa có Local
     for (const dStory of driveStories) {
         if (!mergedMap.has(dStory.url)) {
             const cleanStory = { ...dStory, _dirty: false, _syncedAt: Date.now() };
@@ -614,8 +620,23 @@ export async function syncLibraryIndex(): Promise<Story[]> {
             mergedMap.set(dStory.url, cleanStory);
         }
     }
-    await saveLibraryIndexToDrive(Array.from(mergedMap.values()));
-    return Array.from(mergedMap.values());
+
+    // 3. Xử lý đồng bộ xóa (Pruning): Có Local, Mất trên Drive Index -> Xóa Local
+    // Điều kiện xóa: Truyện ở Local KHÔNG ở trạng thái Dirty (tức là đã sync trước đó)
+    // Nếu truyện ở Local là Dirty (mới thêm, chưa kịp sync) thì GIỮ LẠI để upload.
+    for (const lStory of localStories) {
+        if (!lStory._dirty && !driveStoryUrls.has(lStory.url)) {
+            console.log(`[Sync Pruning] Story "${lStory.title}" not found in Drive Index. Deleting locally...`);
+            await dbService.deleteEbookAndStory(lStory.url);
+            mergedMap.delete(lStory.url);
+        }
+    }
+
+    // 4. Cập nhật lại Drive Index (nếu có truyện Local mới chưa có trên Drive)
+    const finalStories = Array.from(mergedMap.values());
+    await saveLibraryIndexToDrive(finalStories);
+    
+    return finalStories;
 }
 
 export async function uploadAllLocalData(finalize: boolean = true): Promise<void> {
@@ -633,8 +654,8 @@ export async function uploadAllLocalData(finalize: boolean = true): Promise<void
                 await saveStoryDetailsToDrive(cleanStoryData as Story);
                 await dbService.markStorySynced(story);
             }
-            const allStories = await dbService.getAllStories();
-            await saveLibraryIndexToDrive(allStories);
+            // Trigger sync index to refresh list
+            await syncLibraryIndex(); 
         }
 
         const dirtyChapters = await dbService.getAllDirtyChapters();
@@ -668,8 +689,8 @@ export async function pullMissingDataFromDrive(finalize: boolean = true): Promis
     updateGlobalState({ status: "Đang quét dữ liệu trên Drive...", isSyncing: true, isError: false, lastError: null });
     
     try {
-        // 1. Tải Index trước để làm nguồn tin cậy
-        const remoteIndex = await fetchLibraryIndexFromDrive();
+        // 1. Đồng bộ Index (Tải mới + Xóa cũ)
+        const remoteIndex = await syncLibraryIndex();
         const validStoryUrls = new Set(remoteIndex.map(s => s.url));
 
         let pageToken = null;
@@ -758,7 +779,6 @@ export async function pullMissingDataFromDrive(finalize: boolean = true): Promis
             }
         }
 
-        await syncLibraryIndex();
         if (finalize) updateGlobalState({ status: "Đã hoàn tất tải dữ liệu mới!", isSyncing: false });
 
     } catch (e: any) {
