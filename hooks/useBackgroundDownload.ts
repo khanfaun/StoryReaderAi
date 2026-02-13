@@ -3,6 +3,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import type { Story } from '../types';
 import { getChapterContent } from '../services/truyenfullService';
 import { getCachedChapter, setCachedChapter } from '../services/cacheService';
+import * as dbService from '../services/dbService';
 import * as syncService from '../services/sync';
 
 export interface BackgroundDownloadState {
@@ -20,7 +21,25 @@ export const useBackgroundDownload = (
     const backgroundDownloadControls = useRef<Record<string, { paused: boolean; aborted: boolean }>>({});
 
     const runBackgroundContentFetcher = async (storyToFetch: Story, startIndex: number) => {
-        if (!storyToFetch.chapters || startIndex >= storyToFetch.chapters.length) {
+        if (!storyToFetch.chapters) {
+            setActiveDownloadUrl(null);
+            return;
+        }
+
+        // Lọc các chương chưa có trong cache
+        const cachedUrls = await dbService.getCachedChapterUrls(storyToFetch.url);
+        const cachedSet = new Set(cachedUrls);
+        
+        // Nếu startIndex được truyền vào (VD: do user ấn tải từ chương 50), ta chỉ xét từ đó trở đi
+        const relevantChapters = startIndex > 0 
+            ? storyToFetch.chapters.slice(startIndex) 
+            : storyToFetch.chapters;
+
+        // Chỉ lấy những chương chưa có trong cache
+        const missingChapters = relevantChapters.filter(ch => !cachedSet.has(ch.url));
+
+        if (missingChapters.length === 0) {
+            console.log(`All chapters for ${storyToFetch.title} are cached. Skipping download.`);
             setActiveDownloadUrl(null);
             return;
         }
@@ -29,14 +48,13 @@ export const useBackgroundDownload = (
 
         setBackgroundDownloads(prev => ({
             ...prev,
-            [storyToFetch.url]: { current: startIndex, total: storyToFetch.chapters!.length, status: 'running' }
+            [storyToFetch.url]: { current: 0, total: missingChapters.length, status: 'running' }
         }));
 
-        const chapters = storyToFetch.chapters;
         const BATCH_SIZE = 3; 
         
         try {
-            for (let i = startIndex; i < chapters.length; i += BATCH_SIZE) {
+            for (let i = 0; i < missingChapters.length; i += BATCH_SIZE) {
                 const controls = backgroundDownloadControls.current[storyToFetch.url];
                 if (!controls || controls.aborted) break;
 
@@ -47,10 +65,10 @@ export const useBackgroundDownload = (
                 
                 if (!controls || controls.aborted) break;
 
-                const batch = chapters.slice(i, i + BATCH_SIZE);
+                const batch = missingChapters.slice(i, i + BATCH_SIZE);
                 await Promise.all(batch.map(async (chap) => {
                     try {
-                        // 1. Kiểm tra Local Cache
+                        // Double check (để an toàn với race condition)
                         const cached = await getCachedChapter(storyToFetch.url, chap.url);
                         if (!cached) {
                             let content = '';
@@ -93,8 +111,8 @@ export const useBackgroundDownload = (
                 setBackgroundDownloads(prev => ({
                     ...prev,
                     [storyToFetch.url]: { 
-                        current: Math.min(i + BATCH_SIZE, chapters.length), 
-                        total: chapters.length, 
+                        current: Math.min(i + BATCH_SIZE, missingChapters.length), 
+                        total: missingChapters.length, 
                         status: prev[storyToFetch.url]?.status || 'running' 
                     }
                 }));

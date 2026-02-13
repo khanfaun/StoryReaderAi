@@ -448,9 +448,24 @@ const App: React.FC = () => {
           // Only scroll if not silent reload
           if (!silent) window.scrollTo(0, 0);
 
-          // TỰ ĐỘNG TẢI NGẦM TOÀN BỘ (Nếu không phải Local/Ebook)
+          // --- FIX: Check if all chapters are cached BEFORE starting background fetch ---
+          // Re-fetch cached URLs for the fully loaded story
+          const latestCachedUrls = await dbService.getCachedChapterUrls(fullStory.url);
+          const latestCachedSet = new Set(latestCachedUrls);
+          setCachedChapters(latestCachedSet);
+
+          const totalChapters = fullStory.chapters?.length || 0;
+          const hasMissingChapters = fullStory.chapters?.some(ch => !latestCachedSet.has(ch.url)) ?? true;
+
+          // TỰ ĐỘNG TẢI NGẦM TOÀN BỘ 
+          // Chỉ chạy nếu: Có chương, không phải Local/Ebook, VÀ CÓ CHƯƠNG THIẾU
           if (fullStory.chapters && fullStory.chapters.length > 0 && fullStory.source !== 'Local' && fullStory.source !== 'Ebook') {
-              runBackgroundContentFetcher(fullStory, 0);
+              if (hasMissingChapters) {
+                  // Chỉ chạy khi thực sự cần tải
+                  runBackgroundContentFetcher(fullStory, 0);
+              } else {
+                  console.log("All chapters cached. Skipping background fetch.");
+              }
           }
 
       } catch (e) {
