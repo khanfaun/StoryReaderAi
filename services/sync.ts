@@ -474,15 +474,31 @@ export async function saveStoryDetailsToDrive(story: Story): Promise<void> {
 }
 
 // Auto-Sync: Gọi hàm này khi xóa Story
+// FIX: Phải cập nhật lại library_index.json ngay lập tức để tránh zombie
 export async function deleteStoryFromDrive(story: Story): Promise<void> {
-    const filename = getStoryFilename(story.url);
-    await queueDelete(filename);
+    if (!accessToken) return;
     
-    // Cập nhật index sau khi xóa file truyện
-    // Lưu ý: Logic lấy index hiện tại -> filter -> save lại nên được thực hiện cẩn thận
-    // Để đơn giản cho auto-sync, ta lấy index local (đã xóa) và đẩy lên
-    const localStories = await dbService.getAllStories();
-    await saveLibraryIndexToDrive(localStories);
+    // Đưa vào queue để đảm bảo tuần tự
+    enqueueSyncTask(async () => {
+        // 1. Xóa file truyện
+        const filename = getStoryFilename(story.url);
+        await performDelete(filename);
+        
+        // 2. Tải Index hiện tại từ Drive
+        const remoteData = await downloadFile<{ stories: Story[] }>(INDEX_FILENAME);
+        let remoteStories = remoteData?.stories || [];
+        
+        // 3. Lọc bỏ truyện vừa xóa
+        const newRemoteStories = remoteStories.filter(s => s.url !== story.url);
+        
+        // 4. Upload Index mới lên ngay
+        const minimalStories = newRemoteStories.map(s => ({
+            title: s.title, author: s.author, imageUrl: s.imageUrl,
+            source: s.source, url: s.url, createdAt: s.createdAt,
+        }));
+        
+        await performUpload(INDEX_FILENAME, { stories: minimalStories });
+    });
 }
 
 // 3. CHAPTER CONTENT
@@ -504,10 +520,29 @@ export async function deleteChapterFromDrive(storyUrl: string, chapterUrl: strin
 }
 
 // 4. READING HISTORY
-// Auto-Sync: Gọi khi đọc chương mới
+// Auto-Sync: Gọi khi đọc chương mới (Merge/Update)
 export async function saveReadingHistoryToDrive(history: ReadingHistoryItem[]): Promise<void> {
     await queueUpload(HISTORY_FILENAME, { history });
     markHistorySynced(); // Mark synced immediately in memory
+}
+
+// Auto-Sync: Gọi khi xóa một mục khỏi lịch sử (Explicit Delete)
+export async function removeHistoryItemFromDrive(itemUrl: string): Promise<void> {
+    if (!accessToken) return;
+    
+    enqueueSyncTask(async () => {
+        // 1. Tải History hiện tại từ Drive
+        const remoteData = await downloadFile<{ history: ReadingHistoryItem[] }>(HISTORY_FILENAME);
+        let remoteHistory = remoteData?.history || [];
+        
+        // 2. Lọc bỏ item
+        const newHistory = remoteHistory.filter(h => h.url !== itemUrl);
+        
+        // 3. Upload lại (Ghi đè)
+        await performUpload(HISTORY_FILENAME, { history: newHistory });
+        
+        markHistorySynced();
+    });
 }
 
 // --- SYNC ACTIONS (Called by UI Modal - MANUAL FULL SYNC) ---
@@ -607,6 +642,10 @@ export async function pullMissingDataFromDrive(finalize: boolean = true): Promis
     updateGlobalState({ status: "Đang quét dữ liệu trên Drive...", isSyncing: true, isError: false, lastError: null });
     
     try {
+        // 1. Tải Index trước để làm nguồn tin cậy
+        const remoteIndex = await fetchLibraryIndexFromDrive();
+        const validStoryUrls = new Set(remoteIndex.map(s => s.url));
+
         let pageToken = null;
         const driveFilesMap = new Map<string, { id: string, modifiedTime: string }>();
         do {
@@ -626,6 +665,9 @@ export async function pullMissingDataFromDrive(finalize: boolean = true): Promis
             const hash = filename.replace('story_', '').replace('.json', '');
             const storyUrl = unhashUrl(hash);
             if (!storyUrl) continue;
+            
+            // SKIP ORPHANED FILES (Files not in Index)
+            if (!validStoryUrls.has(storyUrl)) continue;
 
             const driveFile = driveFilesMap.get(filename);
             const localStory = await dbService.getStory(storyUrl);
@@ -653,6 +695,9 @@ export async function pullMissingDataFromDrive(finalize: boolean = true): Promis
             const storyUrl = unhashUrl(parts[1]);
             const chapterUrl = unhashUrl(parts[2]);
             if (!storyUrl || !chapterUrl) continue;
+            
+            // SKIP CHAPTERS OF DELETED STORIES
+            if (!validStoryUrls.has(storyUrl)) continue;
 
             const driveFile = driveFilesMap.get(filename);
             const localChapter = await dbService.getChapterData(storyUrl, chapterUrl);

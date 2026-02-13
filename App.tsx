@@ -94,7 +94,7 @@ const App: React.FC = () => {
       handleStartBackgroundDownload, 
       handlePauseBackgroundDownload, 
       handleResumeBackgroundDownload, 
-      handleStopBackgroundDownload,
+      handleStopBackgroundDownload, 
       handlePrioritize,
       handleRemoveFromQueue,
       runBackgroundContentFetcher 
@@ -837,6 +837,7 @@ const App: React.FC = () => {
           
           // Delete from Drive if authenticated
           if (syncService.isAuthenticated()) {
+              // Sử dụng lệnh xóa đặc biệt để cập nhật cả Index
               syncService.deleteStoryFromDrive(storyToDelete).catch(console.error);
           }
           
@@ -864,6 +865,11 @@ const App: React.FC = () => {
               saveReadingHistory(newHistory);
               setReadingHistory(newHistory);
               setLocalStories(prev => prev.filter(s => s.url !== deleteConfirmation.item?.url));
+              
+              // Sync removal even if story obj missing
+              if (syncService.isAuthenticated()) {
+                  syncService.removeHistoryItemFromDrive(deleteConfirmation.item.url);
+              }
           }
       }
       setDeleteConfirmation({ isOpen: false });
@@ -873,6 +879,11 @@ const App: React.FC = () => {
       const newHistory = getReadingHistory().filter(h => h.url !== itemToRemove.url);
       saveReadingHistory(newHistory);
       setReadingHistory(newHistory);
+      
+      // Sync explicit removal
+      if (syncService.isAuthenticated()) {
+          syncService.removeHistoryItemFromDrive(itemToRemove.url);
+      }
   };
 
   const handleSearch = async (query: string) => {
@@ -1167,7 +1178,7 @@ const App: React.FC = () => {
                   <h3 className="text-lg font-bold text-[var(--theme-text-primary)] mb-4 flex items-center gap-3">
                       <SpinnerIcon className="w-6 h-6 animate-spin text-[var(--theme-accent-primary)]" />
                       Đang xử lý tải xuống...
-                  </h3>
+                          </h3>
                   
                   <div className="mb-4">
                       <div className="flex justify-between text-xs text-[var(--theme-text-secondary)] mb-1">
