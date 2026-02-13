@@ -15,15 +15,13 @@ const DELETION_LOG_FILENAME = 'deletion_log.json'; // CHECKLIST XOÁ
 
 const STORAGE_KEY_TOKEN = 'gdrive_access_token';
 const STORAGE_KEY_EXPIRY = 'gdrive_token_expiry';
-const STORAGE_KEY_DEVICE_ID = 'gdrive_sync_device_id'; // Key lưu ID thiết bị
+const STORAGE_KEY_DEVICE_ID = 'gdrive_sync_device_id'; // Key lưu ID thiết bị (LocalStorage - Bền vững)
+const SESSION_KEY_DELETION_CHECKED = 'gdrive_deletion_checked'; // Key lưu trạng thái đã quét (SessionStorage - Tạm thời)
 
 let tokenClient: any;
 let gapiInited = false;
 let gisInited = false;
 let accessToken: string | null = null;
-
-// Cờ kiểm soát việc quét log xóa chỉ 1 lần mỗi phiên
-let hasCheckedDeletionsSession = false;
 
 const fileIdCache = new Map<string, string>();
 
@@ -208,9 +206,10 @@ export async function initGoogleDrive(): Promise<void> {
                         const expirationTime = Date.now() + (resp.expires_in * 1000);
                         localStorage.setItem(STORAGE_KEY_TOKEN, accessToken!);
                         localStorage.setItem(STORAGE_KEY_EXPIRY, expirationTime.toString());
-                        updateGlobalState({ isDirty: false, isError: false }); // Reset status on login
-                        hasCheckedDeletionsSession = false; // Reset flag on login
-                        checkDirtyStatus(); // Check and Auto-Sync
+                        updateGlobalState({ isDirty: false, isError: false }); 
+                        // Khi đăng nhập mới (hoặc đăng nhập lại), xóa cờ session để bắt buộc quét lại
+                        sessionStorage.removeItem(SESSION_KEY_DELETION_CHECKED);
+                        checkDirtyStatus(); 
                     },
                 });
                 gisInited = true;
@@ -265,10 +264,13 @@ export function signOut() {
     accessToken = null;
     localStorage.removeItem(STORAGE_KEY_TOKEN);
     localStorage.removeItem(STORAGE_KEY_EXPIRY);
+    
+    // Xóa cờ kiểm tra session khi đăng xuất
+    sessionStorage.removeItem(SESSION_KEY_DELETION_CHECKED);
+    
     fileIdCache.clear();
     if (gapi.client) gapi.client.setToken(null);
     updateGlobalState({ isDirty: false, isBackgroundSyncing: false, isError: false });
-    hasCheckedDeletionsSession = false; // Reset check flag
 }
 
 export function isAuthenticated(): boolean {
@@ -480,9 +482,10 @@ async function appendToRemoteDeletionLog(item: Omit<DeletionLogItem, 'deviceId'>
 async function processRemoteDeletions(): Promise<void> {
     if (!accessToken) return;
     
-    // Nếu đã kiểm tra trong phiên này rồi thì bỏ qua
-    if (hasCheckedDeletionsSession) {
-        console.log("[Sync] Skipping deletion log check (already done this session).");
+    // KIỂM TRA SESSION STORAGE
+    // Nếu trong phiên làm việc này (từ lúc mở tab) đã quét rồi thì thôi.
+    if (sessionStorage.getItem(SESSION_KEY_DELETION_CHECKED) === 'true') {
+        console.log("[Sync] Skipping deletion log check (Session Cached).");
         return;
     }
     
@@ -491,39 +494,38 @@ async function processRemoteDeletions(): Promise<void> {
     
     try {
         const log = await downloadFile<DeletionLog>(DELETION_LOG_FILENAME);
-        if (!log || !log.deletedItems || log.deletedItems.length === 0) {
-            hasCheckedDeletionsSession = true; // Mark as checked
-            return;
-        }
-        
-        console.log(`[Deletion Log] Found ${log.deletedItems.length} items to check.`);
-        
-        for (const item of log.deletedItems) {
-            // QUAN TRỌNG: Bỏ qua nếu lệnh xóa đến từ chính thiết bị này
-            if (item.deviceId === currentDeviceId) {
-                continue;
-            }
-
-            if (item.type === 'story') {
-                const exists = await dbService.getStory(item.id);
-                if (exists) {
-                    console.log(`[Sync Pruning] Deleting story from checklist: ${exists.title}`);
-                    await dbService.deleteEbookAndStory(item.id);
+        if (log && log.deletedItems && log.deletedItems.length > 0) {
+            console.log(`[Deletion Log] Found ${log.deletedItems.length} items to check.`);
+            
+            for (const item of log.deletedItems) {
+                // Bỏ qua nếu lệnh xóa đến từ chính thiết bị này (tránh loop)
+                if (item.deviceId === currentDeviceId) {
+                    continue;
                 }
-            } else if (item.type === 'history') {
-                let history = getReadingHistory();
-                const initialLen = history.length;
-                history = history.filter(h => h.url !== item.id);
-                if (history.length !== initialLen) {
-                    saveReadingHistory(history);
-                    console.log(`[Sync Pruning] Removed history item: ${item.id}`);
+
+                if (item.type === 'story') {
+                    const exists = await dbService.getStory(item.id);
+                    if (exists) {
+                        console.log(`[Sync Pruning] Deleting story from checklist: ${exists.title}`);
+                        await dbService.deleteEbookAndStory(item.id);
+                    }
+                } else if (item.type === 'history') {
+                    let history = getReadingHistory();
+                    const initialLen = history.length;
+                    history = history.filter(h => h.url !== item.id);
+                    if (history.length !== initialLen) {
+                        saveReadingHistory(history);
+                        console.log(`[Sync Pruning] Removed history item: ${item.id}`);
+                    }
                 }
             }
         }
     } catch (e) {
         console.warn("Error processing remote deletions:", e);
     } finally {
-        hasCheckedDeletionsSession = true; // Mark as checked regardless of success/fail to avoid loop
+        // LUÔN ĐÁNH DẤU LÀ ĐÃ QUÉT (Dù thành công hay lỗi)
+        // Để tránh bị kẹt ở bước này nếu mạng chập chờn
+        sessionStorage.setItem(SESSION_KEY_DELETION_CHECKED, 'true');
     }
 }
 
