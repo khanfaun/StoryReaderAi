@@ -1,8 +1,8 @@
 
 import React, { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
-import { CloseIcon, SpinnerIcon, SyncIcon, CheckIcon, CloudIcon, LogoutIcon, UploadIcon, DownloadIcon } from './icons';
-import { initGoogleDrive, signInToDrive, isAuthenticated, syncLibraryIndex, signOut, uploadAllLocalData, pullMissingDataFromDrive, subscribeToSyncState } from '../services/sync';
+import { CloseIcon, SpinnerIcon, SyncIcon, CheckIcon, CloudIcon, LogoutIcon } from './icons';
+import { initGoogleDrive, signInToDrive, isAuthenticated, syncLibraryIndex, signOut, syncData, subscribeToSyncState } from '../services/sync';
 import ConfirmationModal from './ConfirmationModal';
 
 interface SyncModalProps {
@@ -16,17 +16,15 @@ const SyncModal: React.FC<SyncModalProps> = ({ onClose }) => {
   const [initError, setInitError] = useState<string | null>(null);
   const [isLogoutConfirmOpen, setIsLogoutConfirmOpen] = useState(false);
 
-  // Helper để trích xuất phần trăm từ chuỗi status (Ví dụ: "Đang tải... 70%")
+  // Helper để trích xuất phần trăm từ chuỗi status
   const getProgressPercentage = (statusStr: string): number => {
       const match = statusStr.match(/(\d+)%/);
       return match ? parseInt(match[1], 10) : 0;
   };
 
   const progressPercent = getProgressPercentage(status);
-  // Nếu đang chạy mà chưa có phần trăm cụ thể -> Chế độ chờ (Indeterminate)
   const isIndeterminate = isWorking && progressPercent === 0;
 
-  // Subscribe to Global Sync State
   useEffect(() => {
       const unsubscribe = subscribeToSyncState((newStatus, newIsSyncing) => {
           setStatus(newStatus);
@@ -49,23 +47,17 @@ const SyncModal: React.FC<SyncModalProps> = ({ onClose }) => {
   }, []);
 
   const handleSignIn = async () => {
-    // Local spinner just for sign-in process
     setIsWorking(true);
     setStatus('Đang kết nối Google Drive...');
     try {
       await signInToDrive();
       setIsLoggedIn(true);
       setStatus('Đăng nhập thành công! Đang đồng bộ danh sách truyện...');
-      
-      // Tự động đồng bộ danh sách ngay sau khi đăng nhập
       await syncLibraryIndex();
-      
       setStatus('Đồng bộ danh sách hoàn tất! Bạn có thể đóng cửa sổ này.');
       setTimeout(() => {
-          // Tải lại trang để cập nhật danh sách truyện mới vào App state
           window.location.reload(); 
       }, 1500);
-
     } catch (error: any) {
         setStatus('Đăng nhập thất bại hoặc bị hủy.');
         console.error(error);
@@ -73,27 +65,14 @@ const SyncModal: React.FC<SyncModalProps> = ({ onClose }) => {
     }
   };
 
-  const handleSmartPull = async () => {
+  const handleSync = async () => {
       if (isWorking) return;
       try {
-          await pullMissingDataFromDrive();
-          // Nếu thành công, có thể reload để cập nhật UI chính
-          setTimeout(() => window.location.reload(), 1500);
+          await syncData();
+          // Nếu thành công, có thể reload để cập nhật UI chính nếu cần thiết
+          // setTimeout(() => window.location.reload(), 1500);
       } catch (e: any) {
           console.error(e);
-          // Lỗi đã được update vào global state status
-      }
-  }
-
-  const handleForceUploadAll = async () => {
-      if (isWorking) return;
-      if (!confirm("Hành động này sẽ tải toàn bộ dữ liệu từ máy này lên Google Drive (ghi đè nếu cần). Quá trình có thể mất vài phút tùy vào số lượng truyện. Bạn có muốn tiếp tục?")) return;
-
-      try {
-          await uploadAllLocalData();
-      } catch (e: any) {
-          console.error(e);
-          // Lỗi đã được update vào global state status
       }
   }
 
@@ -106,7 +85,6 @@ const SyncModal: React.FC<SyncModalProps> = ({ onClose }) => {
       setIsLoggedIn(false);
       setIsLogoutConfirmOpen(false);
       setStatus('');
-      // Tải lại trang để xóa sạch dữ liệu cache cũ từ Drive nếu cần
       window.location.reload();
   };
 
@@ -135,7 +113,7 @@ const SyncModal: React.FC<SyncModalProps> = ({ onClose }) => {
                   </div>
                   <h3 className="text-lg font-bold text-[var(--theme-text-primary)] mb-2">Lưu trữ & Đồng bộ</h3>
                   <p className="text-sm text-[var(--theme-text-secondary)]">
-                    Đăng nhập để tự động lưu truyện và dữ liệu AI vào Google Drive của bạn (Thư mục Ẩn). Dữ liệu sẽ được tải về khi bạn cần (Lazy Loading).
+                    Đăng nhập để tự động lưu truyện và dữ liệu AI vào Google Drive của bạn (Thư mục Ẩn). Dữ liệu sẽ được tải về khi bạn cần.
                   </p>
               </div>
               <button
@@ -157,38 +135,29 @@ const SyncModal: React.FC<SyncModalProps> = ({ onClose }) => {
                     <div className="bg-emerald-500 rounded-full p-1"><CheckIcon className="w-5 h-5 text-white" /></div>
                     <div>
                         <p className="text-sm font-bold text-emerald-400">Đã kết nối Google Drive</p>
-                        <p className="text-xs text-emerald-200/70">Tài khoản của bạn đã sẵn sàng.</p>
+                        <p className="text-xs text-emerald-200/70">Dữ liệu của bạn được an toàn.</p>
                     </div>
                 </div>
 
                 <div className="flex flex-col gap-3">
-                    {/* Hàng nút thao tác chính */}
-                    <div className="flex gap-3">
-                        <button
-                            onClick={handleSmartPull}
-                            disabled={isWorking}
-                            className="flex-1 bg-[var(--theme-accent-primary)] hover:brightness-110 text-white font-bold py-3 px-2 rounded-lg flex flex-col items-center justify-center gap-1 transition-colors disabled:opacity-50"
-                            title="Tải dữ liệu mới từ Drive"
-                        >
-                            {isWorking && status.includes('tải') ? <SpinnerIcon className="w-5 h-5 animate-spin" /> : <DownloadIcon className="w-5 h-5" />}
-                            <span className="text-xs">Tải dữ liệu (Pull)</span>
-                        </button>
-
-                        <button
-                            onClick={handleForceUploadAll}
-                            disabled={isWorking}
-                            className="flex-1 bg-blue-600 hover:bg-blue-500 text-white font-bold py-3 px-2 rounded-lg flex flex-col items-center justify-center gap-1 transition-colors disabled:opacity-50"
-                            title="Sao lưu toàn bộ lên Drive"
-                        >
-                            <UploadIcon className="w-5 h-5" />
-                            <span className="text-xs">Sao lưu (Push)</span>
-                        </button>
-                    </div>
+                    {/* Nút Đồng bộ duy nhất */}
+                    <button
+                        onClick={handleSync}
+                        disabled={isWorking}
+                        className="w-full bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white font-bold py-4 px-4 rounded-xl flex items-center justify-center gap-3 transition-all transform hover:scale-[1.02] disabled:opacity-50 disabled:scale-100 shadow-lg"
+                        title="Đồng bộ ngay"
+                    >
+                        {isWorking ? <SpinnerIcon className="w-6 h-6 animate-spin" /> : <SyncIcon className="w-6 h-6" />}
+                        <span className="text-lg">Đồng bộ ngay</span>
+                    </button>
+                    <p className="text-center text-xs text-[var(--theme-text-secondary)]">
+                        Hệ thống sẽ tự động tải về nội dung mới và sao lưu các thay đổi của bạn.
+                    </p>
 
                     <button
                         onClick={handleLogoutClick}
                         disabled={isWorking}
-                        className="w-full bg-transparent border border-rose-500/50 hover:bg-rose-900/20 text-rose-400 font-bold py-2 px-4 rounded-lg flex items-center justify-center gap-2 transition-colors disabled:opacity-50 text-sm"
+                        className="w-full mt-4 bg-transparent border border-rose-500/30 hover:bg-rose-900/20 text-rose-400 font-bold py-2 px-4 rounded-lg flex items-center justify-center gap-2 transition-colors disabled:opacity-50 text-sm"
                     >
                         <LogoutIcon className="w-4 h-4" />
                         <span>Đăng xuất</span>

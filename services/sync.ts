@@ -466,11 +466,6 @@ export async function syncReadingProgress(): Promise<void> {
     // Only upload if local is dirty
     if (isHistoryDirty()) {
         const localHistory = getReadingHistory();
-        // Merge with remote first to be safe (optional, but good practice)
-        // For simplicity in this logic, we push local state as "latest" if dirty,
-        // but real differential sync would require merging.
-        // Let's implement merge: Pull -> Merge -> Push if changes
-        
         const remoteData = await downloadFile<{ history: ReadingHistoryItem[] }>(HISTORY_FILENAME);
         const remoteHistory = remoteData?.history || [];
         
@@ -496,8 +491,6 @@ export async function syncReadingProgress(): Promise<void> {
         const remoteData = await downloadFile<{ history: ReadingHistoryItem[] }>(HISTORY_FILENAME);
         if (remoteData?.history) {
              const localHistory = getReadingHistory();
-             // Simple check: if timestamps differ for top item
-             // Or just always merge to be safe
              const mergedMap = new Map<string, ReadingHistoryItem>();
              const mergeItem = (item: ReadingHistoryItem) => {
                 const existing = mergedMap.get(item.url);
@@ -550,11 +543,12 @@ export async function syncLibraryIndex(): Promise<Story[]> {
 
 // --- OPTIMIZED UPLOAD (DIFFERENTIAL SYNC) ---
 
-export async function uploadAllLocalData(): Promise<void> {
-    if (globalIsSyncing) return;
+// Tham số finalize: Nếu true thì kết thúc sẽ tắt globalIsSyncing. 
+// Nếu false thì giữ nguyên (để dùng cho chuỗi syncData)
+export async function uploadAllLocalData(finalize: boolean = true): Promise<void> {
     if (!accessToken) throw new Error("Chưa đăng nhập Google Drive");
 
-    updateGlobalState("Đang kiểm tra thay đổi...", true);
+    updateGlobalState("Đang kiểm tra thay đổi trên máy...", true);
 
     try {
         // 1. Sync Reading History first
@@ -596,7 +590,9 @@ export async function uploadAllLocalData(): Promise<void> {
             }
         }
         
-        updateGlobalState("Đồng bộ hoàn tất!", false);
+        if (finalize) {
+            updateGlobalState("Đồng bộ hoàn tất!", false);
+        }
     } catch (e: any) {
         updateGlobalState(`Lỗi sao lưu: ${e.message}`, false);
         throw e;
@@ -605,18 +601,13 @@ export async function uploadAllLocalData(): Promise<void> {
 
 // --- SMART PULL ACTION (DIFFERENTIAL DOWNLOAD) ---
 
-export async function pullMissingDataFromDrive(): Promise<void> {
-    if (globalIsSyncing) return;
+export async function pullMissingDataFromDrive(finalize: boolean = true): Promise<void> {
     if (!accessToken) throw new Error("Chưa đăng nhập Google Drive");
-
-    updateGlobalState("Đang đồng bộ tiến độ đọc...", true);
-    await syncReadingProgress();
 
     updateGlobalState("Đang quét dữ liệu trên Drive...", true);
     
     try {
         // 1. Get List of ALL files in AppData (Metadata only: id, name, modifiedTime)
-        // This avoids downloading content for checking
         let pageToken = null;
         const driveFilesMap = new Map<string, { id: string, modifiedTime: string }>();
         
@@ -638,8 +629,6 @@ export async function pullMissingDataFromDrive(): Promise<void> {
         } while (pageToken);
 
         // 2. Check Stories
-        // Extract Story URLs from filenames in driveFilesMap
-        // story_HASH.json
         const driveStoryFilenames = Array.from(driveFilesMap.keys()).filter(k => k.startsWith('story_') && k.endsWith('.json'));
         
         for (const filename of driveStoryFilenames) {
@@ -655,13 +644,13 @@ export async function pullMissingDataFromDrive(): Promise<void> {
             if (!localStory) {
                 shouldDownload = true; // New story
             } else if (!localStory._dirty && driveFile?.modifiedTime) {
+                // Chỉ tải về nếu local SẠCH và Drive MỚI HƠN
                 const driveTime = new Date(driveFile.modifiedTime).getTime();
-                // If Drive is significantly newer (> 2 seconds to account for clock skew) than last local sync
-                if (driveTime > (localStory._syncedAt || 0) + 2000) {
+                if (driveTime > (localStory._syncedAt || 0) + 5000) { // Buffer 5s
                     shouldDownload = true;
                 }
             }
-            // If local is dirty, we keep local version (Conflict strategy: Local wins for now, or Manual Resolve later)
+            // Nếu local DIRTY -> SKIP (Local wins)
 
             if (shouldDownload) {
                 updateGlobalState(`Đang tải truyện mới: ${filename}...`, true);
@@ -676,9 +665,7 @@ export async function pullMissingDataFromDrive(): Promise<void> {
         const driveChapterFilenames = Array.from(driveFilesMap.keys()).filter(k => k.startsWith('chap_') && k.endsWith('.json'));
         const missingOrOutdatedChapters: string[] = [];
 
-        // Batch check against DB
         for (const filename of driveChapterFilenames) {
-            // Filename: chap_STORYHASH_CHAPHASH.json
             const parts = filename.replace('.json', '').split('_');
             if (parts.length !== 3) continue;
             
@@ -694,7 +681,7 @@ export async function pullMissingDataFromDrive(): Promise<void> {
                 shouldDownload = true;
             } else if (!localChapter._dirty && driveFile?.modifiedTime) {
                 const driveTime = new Date(driveFile.modifiedTime).getTime();
-                if (driveTime > (localChapter._syncedAt || 0) + 2000) {
+                if (driveTime > (localChapter._syncedAt || 0) + 5000) {
                     shouldDownload = true;
                 }
             }
@@ -705,7 +692,7 @@ export async function pullMissingDataFromDrive(): Promise<void> {
         }
 
         if (missingOrOutdatedChapters.length > 0) {
-            updateGlobalState(`Tìm thấy ${missingOrOutdatedChapters.length} chương cần cập nhật. Đang tải...`, true);
+            updateGlobalState(`Tìm thấy ${missingOrOutdatedChapters.length} chương mới trên mây. Đang tải...`, true);
             const BATCH_SIZE = 5;
             for (let i = 0; i < missingOrOutdatedChapters.length; i += BATCH_SIZE) {
                 const batch = missingOrOutdatedChapters.slice(i, i + BATCH_SIZE);
@@ -713,7 +700,6 @@ export async function pullMissingDataFromDrive(): Promise<void> {
                 updateGlobalState(`Đang tải dữ liệu: ${percent}% (${i + batch.length}/${missingOrOutdatedChapters.length})`, true);
 
                 await Promise.all(batch.map(async (filename) => {
-                    // Extract IDs again to save
                     const parts = filename.replace('.json', '').split('_');
                     const storyUrl = unhashUrl(parts[1]);
                     const chapterUrl = unhashUrl(parts[2]);
@@ -730,12 +716,42 @@ export async function pullMissingDataFromDrive(): Promise<void> {
             }
         }
 
-        // Sync Index last
         await syncLibraryIndex();
 
-        updateGlobalState("Đã hoàn tất tải dữ liệu mới từ Drive!", false);
+        if (finalize) {
+            updateGlobalState("Đã hoàn tất tải dữ liệu mới từ Drive!", false);
+        }
     } catch (e: any) {
         updateGlobalState(`Lỗi tải dữ liệu: ${e.message}`, false);
+        throw e;
+    }
+}
+
+// --- MAIN SYNC FUNCTION (Pull then Push) ---
+
+export async function syncData(): Promise<void> {
+    if (globalIsSyncing) return;
+    if (!accessToken) throw new Error("Chưa đăng nhập Google Drive");
+
+    try {
+        // BƯỚC 1: PULL (Lấy cái mới của người khác về, trừ khi mình đang sửa)
+        updateGlobalState("Bắt đầu đồng bộ: Bước 1/2 - Tải về...", true);
+        await pullMissingDataFromDrive(false); // false để giữ loading bar
+
+        // BƯỚC 2: PUSH (Đẩy cái mới của mình lên)
+        updateGlobalState("Bắt đầu đồng bộ: Bước 2/2 - Tải lên...", true);
+        await uploadAllLocalData(false); // false để giữ loading bar
+
+        updateGlobalState("Đồng bộ hoàn tất! Dữ liệu đã an toàn.", false);
+        
+        // Refresh UI
+        setTimeout(() => {
+             const event = new Event('visibilitychange');
+             document.dispatchEvent(event);
+        }, 500);
+
+    } catch (e: any) {
+        updateGlobalState(`Lỗi đồng bộ: ${e.message}`, false);
         throw e;
     }
 }
