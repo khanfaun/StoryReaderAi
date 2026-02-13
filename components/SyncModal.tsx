@@ -1,8 +1,8 @@
 
 import React, { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
-import { CloseIcon, SpinnerIcon, SyncIcon, CheckIcon, CloudIcon, LogoutIcon } from './icons';
-import { initGoogleDrive, signInToDrive, isAuthenticated, syncLibraryIndex, signOut } from '../services/sync';
+import { CloseIcon, SpinnerIcon, SyncIcon, CheckIcon, CloudIcon, LogoutIcon, UploadIcon, DownloadIcon } from './icons';
+import { initGoogleDrive, signInToDrive, isAuthenticated, syncLibraryIndex, signOut, uploadAllLocalData, pullMissingDataFromDrive } from '../services/sync';
 import ConfirmationModal from './ConfirmationModal';
 
 interface SyncModalProps {
@@ -54,15 +54,30 @@ const SyncModal: React.FC<SyncModalProps> = ({ onClose }) => {
     }
   };
 
-  const handleManualSyncIndex = async () => {
+  const handleSmartPull = async () => {
       setIsWorking(true);
-      setStatus("Đang tải danh sách truyện từ Drive...");
+      setStatus("Đang kiểm tra dữ liệu trên Drive...");
       try {
-          await syncLibraryIndex();
-          setStatus("Đã cập nhật danh sách truyện mới nhất!");
-          setTimeout(() => window.location.reload(), 1000);
+          await pullMissingDataFromDrive((msg) => setStatus(msg));
+          setStatus("Đã cập nhật toàn bộ dữ liệu mới từ Drive!");
+          // Delay reload để người dùng kịp đọc thông báo
+          setTimeout(() => window.location.reload(), 2000);
       } catch (e: any) {
           setStatus("Lỗi đồng bộ: " + e.message);
+          setIsWorking(false); // Only stop working spinner on error so user can retry, success reloads page
+      }
+  }
+
+  const handleForceUploadAll = async () => {
+      if (!confirm("Hành động này sẽ tải toàn bộ dữ liệu từ máy này lên Google Drive (ghi đè nếu cần). Quá trình có thể mất vài phút tùy vào số lượng truyện. Bạn có muốn tiếp tục?")) return;
+
+      setIsWorking(true);
+      setStatus("Bắt đầu sao lưu...");
+      try {
+          await uploadAllLocalData((msg) => setStatus(msg));
+          setStatus("Đã sao lưu thành công toàn bộ dữ liệu lên Drive!");
+      } catch (e: any) {
+          setStatus("Lỗi sao lưu: " + e.message);
       } finally {
           setIsWorking(false);
       }
@@ -144,12 +159,21 @@ const SyncModal: React.FC<SyncModalProps> = ({ onClose }) => {
 
                 <div className="flex flex-col gap-3">
                     <button
-                        onClick={handleManualSyncIndex}
+                        onClick={handleSmartPull}
                         disabled={isWorking}
                         className="w-full bg-[var(--theme-accent-primary)] hover:brightness-110 text-white font-bold py-3 px-4 rounded-lg flex items-center justify-center gap-2 transition-colors disabled:opacity-50"
                     >
-                        {isWorking ? <SpinnerIcon className="w-5 h-5 animate-spin" /> : <SyncIcon className="w-5 h-5" />}
-                        <span>Làm mới danh sách truyện ngay</span>
+                        {isWorking && status.includes('tải') ? <SpinnerIcon className="w-5 h-5 animate-spin" /> : <DownloadIcon className="w-5 h-5" />}
+                        <span>Tải dữ liệu mới từ Drive (Smart Pull)</span>
+                    </button>
+
+                    <button
+                        onClick={handleForceUploadAll}
+                        disabled={isWorking}
+                        className="w-full bg-blue-600 hover:bg-blue-500 text-white font-bold py-3 px-4 rounded-lg flex items-center justify-center gap-2 transition-colors disabled:opacity-50"
+                    >
+                        <UploadIcon className="w-5 h-5" />
+                        <span>Sao lưu toàn bộ lên Drive (Force Push)</span>
                     </button>
 
                     <button
