@@ -614,6 +614,14 @@ const StoryViewer: React.FC<StoryViewerProps> = ({
         }
     };
 
+    // Wrapper for delete to sync with Drive
+    const handleDeleteChapterContent = async (storyUrl: string, chapterUrl: string) => {
+        await dbService.deleteChapterData(storyUrl, chapterUrl);
+        if (syncService.isAuthenticated()) {
+            await syncService.deleteChapterFromDrive(storyUrl, chapterUrl);
+        }
+    };
+
     const handleRewriteChapter = useCallback(async () => {
         const currentApiKey = apiKeyService.getApiKey();
         if (!currentApiKey) { setIsApiKeyModalOpen(true); return; }
@@ -831,6 +839,7 @@ const StoryViewer: React.FC<StoryViewerProps> = ({
             : "top-20 max-h-[calc(100vh-6rem)]";
 
         return (
+            <div className="w-full">
             <div className={gridClass}>
                 {leftSidebarContent && (
                     <aside className={`hidden lg:block sticky ${stickySidebarClass} self-start transition-all duration-300 overflow-y-auto custom-scrollbar pr-2`}>
@@ -933,6 +942,7 @@ const StoryViewer: React.FC<StoryViewerProps> = ({
                     />
                 )}
             </div>
+            </div>
         );
     }
 
@@ -943,7 +953,7 @@ const StoryViewer: React.FC<StoryViewerProps> = ({
                 story={story} 
                 onSelectChapter={handleSelectChapter} readChapters={readChapters} lastReadChapterIndex={selectedChapterIndex} 
                 onBack={onBack} onUpdateStory={onUpdateStory} onDeleteStory={onDeleteStory}
-                onDeleteChapterContent={dbService.deleteChapterData}
+                onDeleteChapterContent={handleDeleteChapterContent}
                 isBackgroundLoading={false}
                 onStartDownload={onStartDownloadExport}
                 downloadProgress={backgroundDownloads[story.url]}

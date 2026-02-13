@@ -217,6 +217,23 @@ async function uploadFile(filename: string, content: any): Promise<void> {
     }
 }
 
+// Delete file
+async function deleteFile(filename: string): Promise<void> {
+    if (!accessToken) return;
+    const fileId = await findFileId(filename);
+    if (!fileId) return;
+
+    try {
+        await gapi.client.drive.files.delete({
+            fileId: fileId
+        });
+        console.log(`Deleted file ${filename} from Drive.`);
+    } catch (e) {
+        console.error(`Error deleting file ${filename}:`, e);
+        if ((e as any)?.status === 401) signOut();
+    }
+}
+
 // Download file content
 async function downloadFile<T>(filename: string): Promise<T | null> {
     if (!accessToken) return null;
@@ -277,6 +294,22 @@ export async function saveStoryDetailsToDrive(story: Story): Promise<void> {
     await uploadFile(filename, story);
 }
 
+// Xóa truyện khỏi Drive (File chi tiết + Cập nhật Index)
+export async function deleteStoryFromDrive(story: Story): Promise<void> {
+    // 1. Xóa file chi tiết truyện
+    const filename = getStoryFilename(story.url);
+    await deleteFile(filename);
+
+    // 2. Cập nhật lại Index trên Drive (Loại bỏ truyện này)
+    const currentIndex = await fetchLibraryIndexFromDrive();
+    const newIndex = currentIndex.filter(s => s.url !== story.url);
+    await saveLibraryIndexToDrive(newIndex);
+    
+    // Lưu ý: Không tự động xóa các file chương lẻ để tiết kiệm thời gian chờ, 
+    // chúng sẽ thành file rác nhưng không ảnh hưởng logic app.
+    // Nếu muốn kỹ, có thể loop xóa hết chapter files.
+}
+
 // 3. CHAPTER CONTENT
 // Tải nội dung chương
 export async function fetchChapterContentFromDrive(storyUrl: string, chapterUrl: string): Promise<CachedChapter | null> {
@@ -288,6 +321,12 @@ export async function fetchChapterContentFromDrive(storyUrl: string, chapterUrl:
 export async function saveChapterContentToDrive(storyUrl: string, chapterUrl: string, data: CachedChapter): Promise<void> {
     const filename = getChapterFilename(storyUrl, chapterUrl);
     await uploadFile(filename, data);
+}
+
+// Xóa nội dung chương khỏi Drive
+export async function deleteChapterFromDrive(storyUrl: string, chapterUrl: string): Promise<void> {
+    const filename = getChapterFilename(storyUrl, chapterUrl);
+    await deleteFile(filename);
 }
 
 // --- SYNC ACTIONS (Called by UI) ---

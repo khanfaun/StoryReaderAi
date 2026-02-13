@@ -1,3 +1,4 @@
+
 import React, { useState, useCallback, useEffect, useRef, useMemo } from 'react';
 import type { Story, Chapter, ReadingHistoryItem, ApiKeyInfo, DownloadConfig } from './types';
 import { searchStory, getStoryDetails, getStoryFromUrl, parseHtml, parseStoryDetailsFromDoc } from './services/truyenfullService';
@@ -663,10 +664,6 @@ const App: React.FC = () => {
           await dbService.saveStory(updatedStory);
           handleUpdateStory(updatedStory);
           
-          if (syncService.isAuthenticated()) {
-              syncService.saveStoryDetailsToDrive(updatedStory).catch(console.error);
-          }
-          
       } catch (e) {
           throw e; // Để modal bắt lỗi
       }
@@ -678,10 +675,6 @@ const App: React.FC = () => {
           return;
       }
       
-      // Check if trying to add a chapter that implies overwrite?
-      // Single add modal usually appends.
-      // We'll treat single add as append always for simplicity unless complex logic needed.
-      
       const newChapter: Chapter = { title, url: `${story.url}/chapter-${Date.now()}` };
       const updatedChapters = [...(story.chapters || []), newChapter];
       const updatedStory = { ...story, chapters: updatedChapters };
@@ -691,9 +684,8 @@ const App: React.FC = () => {
           await dbService.saveStory(updatedStory);
           handleUpdateStory(updatedStory);
           
-          // Sync to Drive
+          // Sync to Drive (Content)
           if(syncService.isAuthenticated()) {
-              syncService.saveStoryDetailsToDrive(updatedStory).catch(console.error);
               syncService.saveChapterContentToDrive(story.url, newChapter.url, { content, stats: null }).catch(console.error);
           }
       } catch (e) {
@@ -715,16 +707,6 @@ const App: React.FC = () => {
               chapters: newChapters,
               story: targetStory
           });
-          // Trả về promise để modal chờ, nhưng vì logic UI là modal đóng/mở
-          // Ta cần cơ chế để modal biết là đang chờ confirm.
-          // Tuy nhiên, để đơn giản: Modal gọi hàm này -> Hàm này mở Confirm -> Modal đóng hoặc chờ?
-          // Yêu cầu: "hệ thống popup modal hỏi có muốn ghi đè không".
-          // Cách tốt nhất: Modal gọi hàm này -> Hàm này check -> Nếu trùng -> throw error đặc biệt hoặc return false?
-          // Hoặc: Hàm này return void, nhưng set state để mở Confirm modal.
-          // Modal 'MultiChapterAdd' sẽ đóng lại. Người dùng sẽ tương tác với Confirm Modal của App.
-          // Nếu Confirm -> Execute. Nếu Cancel -> Hủy. Dữ liệu trong Modal đã mất nếu Modal đóng.
-          // FIX: Để Modal không đóng, hàm này cần return Promise.
-          // Nếu overwrite -> User confirm -> Resolve. User cancel -> Reject.
           
           return new Promise<void>((resolve, reject) => {
               // Hacky way: Attach resolvers to the state so ConfirmModal can call them
@@ -767,9 +749,6 @@ const App: React.FC = () => {
       // Reject promise to keep MultiAddModal open if possible, or just to signal cancellation
       if ((window as any)._overwriteReject) {
           // Truyền lỗi "Cancelled" để modal biết không đóng (hoặc xử lý tùy ý)
-          // Tuy nhiên nếu modal đóng rồi thì thôi. 
-          // Ở đây ta giả định Modal gọi await handleBatchAdd... 
-          // Nếu ta reject, modal sẽ catch và hiện lỗi, giữ form.
           (window as any)._overwriteReject(new Error("Đã hủy ghi đè."));
           delete (window as any)._overwriteResolve;
           delete (window as any)._overwriteReject;
@@ -783,9 +762,9 @@ const App: React.FC = () => {
           setLocalStories(prev => prev.map(s => s.url === updatedStory.url ? updatedStory : s));
           
           if (syncService.isAuthenticated()) {
-              syncService.saveStoryDetailsToDrive(updatedStory).catch(console.error);
-              // Also sync index to update title/author if changed
-              syncService.syncLibraryIndex().catch(console.error);
+              await syncService.saveStoryDetailsToDrive(updatedStory);
+              // Also sync index to update title/author if changed OR story is new
+              await syncService.syncLibraryIndex();
           }
 
           const history = getReadingHistory();
@@ -809,7 +788,12 @@ const App: React.FC = () => {
           saveReadingHistory(history);
           setReadingHistory(history);
           setLocalStories(prev => prev.filter(s => s.url !== storyToDelete.url));
-          // Note: Currently not deleting from Drive to prevent accidental data loss, user can manually delete in Drive if needed or implement later
+          
+          // Delete from Drive if authenticated
+          if (syncService.isAuthenticated()) {
+              await syncService.deleteStoryFromDrive(storyToDelete);
+          }
+          
           handleBackToMain();
       } catch (e) {
           setError(`Lỗi xóa truyện: ${(e as Error).message}`);
@@ -823,11 +807,18 @@ const App: React.FC = () => {
   const handleRequestDeleteEbook = async (item: ReadingHistoryItem) => { setDeleteConfirmation({ isOpen: true, item }); };
   const confirmDeleteEbook = async () => {
       if (deleteConfirmation.item) {
-          await dbService.deleteEbookAndStory(deleteConfirmation.item.url);
-          const newHistory = getReadingHistory().filter(h => h.url !== deleteConfirmation.item?.url);
-          saveReadingHistory(newHistory);
-          setReadingHistory(newHistory);
-          setLocalStories(prev => prev.filter(s => s.url !== deleteConfirmation.item?.url));
+          // Re-find the full story object to delete properly
+          const storyToDelete = localStories.find(s => s.url === deleteConfirmation.item?.url);
+          if (storyToDelete) {
+              await handleDeleteStory(storyToDelete);
+          } else {
+              // Fallback just for local cleanup if full story obj missing
+              await dbService.deleteEbookAndStory(deleteConfirmation.item.url);
+              const newHistory = getReadingHistory().filter(h => h.url !== deleteConfirmation.item?.url);
+              saveReadingHistory(newHistory);
+              setReadingHistory(newHistory);
+              setLocalStories(prev => prev.filter(s => s.url !== deleteConfirmation.item?.url));
+          }
       }
       setDeleteConfirmation({ isOpen: false });
   };
