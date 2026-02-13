@@ -845,19 +845,22 @@ const App: React.FC = () => {
       // Việc này unmount StoryViewer/StoryDetail
       handleBackToMain();
 
-      // 4. XỬ LÝ DỮ LIỆU NẶNG TRONG NỀN (Non-blocking)
-      // Không dùng await ở cấp độ top-level để tránh block UI
-      try {
-          // Xóa dữ liệu IndexedDB (có thể mất vài giây nếu truyện dài)
-          await dbService.deleteEbookAndStory(storyToDelete.url);
-          
-          // Xóa trên Drive (Sync)
-          if (syncService.isAuthenticated()) {
-              await syncService.deleteStoryFromDrive(storyToDelete);
-          }
-      } catch (e) {
-          // Log lỗi ngầm, không làm phiền user vì họ đã xóa xong trên UI
-          console.error(`Background delete error for ${storyToDelete.title}:`, (e as Error).message);
+      // 4. XỬ LÝ DỮ LIỆU NỀN (Non-blocking & Parallel)
+      // Tách biệt việc xóa Local và Drive để đảm bảo Drive luôn được xử lý ngay cả khi Local bị chậm/lỗi
+      
+      // Task A: Xóa dữ liệu IndexedDB Local
+      dbService.deleteEbookAndStory(storyToDelete.url)
+          .catch(e => console.error(`[Local Delete Error] ${storyToDelete.title}:`, e));
+      
+      // Task B: Xóa trên Drive (Sync)
+      if (syncService.isAuthenticated()) {
+          // Thêm delay nhỏ (500ms) để đảm bảo các request tải xuống đang chạy dở (nếu có) bị hủy hoàn toàn
+          // trước khi gửi lệnh xóa lên Drive, tránh xung đột file.
+          setTimeout(() => {
+              syncService.deleteStoryFromDrive(storyToDelete)
+                  .then(() => console.log(`[Drive Delete] Deleted ${storyToDelete.title}`))
+                  .catch(e => console.error(`[Drive Delete Error] ${storyToDelete.title}:`, e));
+          }, 500);
       }
   };
 
