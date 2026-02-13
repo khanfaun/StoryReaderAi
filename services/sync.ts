@@ -28,11 +28,14 @@ const fileIdCache = new Map<string, string>();
 // isSyncing: True khi đang chạy quy trình đồng bộ thủ công (Modal)
 // isBackgroundSyncing: True khi đang chạy đồng bộ ngầm (Icon Header xoay)
 // isDirty: True khi có thay đổi chưa được đẩy lên (Icon Header màu cam)
+// isError: True khi quá trình đồng bộ gặp lỗi (Icon Header tam giác)
 let globalState = {
     status: '',
     isSyncing: false,
     isBackgroundSyncing: false,
-    isDirty: false
+    isDirty: false,
+    isError: false,
+    lastError: null as string | null
 };
 
 type SyncListener = (state: typeof globalState) => void;
@@ -73,8 +76,8 @@ const enqueueSyncTask = (task: SyncTask) => {
 const processSyncQueue = async () => {
     if (isQueueProcessing) return;
     
-    // Bật trạng thái background syncing ngay lập tức
-    updateGlobalState({ isBackgroundSyncing: true, isDirty: false });
+    // Bật trạng thái background syncing ngay lập tức, xóa lỗi cũ
+    updateGlobalState({ isBackgroundSyncing: true, isDirty: false, isError: false, lastError: null });
     isQueueProcessing = true;
 
     try {
@@ -83,51 +86,105 @@ const processSyncQueue = async () => {
             if (task) {
                 try {
                     await task();
-                } catch (e) {
+                } catch (e: any) {
                     console.error("Background sync task failed:", e);
-                    // Nếu lỗi một task, đánh dấu là Dirty để người dùng biết cần đồng bộ lại sau
-                    // Nhưng không dừng loop, tiếp tục xử lý các task khác
-                    updateGlobalState({ isDirty: true });
+                    // Nếu lỗi một task, đánh dấu là Lỗi
+                    updateGlobalState({ isError: true, lastError: e.message || 'Lỗi đồng bộ' });
                 }
                 // Delay nhỏ giữa các request để an toàn cho quota Google Drive
                 await new Promise(resolve => setTimeout(resolve, 500)); 
             }
         }
-    } catch (err) {
+    } catch (err: any) {
         console.error("Critical Queue Error:", err);
+        updateGlobalState({ isError: true, lastError: err.message || 'Lỗi hàng đợi' });
     } finally {
         // LUÔN LUÔN TẮT TRẠNG THÁI BẬN DÙ CÓ LỖI HAY KHÔNG
         isQueueProcessing = false;
         
-        // Kiểm tra lại dirty status lần cuối để cập nhật icon chính xác
-        // Nếu còn task (do lỗi logic nào đó) hoặc checkDirty thấy file chưa sync -> Dirty
-        // Ngược lại -> Synced (Tick xanh)
+        // Kiểm tra lại trạng thái cuối cùng
+        // Nếu đã có lỗi (isError=true) thì giữ nguyên icon tam giác.
+        // Nếu không có lỗi, kiểm tra xem còn dirty item nào sót lại không.
         await checkDirtyStatus(true); 
     }
 };
 
-// Hàm kiểm tra nhanh xem còn file nào chưa sync không (chạy sau khi queue rỗng)
+// Hàm mới: Tự động đẩy các dữ liệu dirty lên Drive (chạy ngầm)
+const uploadDirtyDataToDrive = async () => {
+    if (!accessToken) return;
+    
+    try {
+        // 1. Check & Upload Reading History
+        if (isHistoryDirty()) {
+            const history = getReadingHistory();
+            await saveReadingHistoryToDrive(history);
+        }
+
+        // 2. Check & Upload Stories
+        const dirtyStories = await dbService.getDirtyStories();
+        if (dirtyStories.length > 0) {
+            for (const story of dirtyStories) {
+                const { _dirty, ...cleanStoryData } = story;
+                await saveStoryDetailsToDrive(cleanStoryData as Story);
+                await dbService.markStorySynced(story);
+            }
+            // Update index if stories changed
+            const allStories = await dbService.getAllStories();
+            await saveLibraryIndexToDrive(allStories);
+        }
+
+        // 3. Check & Upload Chapters
+        const dirtyChapters = await dbService.getAllDirtyChapters();
+        if (dirtyChapters.length > 0) {
+            for (const chap of dirtyChapters) {
+                const { _dirty, ...cleanChapData } = chap;
+                await saveChapterContentToDrive(chap.storyUrl, chap.chapterUrl, cleanChapData);
+                await dbService.markChapterSynced(chap.storyUrl, chap.chapterUrl, cleanChapData);
+            }
+        }
+    } catch (e) {
+        console.error("Auto-sync failed", e);
+        throw e; // Để queue handler bắt lỗi
+    }
+};
+
+// Hàm kiểm tra nhanh xem còn file nào chưa sync không (chạy sau khi queue rỗng hoặc khi init)
 // updateUI: Có cập nhật globalState tắt spinner không
+// triggerAutoSync: Có tự động đẩy lên Drive không
 const checkDirtyStatus = async (updateUI: boolean = false) => {
     if (!accessToken) {
         if(updateUI) updateGlobalState({ isBackgroundSyncing: false });
         return;
     }
+    
     try {
         const dirtyStories = await dbService.getDirtyStories();
         const isHistoryUnsynced = isHistoryDirty();
-        const hasDirty = dirtyStories.length > 0 || isHistoryUnsynced;
+        // Check dirty chapters cost heavy db read, maybe optimize later. 
+        // For now rely on story/history or assume queue cleared chapters.
+        const dirtyChapters = await dbService.getAllDirtyChapters(); 
         
-        if (updateUI) {
-            updateGlobalState({ 
-                isDirty: hasDirty, 
-                isBackgroundSyncing: false // Đảm bảo tắt spinner
-            });
-        } else if (hasDirty) {
+        const hasDirty = dirtyStories.length > 0 || isHistoryUnsynced || dirtyChapters.length > 0;
+        
+        if (hasDirty) {
             updateGlobalState({ isDirty: true });
+            
+            // AUTO SYNC LOGIC:
+            // Nếu phát hiện dirty, đang đăng nhập, và không đang trong trạng thái lỗi nghiêm trọng
+            // -> Tự động queue task để đồng bộ
+            if (!globalState.isError && !globalState.isBackgroundSyncing) {
+                console.log("Auto-sync triggered due to dirty items...");
+                enqueueSyncTask(uploadDirtyDataToDrive);
+            }
+        } else {
+            // Nếu không còn gì dirty, và không có lỗi -> Icon Tick Xanh (Clean)
+            if (!globalState.isError) {
+                updateGlobalState({ isDirty: false });
+            }
         }
     } catch(e) {
         console.warn("Check dirty failed", e);
+    } finally {
         if(updateUI) updateGlobalState({ isBackgroundSyncing: false });
     }
 }
@@ -161,8 +218,8 @@ export async function initGoogleDrive(): Promise<void> {
                         const expirationTime = Date.now() + (resp.expires_in * 1000);
                         localStorage.setItem(STORAGE_KEY_TOKEN, accessToken!);
                         localStorage.setItem(STORAGE_KEY_EXPIRY, expirationTime.toString());
-                        updateGlobalState({ isDirty: false }); // Reset dirty visually on login
-                        checkDirtyStatus();
+                        updateGlobalState({ isDirty: false, isError: false }); // Reset status on login
+                        checkDirtyStatus(); // Check and Auto-Sync
                     },
                 });
                 gisInited = true;
@@ -192,7 +249,7 @@ function tryRestoreSession() {
             accessToken = storedToken;
             if (gapi.client) gapi.client.setToken({ access_token: accessToken });
             console.log("Restored Google Drive session.");
-            checkDirtyStatus(); // Check status on restore
+            checkDirtyStatus(); // Check and Auto-Sync on restore
         } else {
             signOut();
         }
@@ -219,7 +276,7 @@ export function signOut() {
     localStorage.removeItem(STORAGE_KEY_EXPIRY);
     fileIdCache.clear();
     if (gapi.client) gapi.client.setToken(null);
-    updateGlobalState({ isDirty: false, isBackgroundSyncing: false });
+    updateGlobalState({ isDirty: false, isBackgroundSyncing: false, isError: false });
 }
 
 export function isAuthenticated(): boolean {
@@ -414,8 +471,6 @@ export async function fetchStoryDetailsFromDrive(storyUrl: string): Promise<Stor
 export async function saveStoryDetailsToDrive(story: Story): Promise<void> {
     const filename = getStoryFilename(story.url);
     await queueUpload(filename, story);
-    // Khi save story, ta cũng nên mark local synced ngay sau khi queue thành công (trong queue logic)
-    // Nhưng vì queue bất đồng bộ, ta cứ để _dirty local, lần sau vào check lại.
 }
 
 // Auto-Sync: Gọi hàm này khi xóa Story
@@ -504,7 +559,7 @@ export async function syncLibraryIndex(): Promise<Story[]> {
 
 export async function uploadAllLocalData(finalize: boolean = true): Promise<void> {
     if (!accessToken) throw new Error("Chưa đăng nhập Google Drive");
-    updateGlobalState({ status: "Đang kiểm tra thay đổi trên máy...", isSyncing: true });
+    updateGlobalState({ status: "Đang kiểm tra thay đổi trên máy...", isSyncing: true, isError: false, lastError: null });
 
     try {
         await syncReadingProgress();
@@ -538,18 +593,18 @@ export async function uploadAllLocalData(finalize: boolean = true): Promise<void
         }
         
         if (finalize) {
-            updateGlobalState({ status: "Đồng bộ hoàn tất!", isSyncing: false, isDirty: false });
+            updateGlobalState({ status: "Đồng bộ hoàn tất!", isSyncing: false, isDirty: false, isError: false });
         }
     } catch (e: any) {
         // Ensure spinner stops even on error
-        updateGlobalState({ status: `Lỗi sao lưu: ${e.message}`, isSyncing: false });
+        updateGlobalState({ status: `Lỗi sao lưu: ${e.message}`, isSyncing: false, isError: true, lastError: e.message });
         throw e;
     }
 }
 
 export async function pullMissingDataFromDrive(finalize: boolean = true): Promise<void> {
     if (!accessToken) throw new Error("Chưa đăng nhập Google Drive");
-    updateGlobalState({ status: "Đang quét dữ liệu trên Drive...", isSyncing: true });
+    updateGlobalState({ status: "Đang quét dữ liệu trên Drive...", isSyncing: true, isError: false, lastError: null });
     
     try {
         let pageToken = null;
@@ -637,7 +692,7 @@ export async function pullMissingDataFromDrive(finalize: boolean = true): Promis
 
     } catch (e: any) {
         // Ensure spinner stops even on error
-        updateGlobalState({ status: `Lỗi tải dữ liệu: ${e.message}`, isSyncing: false });
+        updateGlobalState({ status: `Lỗi tải dữ liệu: ${e.message}`, isSyncing: false, isError: true, lastError: e.message });
         throw e;
     }
 }
@@ -647,18 +702,18 @@ export async function syncData(): Promise<void> {
     if (!accessToken) throw new Error("Chưa đăng nhập Google Drive");
 
     try {
-        updateGlobalState({ status: "Bắt đầu đồng bộ: Bước 1/2 - Tải về...", isSyncing: true });
+        updateGlobalState({ status: "Bắt đầu đồng bộ: Bước 1/2 - Tải về...", isSyncing: true, isError: false, lastError: null });
         await pullMissingDataFromDrive(false);
         updateGlobalState({ status: "Bắt đầu đồng bộ: Bước 2/2 - Tải lên..." });
         await uploadAllLocalData(false);
-        updateGlobalState({ status: "Đồng bộ hoàn tất!", isSyncing: false, isDirty: false });
+        updateGlobalState({ status: "Đồng bộ hoàn tất!", isSyncing: false, isDirty: false, isError: false });
         
         setTimeout(() => {
              const event = new Event('visibilitychange');
              document.dispatchEvent(event);
         }, 500);
     } catch (e: any) {
-        updateGlobalState({ status: `Lỗi đồng bộ: ${e.message}`, isSyncing: false });
+        updateGlobalState({ status: `Lỗi đồng bộ: ${e.message}`, isSyncing: false, isError: true, lastError: e.message });
         throw e;
     }
 }

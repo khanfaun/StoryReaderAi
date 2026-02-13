@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect, useRef } from 'react';
-import { KeyIcon, BellIcon, CloudIcon, MagnifyingGlassIcon, PlusIcon, CheckIcon, SpinnerIcon } from './icons';
+import { KeyIcon, BellIcon, CloudIcon, MagnifyingGlassIcon, PlusIcon, CheckIcon, SpinnerIcon, ExclamationTriangleIcon } from './icons';
 import { subscribeToSyncState, isAuthenticated } from '../services/sync';
 
 interface HeaderProps {
@@ -35,7 +35,7 @@ const Header: React.FC<HeaderProps> = ({
   const lastScrollY = useRef(0);
   
   // Sync State for Icon
-  const [syncState, setSyncState] = useState({ isSyncing: false, isBackgroundSyncing: false, isDirty: false });
+  const [syncState, setSyncState] = useState({ isSyncing: false, isBackgroundSyncing: false, isDirty: false, isError: false, lastError: null as string | null });
   const [isDriveConnected, setIsDriveConnected] = useState(false);
 
   const isVisible = externalIsVisible !== undefined ? externalIsVisible : internalIsVisible;
@@ -49,7 +49,9 @@ const Header: React.FC<HeaderProps> = ({
           setSyncState({
               isSyncing: state.isSyncing,
               isBackgroundSyncing: state.isBackgroundSyncing,
-              isDirty: state.isDirty
+              isDirty: state.isDirty,
+              isError: state.isError,
+              lastError: state.lastError
           });
           // Update auth status if it changes (e.g. after logout)
           setIsDriveConnected(isAuthenticated());
@@ -85,21 +87,29 @@ const Header: React.FC<HeaderProps> = ({
           return <CloudIcon className="w-6 h-6 text-[var(--theme-text-secondary)]" />;
       }
       
+      // 1. Priority: Syncing
       if (syncState.isSyncing || syncState.isBackgroundSyncing) {
           return <SpinnerIcon className="w-6 h-6 text-[var(--theme-accent-primary)] animate-spin" />;
       }
       
+      // 2. Priority: Error
+      if (syncState.isError) {
+          return <ExclamationTriangleIcon className="w-6 h-6 text-rose-500 animate-pulse" />;
+      }
+      
+      // 3. Priority: Dirty (Manual Sync Required or Network Issue prevented auto-sync)
       if (syncState.isDirty) {
           return <CloudIcon className="w-6 h-6 text-amber-500" />;
       }
       
-      // Fully Synced
+      // 4. Default: Synced
       return <CheckIcon className="w-6 h-6 text-emerald-500" />;
   };
   
   const getSyncTitle = () => {
       if (!isDriveConnected) return "Đăng nhập Google Drive";
       if (syncState.isSyncing || syncState.isBackgroundSyncing) return "Đang đồng bộ...";
+      if (syncState.isError) return `Lỗi đồng bộ: ${syncState.lastError || 'Không xác định'}. Nhấn để thử lại.`;
       if (syncState.isDirty) return "Có thay đổi chưa đồng bộ (Nhấn để đồng bộ ngay)";
       return "Đã đồng bộ an toàn";
   }
