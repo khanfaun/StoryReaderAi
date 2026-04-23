@@ -168,7 +168,17 @@ async function fetchAndParse(url: string, isBackground: boolean = false): Promis
   } catch (aggregateError: any) {
       const errorDetails = aggregateError.errors ? aggregateError.errors.map((e: any) => e.message || String(e)).join(', ') : String(aggregateError);
       console.error("All proxies failed:", errorDetails);
-      throw new Error(`CONNECTION_FAILED: Không thể tải dữ liệu từ ${url}. Chi tiết lỗi: ${errorDetails}`);
+      
+      const isCloudflare = errorDetails.includes('403') || errorDetails.includes('503') || errorDetails.includes('Cloudflare') || errorDetails.includes('aborted');
+      
+      let msg = `Không thể kết nối đến ${url}. `;
+      if (isCloudflare) {
+          msg += `Nguồn truyện này đang khóa bảo vệ (Cloudflare/Bot Check), khiến ứng dụng bị chặn tải nội dung. 💡 GỢI Ý: Hãy thử tìm truyện này ở các nguồn khác như KhoDocSach, TruyenHDT, hoặc TruyenYY!`;
+      } else {
+          msg += `Tất cả các trạm mạng đều thất bại. Chi tiết: ${errorDetails}`;
+      }
+
+      throw new Error(msg);
   }
 }
 

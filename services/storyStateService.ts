@@ -7,22 +7,20 @@ function mergeArray<T extends { ten: string; moTa: string; status?: string }>(
   currentArr: T[] = [],
   chapterArr: T[] = []
 ): T[] {
+  const safeCurrentArr = currentArr || [];
   if (!chapterArr || chapterArr.length === 0) {
-    return currentArr;
+    return safeCurrentArr;
   }
   
-  const map = new Map<string, T>(currentArr.map(item => [item.ten.toLowerCase(), { ...item }]));
+  const map = new Map<string, T>(safeCurrentArr.map(item => [item.ten.toLowerCase(), { ...item }]));
 
   chapterArr.forEach(item => {
     const key = item.ten.toLowerCase();
     const existingItem = map.get(key);
 
     if (existingItem) {
-      // Cập nhật tất cả các thuộc tính từ mục mới vào mục hiện có.
-      // Điều này đảm bảo `moTa`, `status`, và các thuộc tính mới như `capDo` được cập nhật.
       map.set(key, { ...existingItem, ...item });
     } else {
-      // Thêm mục mới, đảm bảo nó có trạng thái 'active' nếu không được chỉ định
       map.set(key, { ...item, status: item.status || 'active' } as T);
     }
   });
@@ -30,26 +28,24 @@ function mergeArray<T extends { ten: string; moTa: string; status?: string }>(
   return Array.from(map.values());
 }
 
-// Hàm hợp nhất đơn giản hơn cho các mảng chỉ có 'ten' và 'moTa' (như TuChat)
 function mergeDescriptiveArray<T extends { ten: string; moTa: string }>(
   currentArr: T[] = [],
   chapterArr: T[] = []
 ): T[] {
+  const safeCurrentArr = currentArr || [];
   if (!chapterArr || chapterArr.length === 0) {
-    return currentArr;
+    return safeCurrentArr;
   }
   
-  const map = new Map<string, T>(currentArr.map(item => [item.ten.toLowerCase(), { ...item }]));
+  const map = new Map<string, T>(safeCurrentArr.map(item => [item.ten.toLowerCase(), { ...item }]));
 
   chapterArr.forEach(item => {
     const key = item.ten.toLowerCase();
     const existingItem = map.get(key);
 
     if (existingItem) {
-      // Cập nhật mô tả từ chương mới hơn
       existingItem.moTa = item.moTa;
     } else {
-      // Thêm mục mới
       map.set(key, { ...item } as T);
     }
   });

@@ -251,19 +251,15 @@ const characterStatsSchema = { type: Type.OBJECT, properties: { ...primaryCharac
 const BASE_PROMPT = `Bạn là một trợ lý quản lý trạng thái thế giới (World State Manager) cho một trò chơi nhập vai dựa trên tiểu thuyết.
 
 **NHIỆM VỤ CỐT LÕI:**
-Dựa trên "DỮ LIỆU CŨ" (thể hiện trạng thái tích lũy của 5 chương trước đó) và "NỘI DUNG CHƯƠNG MỚI", hãy cập nhật trạng thái thế giới.
+Dựa trên "DỮ LIỆU CŨ" (trạng thái thế giới hiện tại) và "NỘI DUNG CHƯƠNG MỚI", hãy trích xuất báo cáo sự thay đổi (Delta).
 
-**QUY TẮC TUYỆT ĐỐI VỀ DỮ LIỆU (KHÔNG ĐƯỢC LÀM SAI):**
-1.  **KHÔNG ĐƯỢC XÓA BỎ MỤC CŨ:** Nếu một NPC, Vật phẩm, hay Thế lực đã có trong "DỮ LIỆU CŨ" nhưng không xuất hiện trong chương mới -> **BẮT BUỘC PHẢI GIỮ NGUYÊN** trong danh sách trả về (Copy y nguyên).
-2.  **XỬ LÝ THAY ĐỔI TRẠNG THÁI (GẠCH NGANG):**
-    *   Nếu Nhân vật CHẾT: Đổi \`status\` thành \`'dead'\`.
-    *   Nếu Vật phẩm bị DÙNG HẾT / MẤT / TẶNG: Đổi \`status\` thành \`'used'\` hoặc \`'lost'\`.
-    *   Nếu Thế lực/Địa điểm bị PHÁ HỦY: Đổi \`status\` thành \`'destroyed'\`.
-    *   **TUYỆT ĐỐI KHÔNG XÓA** object đó khỏi mảng JSON. Chúng tôi cần giữ lại để hiển thị gạch ngang cho người dùng.
-3.  **THÊM MỚI:** Nếu có nhân vật/vật phẩm mới xuất hiện -> Thêm vào danh sách với \`status: 'active'\`.
-4.  **CẬP NHẬT:** Nếu thông tin thay đổi (ví dụ: lên cấp, bị thương) -> Cập nhật \`moTa\` và giữ nguyên ID.
+**TỐI ƯU HÓA HIỆU SUẤT (RẤT QUAN TRỌNG):**
+1. **CHỈ TRẢ VỀ SỰ THAY ĐỔI (DELTA / DIFF):** Tuyệt đối KHÔNG ĐƯỢC lặp lại/copy những món đồ, nhân vật, NPC, hay thế lực cũ không có diễn biến mới trong chương này. 
+2. **THÊM MỚI:** Nếu có nhân vật, vật phẩm, công pháp mới xuất hiện -> Viết mới vào mảng với \`status: 'active'\`.
+3. **CẬP NHẬT TRẠNG THÁI CŨ:** Nếu mục cũ thay đổi (chết, thăng cấp, mất đồ) -> Trả về JSON mục đó với \`ten\` (PHẢI GIỮ Y HỆT DỮ LIỆU CŨ) và cập nhật \`moTa\` hoặc \`status\` ('dead', 'used', 'lost', 'destroyed'). Hệ thống của chúng tôi sẽ tự động ghi đè (upsert) dựa trên trường \`ten\`.
+4. Nếu một mảng (như balo, npcs) không có bất kỳ thay đổi nào trong chương này, hãy trả về mảng rỗng \`[]\` hoặc bỏ qua nó.
 
-**DỮ LIỆU CŨ (PREVIOUS 5 CHAPTERS SNAPSHOT):**
+**DỮ LIỆU CŨ (Để bạn đối chiếu tên gọi hiện tại):**
 \`\`\`json
 {previousStats}
 \`\`\`
@@ -298,7 +294,7 @@ async function executeAnalysis(prompt: string, schema: any, onKeySwitched?: () =
 
 
 export const analyzeChapterForPrimaryCharacter = async (chapterContent: string, previousStats: CharacterStats | null, onKeySwitched?: () => void): Promise<{ data: Partial<CharacterStats> | null, usage: { totalTokens: number }}> => {
-    const taskPrompt = `**NHIỆM VỤ CỤ THỂ:**\nHãy trả về trạng thái **ĐẦY ĐỦ** của nhân vật chính. Nhớ kỹ: Nếu vật phẩm bị dùng, hãy đánh dấu status='used', ĐỪNG XÓA NÓ.`;
+    const taskPrompt = `**NHIỆM VỤ CỤ THỂ:**\nHãy phân tích những **THAY ĐỔI MỚI** về vật phẩm, cảnh giới, công pháp của nhân vật chính trong chương này. Trả về mảng rỗng nếu không có gì mới.`;
     const fullPrompt = BASE_PROMPT
         .replace('{previousStats}', JSON.stringify(previousStats ?? {}, null, 2))
         .replace('{chapterContent}', chapterContent.substring(0, 30000)) + `\n\n${taskPrompt}`;
@@ -306,7 +302,7 @@ export const analyzeChapterForPrimaryCharacter = async (chapterContent: string, 
 };
 
 export const analyzeChapterForWorldInfo = async (chapterContent: string, previousStats: CharacterStats | null, onKeySwitched?: () => void): Promise<{ data: Partial<CharacterStats> | null, usage: { totalTokens: number }}> => {
-    const taskPrompt = `**NHIỆM VỤ CỤ THỂ:**\nHãy trả về danh sách **ĐẦY ĐỦ** NPC và Thế lực. Nhớ kỹ: Nếu NPC chết, hãy đánh dấu status='dead', ĐỪNG XÓA NPC KHỎI DANH SÁCH.`;
+    const taskPrompt = `**NHIỆM VỤ CỤ THỂ:**\nHãy phân tích những **THAY ĐỔI MỚI** về NPC, Thế lực, Địa điểm. Chỉ trả về những NPC mới xuất hiện hoặc NPC cũ bị đổi trạng thái (chết, chuyển phe). Trả về mảng rỗng nếu không có gì mới.`;
     const fullPrompt = BASE_PROMPT
         .replace('{previousStats}', JSON.stringify(previousStats ?? {}, null, 2))
         .replace('{chapterContent}', chapterContent.substring(0, 30000)) + `\n\n${taskPrompt}`;
@@ -314,12 +310,7 @@ export const analyzeChapterForWorldInfo = async (chapterContent: string, previou
 };
 
 export const analyzeChapterForCharacterStats = async (chapterContent: string, previousStats: CharacterStats | null, onKeySwitched?: () => void): Promise<{ data: CharacterStats | null, usage: { totalTokens: number }}> => {
-    const taskPrompt = `**NHIỆM VỤ CỤ THỂ:**\nHãy đóng vai một cơ sở dữ liệu sống. Trả về bản ghi JSON chứa **TOÀN BỘ** thông tin.
-    
-    Quy tắc quan trọng nhất: **SOFT DELETE**.
-    - Vật phẩm cũ: Phải giữ lại. Nếu dùng rồi -> status: 'used'.
-    - NPC cũ: Phải giữ lại. Nếu chết -> status: 'dead'.
-    - Chỉ thêm mới hoặc cập nhật mô tả. Không được tự ý xóa bất kỳ mục nào có trong Dữ Liệu Cũ.`;
+    const taskPrompt = `**NHIỆM VỤ CỤ THỂ:**\nTrả về BÁO CÁO THAY ĐỔI (DELTA DIFF). Chỉ trả về nội dung nếu có MÓN ĐỒ MỚI, NHÂN VẬT MỚI, ĐỊA ĐIỂM MỚI hoặc TRẠNG THÁI BỊ THAY ĐỔI (ví dụ item đã dùng thì status='used'). Mảng nào không có update trong chương này thì hãy để trống \`[]\`.`;
     
      const fullPrompt = BASE_PROMPT
         .replace('{previousStats}', JSON.stringify(previousStats ?? {}, null, 2))
