@@ -109,9 +109,6 @@ export const validateApiKey = async (apiKey: string): Promise<void> => {
     await validationClient.models.generateContent({
         model: "gemini-2.5-flash", // Use fast model for validation
         contents: 'Validate',
-        config: {
-            thinkingConfig: { thinkingBudget: 0 },
-        },
     });
   } catch (error) {
     console.error("Lỗi xác thực API Key:", error);
@@ -119,9 +116,10 @@ export const validateApiKey = async (apiKey: string): Promise<void> => {
       if (error.message.includes('API key not valid')) {
         throw new Error("API Key không hợp lệ. Vui lòng kiểm tra lại.");
       }
-      if (error.message.includes('IAM permission')) {
+      if (error.message.includes('IAM permission') || error.message.includes('insufficient authentication scopes')) {
          throw new Error("API Key không có quyền truy cập. Vui lòng kiểm tra quyền của key.");
       }
+      throw new Error(`Lỗi xác thực API Key: ${error.message}`);
     }
     throw new Error("Không thể xác thực API Key. Vui lòng kiểm tra lại hoặc thử lại sau.");
   }
