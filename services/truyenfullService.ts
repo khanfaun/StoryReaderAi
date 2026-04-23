@@ -8,8 +8,13 @@ import type { Story, Chapter, PartialStory } from '../types';
 // Xác định các proxy với các trình tạo URL cụ thể
 const CORS_PROXIES = [
     {
-        name: 'CORSProxy.io',
-        buildUrl: (url: string) => `https://corsproxy.io/?${url}`, 
+        name: 'cors.lol',
+        buildUrl: (url: string) => `https://api.cors.lol/?url=${encodeURIComponent(url)}`,
+        isJson: false
+    },
+    {
+        name: 'CodeTabs',
+        buildUrl: (url: string) => `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(url)}`,
         isJson: false
     },
     {
@@ -23,8 +28,8 @@ const CORS_PROXIES = [
         isJson: true
     },
     {
-        name: 'CodeTabs',
-        buildUrl: (url: string) => `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(url)}`,
+        name: 'CORSProxy.io',
+        buildUrl: (url: string) => `https://corsproxy.io/?${encodeURIComponent(url)}`, 
         isJson: false
     }
 ];
@@ -161,8 +166,9 @@ async function fetchAndParse(url: string, isBackground: boolean = false): Promis
       }
       return result.doc;
   } catch (aggregateError: any) {
-      console.error("All proxies failed:", aggregateError.errors);
-      throw new Error(`CONNECTION_FAILED: Không thể tải dữ liệu từ ${url}. Tất cả các kênh kết nối đều thất bại.`);
+      const errorDetails = aggregateError.errors ? aggregateError.errors.map((e: any) => e.message || String(e)).join(', ') : String(aggregateError);
+      console.error("All proxies failed:", errorDetails);
+      throw new Error(`CONNECTION_FAILED: Không thể tải dữ liệu từ ${url}. Chi tiết lỗi: ${errorDetails}`);
   }
 }
 
