@@ -259,13 +259,12 @@ const BASE_PROMPT = `Bạn là một trợ lý quản lý trạng thái thế gi
 **NHIỆM VỤ CỐT LÕI:**
 Dựa trên "DỮ LIỆU CŨ" (trạng thái thế giới hiện tại) và "NỘI DUNG CHƯƠNG MỚI", hãy trích xuất báo cáo sự thay đổi (Delta).
 
-**TỐI ƯU HÓA HIỆU SUẤT (RẤT QUAN TRỌNG):**
-1. **CHỈ TRẢ VỀ SỰ THAY ĐỔI (DELTA / DIFF):** Tuyệt đối KHÔNG ĐƯỢC lặp lại/copy những món đồ, nhân vật, NPC, hay thế lực cũ không có diễn biến mới trong chương này. 
-2. **THÊM MỚI:** Nếu có nhân vật, vật phẩm, công pháp mới xuất hiện -> Viết mới vào mảng với \`status: 'active'\`.
-3. **CẬP NHẬT TRẠNG THÁI CŨ:** Nếu mục cũ thay đổi (chết, thăng cấp, mất đồ) -> Trả về JSON mục đó với \`ten\` (PHẢI GIỮ Y HỆT DỮ LIỆU CŨ) và cập nhật \`moTa\` hoặc \`status\` ('dead', 'used', 'lost', 'destroyed'). Hệ thống của chúng tôi sẽ tự động ghi đè (upsert) dựa trên trường \`ten\`.
-4. Nếu một mảng (như balo, npcs) không có bất kỳ thay đổi nào trong chương này, hãy trả về mảng rỗng \`[]\` hoặc bỏ qua nó.
+**QUY TẮC TRÍCH XUẤT (RẤT QUAN TRỌNG):**
+1. **THÊM MỚI (CHÚ Ý TÌM KIẾM):** Nếu có NPC, KẺ ĐỊCH, VẬT PHẨM, CÔNG PHÁP, ĐỊA ĐIỂM, hay THẾ LỰC NÀO ĐƯỢC NHẮC ĐẾN TRONG CHƯƠNG -> Bắt buộc phải trích xuất và thêm mới vào mảng với \`status: 'active'\` (nếu chúng chưa có trong DỮ LIỆU CŨ). Đừng bỏ sót thông tin!
+2. **CẬP NHẬT TRẠNG THÁI CŨ:** Nếu mục cũ thay đổi (nhân vật chết, thăng cấp, item bị dùng, môn phái bị diệt) -> Trả về JSON mục đó với \`ten\` (PHẢI GIỮ Y HỆT DỮ LIỆU CŨ) và cập nhật \`moTa\` hoặc \`status\` ('dead', 'used', 'lost', 'destroyed').
+3. **CHỈ TRẢ VỀ SỰ THAY ĐỔI:** KHÔNG lặp lại những món đồ, nhân vật, NPC, không có sự kiện gì mới. Nếu một mảng không có thêm mới hay cập nhật gì, hãy trả về mảng rỗng \`[]\`.
 
-**DỮ LIỆU CŨ (Để bạn đối chiếu tên gọi hiện tại):**
+**DỮ LIỆU CŨ (Để bạn đối chiếu):**
 \`\`\`json
 {previousStats}
 \`\`\`
@@ -316,13 +315,34 @@ export const analyzeChapterForWorldInfo = async (chapterContent: string, previou
 };
 
 export const analyzeChapterForCharacterStats = async (chapterContent: string, previousStats: CharacterStats | null, onKeySwitched?: () => void): Promise<{ data: CharacterStats | null, usage: { totalTokens: number }}> => {
-    const taskPrompt = `**NHIỆM VỤ CỤ THỂ:**\nTrả về BÁO CÁO THAY ĐỔI (DELTA DIFF). Chỉ trả về nội dung nếu có MÓN ĐỒ MỚI, NHÂN VẬT MỚI, ĐỊA ĐIỂM MỚI hoặc TRẠNG THÁI BỊ THAY ĐỔI (ví dụ item đã dùng thì status='used'). Mảng nào không có update trong chương này thì hãy để trống \`[]\`.`;
-    
-     const fullPrompt = BASE_PROMPT
-        .replace('{previousStats}', JSON.stringify(previousStats ?? {}, null, 2))
-        .replace('{chapterContent}', chapterContent.substring(0, 30000)) + `\n\n${taskPrompt}`;
+    const isEmptyStats = !previousStats || Object.keys(previousStats).length === 0 || 
+        (!previousStats.trangThai?.ten && !(previousStats.npcs?.length) && !(previousStats.balo?.length) && !(previousStats.theLuc?.length));
+
+    let prompt = "";
+    if (isEmptyStats) {
+        prompt = `Bạn là một trợ lý quản lý trạng thái thế giới (World State Manager) cho một trò chơi nhập vai dựa trên tiểu thuyết.
+
+**NHIỆM VỤ CỐT LÕI:**
+Đây là CHƯƠNG ĐẦU TIÊN. Hãy ĐỌC KỸ và TRÍCH XUẤT TOÀN BỘ thông tin quan trọng xuất hiện trong chương này. Đừng lười biếng, hãy tìm kiếm và trích xuất mọi chi tiết!
+
+**YÊU CẦU TRÍCH XUẤT (BẮT BUỘC):**
+1. NHÂN VẬT CHÍNH: Tìm tên nhân vật chính, cảnh giới hiện tại.
+2. NPC/NHÂN VẬT PHỤ: Tìm mọi NPC có mặt hoặc được nhắc đến. Đặt \`status: 'active'\`.
+3. VẬT PHẨM/BẢO VẬT/CÔNG PHÁP: Tìm các vật phẩm, bảo vật nhân vật sở hữu hoặc lấy được.
+4. ĐỊA ĐIỂM/THẾ LỰC: Lấy bất cứ vùng đất, môn phái nào được miêu tả.
+5. Nếu truyện nhắc đến, tuyệt đối KHÔNG ĐƯỢC trả về mảng rỗng.
+
+**NỘI DUNG CHƯƠNG:**
+"${chapterContent.substring(0, 30000)}"`;
+    } else {
+        const taskPrompt = `**NHIỆM VỤ CỤ THỂ (PHÂN TÍCH TỈ MỈ):**\nĐây là chương tiếp theo. Hãy ĐỌC KỸ. Đừng bỏ sót những NPC mới, KẺ ĐỊCH mới, Địa Điểm mới đến, Vật Phẩm mới nhận được hoặc dùng xong, hay sự kiện NPC chết/đổi phe. Trả về dưới dạng DELTA DIFF. Bất cứ xuất hiện sự vật nào chưa từng có trong DỮ LIỆU CŨ, hãy thêm nó vào mảng.`;
         
-    const { data: stats, usage } = await executeAnalysis(fullPrompt, characterStatsSchema, onKeySwitched);
+         prompt = BASE_PROMPT
+            .replace('{previousStats}', JSON.stringify(previousStats ?? {}, null, 2))
+            .replace('{chapterContent}', chapterContent.substring(0, 30000)) + `\n\n${taskPrompt}`;
+    }
+        
+    const { data: stats, usage } = await executeAnalysis(prompt, characterStatsSchema, onKeySwitched);
     
     if (!stats) return { data: null, usage };
 

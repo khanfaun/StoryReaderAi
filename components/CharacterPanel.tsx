@@ -16,6 +16,7 @@ interface CharacterPanelProps {
   isOpen: boolean;
   onClose: () => void;
   isAnalyzing: boolean;
+  isBackgroundAnalyzing?: boolean;
   isSidebar?: boolean;
   unifiedMode?: boolean; // New prop: Force show all tabs even in sidebar
   onStatsChange: (newStats: CharacterStats) => void;
@@ -305,7 +306,7 @@ const RelationshipGraph: React.FC<RelationshipGraphProps> = ({ relations, mainCh
 
 
 const CharacterPanel: React.FC<CharacterPanelProps> = ({ 
-    stats, story, isOpen, onClose, isAnalyzing, isSidebar = false, unifiedMode = false, onStatsChange, onDataLoaded, onReanalyze, onStopAnalysis,
+    stats, story, isOpen, onClose, isAnalyzing, isBackgroundAnalyzing, isSidebar = false, unifiedMode = false, onStatsChange, onDataLoaded, onReanalyze, onStopAnalysis,
     chatMessages, onSendMessage, isChatLoading, isHeaderVisible = true
 }) => {
   // If unifiedMode is active, default to 'status' tab, otherwise check if sidebar (World only) or Mobile (All)
@@ -797,16 +798,25 @@ const CharacterPanel: React.FC<CharacterPanelProps> = ({
              <h2 className="text-xl lg:text-lg xl:text-xl font-bold text-[var(--theme-text-primary)]">
                {isSidebar ? (unifiedMode ? 'Dữ liệu Truyện' : 'Thế Giới') : 'Bảng Nhân Vật'}
              </h2>
-            {isAnalyzing && (
+            {isAnalyzing && !isBackgroundAnalyzing && (
                 <svg className="animate-spin h-5 w-5 lg:h-4 lg:w-4 xl:h-5 xl:w-5 text-[var(--theme-accent-primary)]" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
                     <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
                     <path className="opacity-75" fill="currentColor" d="M4 12a8 8
  0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
                 </svg>
             )}
+            {isBackgroundAnalyzing && (
+                <div className="flex items-center gap-1.5 opacity-60 ml-2" title="Đang tải và phân tích dữ liệu chương tiếp theo ngầm">
+                    <svg className="animate-spin h-4 w-4 lg:h-3 lg:w-3 xl:h-4 xl:w-4 text-[var(--theme-text-secondary)]" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3"></circle>
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                    </svg>
+                    <span className="text-[10px] text-[var(--theme-text-secondary)]">Đang tải ch.sau...</span>
+                </div>
+            )}
           </div>
           <div className="flex items-center gap-2">
-              {isAnalyzing ? (
+              {isAnalyzing && !isBackgroundAnalyzing ? (
                 <button 
                   onClick={onStopAnalysis} 
                   className="bg-rose-600 text-white font-semibold text-xs lg:text-[10px] xl:text-xs px-3 py-1 rounded-md hover:bg-rose-500 transition-colors animate-pulse"
@@ -818,7 +828,12 @@ const CharacterPanel: React.FC<CharacterPanelProps> = ({
               ) : (
                 <button 
                   onClick={onReanalyze} 
-                  className="bg-[var(--theme-accent-secondary)] text-slate-900 font-semibold text-xs lg:text-[10px] xl:text-xs px-3 py-1 rounded-md hover:brightness-110 transition-colors"
+                  disabled={isBackgroundAnalyzing}
+                  className={`font-semibold text-xs lg:text-[10px] xl:text-xs px-3 py-1 rounded-md transition-colors ${
+                      isBackgroundAnalyzing 
+                      ? "bg-[var(--theme-bg-surface)] text-[var(--theme-text-secondary)] cursor-not-allowed border border-[var(--theme-border)]" 
+                      : "bg-[var(--theme-accent-secondary)] text-slate-900 hover:brightness-110"
+                  }`}
                   aria-label="Phân tích lại thông tin thế giới"
                   title="Phân tích lại"
                 >

@@ -125,6 +125,7 @@ const StoryViewer: React.FC<StoryViewerProps> = ({
     
     const [cumulativeStats, setCumulativeStats] = useState<CharacterStats | null>(null);
     const [isAnalyzing, setIsAnalyzing] = useState<boolean>(false);
+    const [isBackgroundAnalyzing, setIsBackgroundAnalyzing] = useState<boolean>(false);
     const [isRewriting, setIsRewriting] = useState<boolean>(false);
     const [isPanelVisible, setIsPanelVisible] = useState<boolean>(false);
     
@@ -625,6 +626,7 @@ const StoryViewer: React.FC<StoryViewerProps> = ({
                 return; // Everything is ready
             }
 
+            setIsBackgroundAnalyzing(true);
             let content = cachedData?.content || "";
             
             // 1. Fetch content if missing
@@ -692,6 +694,8 @@ const StoryViewer: React.FC<StoryViewerProps> = ({
             }
         } catch (e) {
             console.warn("Background prefetch failed:", e);
+        } finally {
+            setIsBackgroundAnalyzing(false);
         }
     }, [story, selectedChapterIndex, cumulativeStats, initialEbookInstance]);
 
@@ -871,7 +875,8 @@ const StoryViewer: React.FC<StoryViewerProps> = ({
         const PrimaryPanel = (
             <CharacterPrimaryPanel 
                 stats={cumulativeStats} 
-                isAnalyzing={isAnalyzing} 
+                isAnalyzing={isAnalyzing}
+                isBackgroundAnalyzing={isBackgroundAnalyzing}
                 onStatsChange={handleStatsChange} 
                 onReanalyze={handleFullReanalysis} 
                 onStopAnalysis={handleStopAnalysis} 
@@ -883,6 +888,7 @@ const StoryViewer: React.FC<StoryViewerProps> = ({
                 stats={cumulativeStats} 
                 story={story}
                 isAnalyzing={isAnalyzing} 
+                isBackgroundAnalyzing={isBackgroundAnalyzing}
                 isOpen={true} 
                 onClose={() => {}} 
                 isSidebar={true} 
@@ -902,6 +908,7 @@ const StoryViewer: React.FC<StoryViewerProps> = ({
                 stats={cumulativeStats} 
                 story={story}
                 isAnalyzing={isAnalyzing} 
+                isBackgroundAnalyzing={isBackgroundAnalyzing}
                 isOpen={true} 
                 onClose={() => {}} 
                 isSidebar={true}
@@ -1002,7 +1009,8 @@ const StoryViewer: React.FC<StoryViewerProps> = ({
                         onClose={() => setIsPanelVisible(false)} 
                         stats={cumulativeStats} 
                         story={story}
-                        isAnalyzing={isAnalyzing} 
+                        isAnalyzing={isAnalyzing}
+                        isBackgroundAnalyzing={isBackgroundAnalyzing}
                         isSidebar={false} 
                         onStatsChange={handleStatsChange} 
                         onDataLoaded={onDataChange} 
