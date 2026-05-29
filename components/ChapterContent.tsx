@@ -6,6 +6,8 @@ import SettingsPanel from './SettingsPanel';
 import EntityTooltip from './EntityTooltip';
 import { ListIcon, EditIcon, SparklesIcon, SpinnerIcon, PlusIcon, PlayIcon, PauseIcon, StopIcon, CloseIcon, BarsIcon, CogIcon, SlidersIcon, BackwardStepIcon, ForwardStepIcon, VolumeHighIcon, UserIcon, ClipboardIcon, BookmarkIcon, BookmarkSlashIcon, EyeIcon, EyeSlashIcon, CheckIcon, KeyIcon } from './icons';
 import type { EntityType } from './EntityEditModal';
+import { isAutoPrefetchDisabled } from '../services/apiKeyService';
+
 
 type TtsStatus = 'idle' | 'loading' | 'playing' | 'paused' | 'error' | 'ready';
 
@@ -177,6 +179,7 @@ const ChapterContent: React.FC<ChapterContentProps> = ({
   
   // Ref để tránh tải trước (prefetch) nhiều lần cho cùng một chương
   const hasPrefetchedRef = useRef(false);
+  const isRestoredRef = useRef(false);
 
   // Ref để lưu lại layout trước đó khi chuyển sang chế độ tập trung
   const lastNonMinimalLayoutRef = useRef<ReadingSettings['pcLayout']>('default');
@@ -224,7 +227,28 @@ const ChapterContent: React.FC<ChapterContentProps> = ({
       setIsEditingContent(false);
       setSelectionMenu(null); // Clear selection menu on content change
       hasPrefetchedRef.current = false; // Reset prefetch flag
-  }, [content]);
+      
+      isRestoredRef.current = false;
+      const timer = setTimeout(() => {
+          isRestoredRef.current = true;
+          // Check if we should prefetch immediately if we settled above 50%
+          if (!hasPrefetchedRef.current && onPrefetchNextChapter && !isBusy && content && content.trim().length > 0 && !isAutoPrefetchDisabled()) {
+              const scrollTop = window.scrollY;
+              const scrollHeight = document.documentElement.scrollHeight;
+              const clientHeight = window.innerHeight;
+              let scrollPercentage = 0;
+              if (scrollHeight > clientHeight) {
+                  scrollPercentage = scrollTop / (scrollHeight - clientHeight);
+              }
+              const safePercentage = Math.min(Math.max(scrollPercentage, 0), 1);
+              if (safePercentage >= 0.5) {
+                  hasPrefetchedRef.current = true;
+                  onPrefetchNextChapter();
+              }
+          }
+      }, 500);
+      return () => clearTimeout(timer);
+  }, [content, onPrefetchNextChapter, isBusy]);
 
   // Handle Manual Scroll Restoration Control
   useEffect(() => {
@@ -360,7 +384,7 @@ const ChapterContent: React.FC<ChapterContentProps> = ({
           latestScrollPercentRef.current = safePercentage;
 
           // PREFETCH NEXT CHAPTER
-          if (safePercentage >= 0.5 && !hasPrefetchedRef.current && onPrefetchNextChapter) {
+          if (safePercentage >= 0.5 && !hasPrefetchedRef.current && onPrefetchNextChapter && !isBusy && content && isRestoredRef.current && !isAutoPrefetchDisabled()) {
               hasPrefetchedRef.current = true;
               onPrefetchNextChapter();
           }

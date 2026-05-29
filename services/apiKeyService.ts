@@ -178,3 +178,15 @@ export const getActiveModel = (): string => {
 export const setActiveModel = (modelId: string): void => {
     localStorage.setItem(ACTIVE_MODEL_KEY, modelId);
 };
+
+// --- Auto-Prefetch Management ---
+const DISABLE_AUTO_PREFETCH_KEY = 'disable_auto_prefetch_next_chapter';
+
+export const isAutoPrefetchDisabled = (): boolean => {
+    return localStorage.getItem(DISABLE_AUTO_PREFETCH_KEY) === 'true';
+};
+
+export const setAutoPrefetchDisabled = (disabled: boolean): void => {
+    localStorage.setItem(DISABLE_AUTO_PREFETCH_KEY, disabled ? 'true' : 'false');
+};
+

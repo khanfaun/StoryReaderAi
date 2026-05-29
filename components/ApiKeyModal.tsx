@@ -30,6 +30,7 @@ const ApiKeyModal: React.FC<ApiKeyModalProps> = ({ isOpen, onClose, onValidateKe
   const [keys, setKeys] = useState<ApiKeyInfo[]>([]);
   const [activeKeyId, setActiveKeyId] = useState<string | null>(null);
   const [activeModelId, setActiveModelId] = useState<string>(apiKeyService.getActiveModel());
+  const [isPrefetchEnabled, setIsPrefetchEnabled] = useState<boolean>(!apiKeyService.isAutoPrefetchDisabled());
   
   const [newKeyInputs, setNewKeyInputs] = useState<Array<{ id: number; value: string }>>([{ id: Date.now(), value: '' }]);
   const [validationResults, setValidationResults] = useState<Record<number, { status: ValidationStatus; message?: string }>>({});
@@ -47,6 +48,7 @@ const ApiKeyModal: React.FC<ApiKeyModalProps> = ({ isOpen, onClose, onValidateKe
     setKeys(apiKeyService.getApiKeys());
     setActiveKeyId(apiKeyService.getActiveApiKeyId());
     setActiveModelId(apiKeyService.getActiveModel());
+    setIsPrefetchEnabled(!apiKeyService.isAutoPrefetchDisabled());
   };
 
   useEffect(() => {
@@ -57,6 +59,14 @@ const ApiKeyModal: React.FC<ApiKeyModalProps> = ({ isOpen, onClose, onValidateKe
       setIsBatchValidating(false);
     }
   }, [isOpen]);
+
+  const handleTogglePrefetch = () => {
+    const newValue = !isPrefetchEnabled;
+    setIsPrefetchEnabled(newValue);
+    apiKeyService.setAutoPrefetchDisabled(!newValue);
+    onDataChange();
+  };
+
 
   const handleSetActive = (id: string) => {
     apiKeyService.setActiveApiKeyId(id);
@@ -238,6 +248,27 @@ const ApiKeyModal: React.FC<ApiKeyModalProps> = ({ isOpen, onClose, onValidateKe
                             <div className="flex justify-between items-center text-[10px] text-[var(--theme-text-secondary)]">
                                 <span className="font-medium">{tokenUsage.totalTokens.toLocaleString()} / {TOKEN_FREE_TIER_BENCHMARK.toLocaleString()} tokens</span>
                                 <span className="font-bold text-[var(--theme-text-primary)]">{tokenUsagePercentage.toFixed(2)}%</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* Tách biệt khỏi cụm mô hình hoạt động: Tận dụng khoảng trống ở cột trái */}
+                    <div className="bg-[var(--theme-bg-surface)] p-4 rounded-xl border border-[var(--theme-border)] space-y-3">
+                        <label className="block text-xs font-semibold text-[var(--theme-text-primary)] uppercase tracking-wider">
+                            ⚙️ Tính Năng Đọc Truyện
+                        </label>
+                        <div 
+                            className="flex items-center justify-between p-3 bg-[var(--theme-bg-base)] rounded-lg border border-[var(--theme-border)] hover:border-gray-500 transition-all cursor-pointer"
+                            onClick={handleTogglePrefetch}
+                        >
+                            <div className="flex flex-col gap-0.5 select-none pr-3">
+                                <span className="text-xs font-semibold text-[var(--theme-text-primary)] font-medium">Tự động phân tích chương sau</span>
+                                <span className="text-[10px] text-[var(--theme-text-secondary)] leading-relaxed">Khi cuộn qua 50% chương đang đọc, hệ thống sẽ tự động phân tích và prefetch ngầm chương tiếp theo.</span>
+                            </div>
+                            <div className="flex-shrink-0 relative">
+                                <span className={`inline-block w-10 h-6 rounded-full transition-colors duration-200 relative ${isPrefetchEnabled ? 'bg-[var(--theme-accent-primary)]' : 'bg-gray-600'}`}>
+                                    <span className={`absolute top-0.5 left-0.5 bg-white w-5 h-5 rounded-full transition-transform duration-200 ${isPrefetchEnabled ? 'transform translate-x-4' : 'transform translate-x-0'}`}></span>
+                                </span>
                             </div>
                         </div>
                     </div>
