@@ -121,6 +121,7 @@ const App: React.FC = () => {
   const [tokenUsage, setTokenUsage] = useState<apiKeyService.TokenUsage>(apiKeyService.getTokenUsage());
   
   const [isUpdateModalOpen, setIsUpdateModalOpen] = useState(false);
+  const [hasUnreadUpdates, setHasUnreadUpdates] = useState(false);
   const [isHelpModalOpen, setIsHelpModalOpen] = useState(false);
   const [isSyncModalOpen, setIsSyncModalOpen] = useState(false); 
   
@@ -312,6 +313,7 @@ const App: React.FC = () => {
       const hasSeenUpdate = localStorage.getItem(UPDATE_MODAL_VERSION);
       if (!hasSeenUpdate) {
           setIsUpdateModalOpen(true);
+          setHasUnreadUpdates(true);
       }
 
       setIsLoading(false);
@@ -323,6 +325,7 @@ const App: React.FC = () => {
   const handleCloseUpdateModal = () => {
       localStorage.setItem(UPDATE_MODAL_VERSION, 'true');
       setIsUpdateModalOpen(false);
+      setHasUnreadUpdates(false);
   };
 
   const handleTokenUsageUpdate = useCallback((usageData?: { totalTokens?: number, ttsCharacters?: number }) => {
@@ -943,6 +946,7 @@ const App: React.FC = () => {
                     isVisible={!isReadingMode && isGlobalHeaderVisible} 
                     onOpenMobileSearch={() => setIsMobileSearchModalOpen(true)}
                     onCreateStory={() => setIsCreateStoryModalOpen(true)}
+                    hasUnreadUpdates={hasUnreadUpdates}
                 >
                     {renderHeaderSearch()}
                 </Header>
@@ -1131,6 +1135,7 @@ const App: React.FC = () => {
             // Enable mobile buttons
             onOpenMobileSearch={() => setIsMobileSearchModalOpen(true)}
             onCreateStory={() => setIsCreateStoryModalOpen(true)}
+            hasUnreadUpdates={hasUnreadUpdates}
         >
             {renderHeaderSearch()}
         </Header>

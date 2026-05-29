@@ -29,6 +29,7 @@ const statusIcons: Record<ValidationStatus, React.ReactNode> = {
 const ApiKeyModal: React.FC<ApiKeyModalProps> = ({ isOpen, onClose, onValidateKey, onDataChange, tokenUsage }) => {
   const [keys, setKeys] = useState<ApiKeyInfo[]>([]);
   const [activeKeyId, setActiveKeyId] = useState<string | null>(null);
+  const [activeModelId, setActiveModelId] = useState<string>(apiKeyService.getActiveModel());
   
   const [newKeyInputs, setNewKeyInputs] = useState<Array<{ id: number; value: string }>>([{ id: Date.now(), value: '' }]);
   const [validationResults, setValidationResults] = useState<Record<number, { status: ValidationStatus; message?: string }>>({});
@@ -45,6 +46,7 @@ const ApiKeyModal: React.FC<ApiKeyModalProps> = ({ isOpen, onClose, onValidateKe
   const refreshKeys = () => {
     setKeys(apiKeyService.getApiKeys());
     setActiveKeyId(apiKeyService.getActiveApiKeyId());
+    setActiveModelId(apiKeyService.getActiveModel());
   };
 
   useEffect(() => {
@@ -59,6 +61,12 @@ const ApiKeyModal: React.FC<ApiKeyModalProps> = ({ isOpen, onClose, onValidateKe
   const handleSetActive = (id: string) => {
     apiKeyService.setActiveApiKeyId(id);
     setActiveKeyId(id);
+    onDataChange();
+  };
+
+  const handleSetModel = (modelId: string) => {
+    apiKeyService.setActiveModel(modelId);
+    setActiveModelId(modelId);
     onDataChange();
   };
   
@@ -163,7 +171,7 @@ const ApiKeyModal: React.FC<ApiKeyModalProps> = ({ isOpen, onClose, onValidateKe
           
           <div className="p-6 overflow-y-auto max-h-[85vh]">
             <div className="sync-modal__description !p-0 !pb-4">
-                <p>Chọn một key để kích hoạt. Bạn có thể thêm nhiều key cùng lúc và hệ thống sẽ tự động xác thực chúng.</p>
+                <p>Chọn một cấu hình AI Model và API key để kích hoạt. Bạn có thể thêm nhiều key cùng lúc.</p>
                 <p className="text-xs text-[var(--theme-text-secondary)] mt-2 italic border-l-2 border-[var(--theme-text-secondary)] pl-2">
                     * Lưu ý: API Key của bạn chỉ được lưu trữ cục bộ trên trình duyệt để đảm bảo riêng tư. Hệ thống không thu thập hay lưu trữ key trên máy chủ.
                 </p>
@@ -174,8 +182,36 @@ const ApiKeyModal: React.FC<ApiKeyModalProps> = ({ isOpen, onClose, onValidateKe
                 )}
             </div>
 
+            {/* Model Selection */}
+            <div className="mb-6">
+                <h3 className="text-sm font-semibold mb-2 text-[var(--theme-text-primary)]">Mô Hình Trí Tuệ Nhân Tạo (AI Model)</h3>
+                <div className="space-y-2">
+                    {apiKeyService.GEMINI_MODELS.map(model => (
+                        <div key={model.id} className="bg-[var(--theme-bg-base)] p-3 rounded-lg border border-[var(--theme-border)] flex items-center justify-between gap-2 hover:border-[var(--theme-accent-primary)] transition-colors cursor-pointer" onClick={() => handleSetModel(model.id)}>
+                            <div className="flex items-center gap-3 flex-grow overflow-hidden">
+                                <input
+                                    type="radio"
+                                    name="activeModel"
+                                    id={`model-${model.id}`}
+                                    checked={activeModelId === model.id}
+                                    onChange={() => handleSetModel(model.id)}
+                                    className="w-4 h-4 text-[var(--theme-accent-primary)] bg-[var(--theme-bg-base)] border-gray-500 focus:ring-[var(--theme-accent-primary)] focus:ring-2"
+                                />
+                                <label htmlFor={`model-${model.id}`} className="flex-grow cursor-pointer overflow-hidden flex flex-col sm:flex-row sm:items-center justify-between gap-1 sm:gap-4">
+                                    <span className="font-semibold text-sm text-[var(--theme-text-primary)]">{model.name}</span>
+                                    <span className="text-xs text-[var(--theme-text-secondary)] text-left sm:text-right">{model.description}</span>
+                                </label>
+                            </div>
+                        </div>
+                    ))}
+                </div>
+            </div>
+
+            <hr className="my-6 border-[var(--theme-border)]" />
+
             {/* Key List */}
             <div className="space-y-3">
+                <h3 className="text-sm font-semibold mb-2 text-[var(--theme-text-primary)]">Khóa Truy Cập (API Keys)</h3>
                 {keys.length === 0 && (
                     <p className="text-center text-sm text-[var(--theme-text-secondary)] py-4">Chưa có API key nào được lưu.</p>
                 )}

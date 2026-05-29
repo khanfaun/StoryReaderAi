@@ -23,12 +23,17 @@ const getAiClient = (apiKey: string): GoogleGenAI => {
  * @param error The error object.
  * @returns True if the error is a quota error, false otherwise.
  */
-function isQuotaError(error: unknown): boolean {
+function isQuotaError(error: any): boolean {
+    if (error && typeof error === 'object' && error.status === 429) {
+        return true;
+    }
     if (error instanceof Error) {
         const message = error.message.toLowerCase();
         return message.includes('quota') || 
                message.includes('billing') || 
-               message.includes('resource has been exhausted');
+               message.includes('resource has been exhausted') ||
+               message.includes('429') ||
+               message.includes('too many requests');
     }
     return false;
 }
@@ -50,7 +55,7 @@ async function executeApiCallWithRetry<T>(
     }
 
     const activeKey = apiKeyService.getActiveApiKey();
-    const startIndex = activeKey ? allKeys.findIndex(k => k.id === activeKey.id) : 0;
+    const startIndex = Math.max(0, activeKey ? allKeys.findIndex(k => k.id === activeKey.id) : 0);
     
     // We will try each key once, starting from the current active one
     for (let i = 0; i < allKeys.length; i++) {
@@ -104,10 +109,11 @@ export const validateApiKey = async (apiKey: string): Promise<void> => {
   }
   
   const validationClient = new GoogleGenAI({ apiKey });
+  const activeModel = apiKeyService.getActiveModel();
 
   try {
     await validationClient.models.generateContent({
-        model: "gemini-2.5-flash", // Use fast model for validation
+        model: activeModel,
         contents: 'Validate',
     });
   } catch (error) {
@@ -267,13 +273,13 @@ Dựa trên "DỮ LIỆU CŨ" (trạng thái thế giới hiện tại) và "N�
 **NỘI DUNG CHƯƠNG MỚI:**
 "{chapterContent}"`;
 
-// Use 'gemini-2.5-flash' for MAXIMUM SPEED and EFFICIENCY
-const ANALYSIS_MODEL = "gemini-2.5-flash"; 
+// Use active model for analysis
+const getAnalysisModel = () => apiKeyService.getActiveModel();
 
 async function executeAnalysis(prompt: string, schema: any, onKeySwitched?: () => void): Promise<{ data: any; usage: { totalTokens: number } }> {
     const { data: response, usage } = await executeApiCallWithRetry(async (client) => {
         const genResponse = await client.models.generateContent({
-            model: ANALYSIS_MODEL,
+            model: getAnalysisModel(),
             contents: prompt,
             config: {
                 responseMimeType: "application/json",
@@ -331,7 +337,7 @@ export const analyzeChapterForCharacterStats = async (chapterContent: string, pr
 export const chatWithChapterContent = async (prompt: string, chapterContent: string, storyTitle: string, onKeySwitched?: () => void): Promise<{ text: string, usage: { totalTokens: number }}> => {
     const { data: response, usage } = await executeApiCallWithRetry(async (client) => {
         const genResponse = await client.models.generateContent({
-            model: "gemini-2.5-flash", // Use 2.5 Flash for faster chat
+            model: apiKeyService.getActiveModel(),
             contents: `**Bối cảnh:** Bạn là một trợ lý AI hữu ích, đang thảo luận về cuốn sách "${storyTitle}".
             **Nhiệm vụ:** Trả lời câu hỏi của người dùng chỉ dựa vào nội dung được cung cấp từ chương truyện hiện tại. Nếu câu trả lời không có trong văn bản, hãy nói rằng bạn không tìm thấy thông tin trong đoạn trích này.
 
@@ -358,7 +364,7 @@ export const chatWithEbook = async (prompt: string, zipInstance: any, chapterLis
     const { data: chapterSelectionResponse, usage: usage1 } = await executeApiCallWithRetry(async (client) => {
         const chapterListText = chapterList.map((c, i) => `${i + 1}. Tiêu đề: "${c.title}", Tên file: "${c.url}"`).join('\n');
         const genResponse = await client.models.generateContent({
-            model: "gemini-2.5-flash",
+            model: apiKeyService.getActiveModel(),
             contents: `Người dùng đang hỏi câu này về một cuốn sách: "${prompt}".
             
             Dựa vào danh sách chương dưới đây, hãy xác định những chương có khả năng chứa câu trả lời nhất.
@@ -422,7 +428,7 @@ export const chatWithEbook = async (prompt: string, zipInstance: any, chapterLis
 
     const { data: finalAnswerResponse, usage: usage2 } = await executeApiCallWithRetry(async (client) => {
         const genResponse = await client.models.generateContent({
-            model: "gemini-2.5-flash",
+            model: apiKeyService.getActiveModel(),
             contents: `**Nhiệm vụ:** Trả lời câu hỏi của người dùng một cách ngắn gọn và súc tích, chỉ dựa vào nội dung được cung cấp dưới đây. Nếu câu trả lời không có trong văn bản, hãy nói rằng bạn không tìm thấy thông tin trong đoạn trích này.
             
             **Nội dung được cung cấp:**
@@ -466,7 +472,7 @@ ${content.substring(0, 20000)}
 
     const { data: response, usage } = await executeApiCallWithRetry(async (client) => {
         const genResponse = await client.models.generateContent({
-            model: "gemini-2.5-flash",
+            model: apiKeyService.getActiveModel(),
             contents: prompt,
         });
         const usageMetadata = genResponse.usageMetadata || { totalTokenCount: 0 };

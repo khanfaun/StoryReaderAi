@@ -390,6 +390,15 @@ const StoryViewer: React.FC<StoryViewerProps> = ({
             // Điều này đảm bảo phân tích dựa trên snapshot quá khứ chứ không phải tương lai
             const baseStats = overrideBaseStats !== undefined ? (overrideBaseStats || {}) : (cumulativeStats || {});
             
+            // Debounce analysis to prevent rate limit pile-up when rapidly switching chapters
+            await new Promise(resolve => setTimeout(resolve, 1500));
+            if (currentOpId !== operationIdRef.current) {
+                return;
+            }
+            
+            // Xoay vòng luân phiên dùng API Key cho mỗi chương để chia đều tải
+            apiKeyService.rotateActiveApiKey();
+
             const { data: deltaStats, usage } = await analyzeChapterForCharacterStats(content, baseStats);
             
             if (currentOpId !== operationIdRef.current) return; 
@@ -650,6 +659,7 @@ const StoryViewer: React.FC<StoryViewerProps> = ({
         const currentOpId = ++operationIdRef.current;
 
         try {
+            apiKeyService.rotateActiveApiKey();
             // Sử dụng stats hiện tại làm base cho re-analyze
             const baseStats = cumulativeStats || {};
             const { data: deltaStats, usage } = await analyzeChapterForCharacterStats(chapterContent, baseStats);

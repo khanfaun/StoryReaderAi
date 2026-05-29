@@ -17,6 +17,7 @@ interface HeaderProps {
   children?: React.ReactNode;
   autoHide?: boolean; 
   isVisible?: boolean; 
+  hasUnreadUpdates?: boolean;
 }
 
 const Header: React.FC<HeaderProps> = ({ 
@@ -29,7 +30,8 @@ const Header: React.FC<HeaderProps> = ({
   onCreateStory,
   children,
   autoHide = false,
-  isVisible: externalIsVisible
+  isVisible: externalIsVisible,
+  hasUnreadUpdates = false
 }) => {
   const [internalIsVisible, setInternalIsVisible] = useState(true);
   const lastScrollY = useRef(0);
@@ -164,7 +166,7 @@ const Header: React.FC<HeaderProps> = ({
             aria-label="Xem thông báo cập nhật"
           >
             <BellIcon className="w-6 h-6" />
-            <span className="absolute top-2 right-2 block h-2.5 w-2.5 rounded-full bg-red-500 ring-2 ring-[var(--theme-bg-surface)]"></span>
+            {hasUnreadUpdates && <span className="absolute top-2 right-2 block h-2.5 w-2.5 rounded-full bg-red-500 ring-2 ring-[var(--theme-bg-surface)]"></span>}
           </button>
           
           <button

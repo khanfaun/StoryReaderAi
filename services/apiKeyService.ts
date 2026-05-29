@@ -91,6 +91,19 @@ export const hasApiKey = (): boolean => {
   return !!getActiveApiKey();
 };
 
+export const rotateActiveApiKey = (): ApiKeyInfo | null => {
+  const keys = getApiKeys();
+  if (keys.length <= 1) return getActiveApiKey();
+  
+  const activeId = getActiveApiKeyId();
+  const currentIndex = keys.findIndex(k => k.id === activeId);
+  const nextIndex = (currentIndex + 1) % keys.length;
+  const nextKey = keys[nextIndex];
+  
+  setActiveApiKeyId(nextKey.id);
+  return nextKey;
+};
+
 // --- Token Usage Management ---
 
 const getDefaultUsage = (): TokenUsage => ({
@@ -138,4 +151,30 @@ export const saveTokenUsage = (apiKey: string, usage: TokenUsage): void => {
     let usageMap = getAllTokenUsages();
     usageMap[apiKey] = usage;
     localStorage.setItem(TOKEN_USAGE_MAP_KEY, JSON.stringify(usageMap));
+};
+
+// --- Model Selection Management ---
+
+export interface GeminiModelInfo {
+    id: string;
+    name: string;
+    description: string;
+}
+
+export const GEMINI_MODELS: GeminiModelInfo[] = [
+    { id: 'gemini-2.5-flash', name: 'Gemini 2.5 Flash', description: 'Nhanh, Ít tốn Token nhất - Khuyên dùng' },
+    { id: 'gemini-2.5-pro', name: 'Gemini 2.5 Pro', description: 'Chất lượng tối đa, thông minh nhất' },
+    { id: 'gemini-2.0-flash', name: 'Gemini 2.0 Flash', description: 'Nhanh, tương đối rẻ' },
+    { id: 'gemini-1.5-flash', name: 'Gemini 1.5 Flash', description: 'Phiên bản cũ ổn định, tốc độ cao' },
+    { id: 'gemini-1.5-pro', name: 'Gemini 1.5 Pro', description: 'Phiên bản cũ chất lượng cao' },
+];
+
+const ACTIVE_MODEL_KEY = 'google_gemini_active_model';
+
+export const getActiveModel = (): string => {
+    return localStorage.getItem(ACTIVE_MODEL_KEY) || 'gemini-2.5-flash';
+};
+
+export const setActiveModel = (modelId: string): void => {
+    localStorage.setItem(ACTIVE_MODEL_KEY, modelId);
 };
