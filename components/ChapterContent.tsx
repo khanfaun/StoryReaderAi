@@ -4,7 +4,7 @@ import type { Story, Chapter, ReadingSettings, CharacterStats } from '../types';
 import ChapterListModal from './ChapterListModal';
 import SettingsPanel from './SettingsPanel';
 import EntityTooltip from './EntityTooltip';
-import { ListIcon, EditIcon, SparklesIcon, SpinnerIcon, PlusIcon, PlayIcon, PauseIcon, StopIcon, CloseIcon, BarsIcon, CogIcon, SlidersIcon, BackwardStepIcon, ForwardStepIcon, VolumeHighIcon, UserIcon, ClipboardIcon, BookmarkIcon, BookmarkSlashIcon, EyeIcon, EyeSlashIcon, CheckIcon } from './icons';
+import { ListIcon, EditIcon, SparklesIcon, SpinnerIcon, PlusIcon, PlayIcon, PauseIcon, StopIcon, CloseIcon, BarsIcon, CogIcon, SlidersIcon, BackwardStepIcon, ForwardStepIcon, VolumeHighIcon, UserIcon, ClipboardIcon, BookmarkIcon, BookmarkSlashIcon, EyeIcon, EyeSlashIcon, CheckIcon, KeyIcon } from './icons';
 import type { EntityType } from './EntityEditModal';
 
 type TtsStatus = 'idle' | 'loading' | 'playing' | 'paused' | 'error' | 'ready';
@@ -874,6 +874,7 @@ const ChapterContent: React.FC<ChapterContentProps> = ({
     // 3. BOTTOM NAV (Default)
     return (
         <div className="container mx-auto px-2 flex justify-center items-center gap-1 sm:gap-2">
+          <button onClick={onOpenApiKeySettings} disabled={isBusy && !isAnalyzing} className="flex-shrink-0 bg-[var(--theme-bg-surface)] brightness-125 hover:brightness-150 text-[var(--theme-text-primary)] p-2 rounded-lg transition-all duration-300 disabled:opacity-50" title="API Key Cài đặt"><KeyIcon className="w-6 h-6" /></button>
           <button onClick={() => setIsSettingsVisible(true)} disabled={isBusy && !isAnalyzing} className="flex-shrink-0 lg:hidden bg-[var(--theme-bg-surface)] brightness-125 hover:brightness-150 text-[var(--theme-text-primary)] p-2 rounded-lg transition-all duration-300 disabled:opacity-50"><CogIcon className="w-6 h-6" /></button>
           <button onClick={onPrev} disabled={isFirstChapter || (isBusy && !isAnalyzing)} className="whitespace-nowrap bg-[var(--theme-bg-surface)] brightness-125 hover:brightness-150 text-[var(--theme-text-primary)] font-bold text-xs sm:text-sm py-2 px-3 sm:px-4 rounded-lg transition-all duration-300 disabled:opacity-50"><span className="md:hidden"><BackwardStepIcon className="w-6 h-6" /></span><span className="hidden md:inline">Chương trước</span></button>
           <button onClick={() => setIsListVisible(true)} disabled={isBusy && !isAnalyzing} className="flex-shrink-0 bg-[var(--theme-text-primary)] text-[var(--theme-bg-surface)] hover:brightness-90 font-bold p-2 rounded-lg transition-all duration-300 disabled:opacity-50"><ListIcon className="h-6 w-6" /></button>
