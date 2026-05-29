@@ -323,19 +323,28 @@ export const analyzeChapterForCharacterStats = async (chapterContent: string, pr
         prompt = `Bạn là một trợ lý quản lý trạng thái thế giới (World State Manager) cho một trò chơi nhập vai dựa trên tiểu thuyết.
 
 **NHIỆM VỤ CỐT LÕI:**
-Đây là CHƯƠNG ĐẦU TIÊN. Hãy ĐỌC KỸ và TRÍCH XUẤT TOÀN BỘ thông tin quan trọng xuất hiện trong chương này. Đừng lười biếng, hãy tìm kiếm và trích xuất mọi chi tiết!
+Đây là quá trình khởi tạo dữ liệu ban đầu. Hãy ĐỌC TỪNG DÒNG và TRÍCH XUẤT TOÀN BỘ thông tin quan trọng xuất hiện trong chương. LƯU Ý LỚN DÀNH CHO BẠN: KHÔNG ĐƯỢC LƯỜI BIẾNG, PHẢI TRÍCH XUẤT MỌI CHI TIẾT!
 
 **YÊU CẦU TRÍCH XUẤT (BẮT BUỘC):**
-1. NHÂN VẬT CHÍNH: Tìm tên nhân vật chính, cảnh giới hiện tại.
-2. NPC/NHÂN VẬT PHỤ: Tìm mọi NPC có mặt hoặc được nhắc đến. Đặt \`status: 'active'\`.
-3. VẬT PHẨM/BẢO VẬT/CÔNG PHÁP: Tìm các vật phẩm, bảo vật nhân vật sở hữu hoặc lấy được.
-4. ĐỊA ĐIỂM/THẾ LỰC: Lấy bất cứ vùng đất, môn phái nào được miêu tả.
-5. Nếu truyện nhắc đến, tuyệt đối KHÔNG ĐƯỢC trả về mảng rỗng.
+1. NHÂN VẬT CHÍNH: Tên nhân vật, **ĐẶC BIỆT LÀ CẢNH GIỚI / CẤP ĐỘ**. Đừng bỏ qua chi tiết này.
+2. VẬT PHẨM & TRANG BỊ (BA LÔ): Trích xuất **MỌI TÊN VẬT PHẨM**, linh thạch, bảo vật, vũ khí nhân vật lấy được hoặc đang có.
+3. KỸ NĂNG & CÔNG PHÁP: Bất cứ môn võ công, phép thuật nào xuất hiện.
+4. THẾ LỰC & ĐỊA ĐIỂM: Tên các Tông Môn, Gia Tộc, Quốc Gia, Các Khu Vực.
+5. NPC: Tên kẻ thù, bạn bè, trưởng bối.
+6. Nếu truyện nhắc đến, tuyệt đối KHÔNG ĐƯỢC trả về mảng rỗng.
 
 **NỘI DUNG CHƯƠNG:**
 "${chapterContent.substring(0, 30000)}"`;
     } else {
-        const taskPrompt = `**NHIỆM VỤ CỤ THỂ (PHÂN TÍCH TỈ MỈ):**\nĐây là chương tiếp theo. Hãy ĐỌC KỸ. Đừng bỏ sót những NPC mới, KẺ ĐỊCH mới, Địa Điểm mới đến, Vật Phẩm mới nhận được hoặc dùng xong, hay sự kiện NPC chết/đổi phe. Trả về dưới dạng DELTA DIFF. Bất cứ xuất hiện sự vật nào chưa từng có trong DỮ LIỆU CŨ, hãy thêm nó vào mảng.`;
+        const taskPrompt = `**NHIỆM VỤ CỤ THỂ (PHÂN TÍCH TỈ MỈ - TUYỆT ĐỐI KHÔNG BỎ SÓT):**
+Đây là chương tiếp theo. TUYỆT ĐỐI KHÔNG ĐƯỢC LƯỜI BIẾNG, hãy quét từng câu tìm kiếm:
+- Đột phá **Cấp độ / Cảnh giới** mới của nhân vật.
+- **Vật phẩm mới** (thu thập, mua, cướp) -> Bắt buộc thêm vào mảng Ba Lô.
+- **Vật phẩm hao hụt** (sử dụng mất) -> Đổi status thành 'used'.
+- **Thế lực / Tông môn mới** xuất hiện.
+- Kẻ thù, NPC, Địa điểm mới.
+
+Trả về BÁO CÁO THAY ĐỔI (DELTA DIFF). Chỉ trả về nội dung nếu có SỰ THAY ĐỔI (ví dụ: cấp độ đổi, thêm đồ mới vào balo, thêm NPC). Những thứ MỚI XUẤT HIỆN thì BẮT BUỘC phải có mặt trong kết quả JSON trả về.`;
         
          prompt = BASE_PROMPT
             .replace('{previousStats}', JSON.stringify(previousStats ?? {}, null, 2))

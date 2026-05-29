@@ -360,7 +360,7 @@ const ChapterContent: React.FC<ChapterContentProps> = ({
           latestScrollPercentRef.current = safePercentage;
 
           // PREFETCH NEXT CHAPTER
-          if (safePercentage >= 0.8 && !hasPrefetchedRef.current && onPrefetchNextChapter) {
+          if (safePercentage >= 0.5 && !hasPrefetchedRef.current && onPrefetchNextChapter) {
               hasPrefetchedRef.current = true;
               onPrefetchNextChapter();
           }
@@ -889,6 +889,17 @@ const ChapterContent: React.FC<ChapterContentProps> = ({
     return (
         <div className="container mx-auto px-2 flex justify-center items-center gap-1 sm:gap-2">
           <button onClick={onOpenApiKeySettings} disabled={isBusy && !isAnalyzing} className="flex-shrink-0 bg-[var(--theme-bg-surface)] brightness-125 hover:brightness-150 text-[var(--theme-text-primary)] p-2 rounded-lg transition-all duration-300 disabled:opacity-50" title="API Key Cài đặt"><KeyIcon className="w-6 h-6" /></button>
+          <button 
+              onClick={handleToggleFocusMode}
+              className={`flex-shrink-0 p-2 rounded-lg transition-all duration-300 ${
+                  settings.pcLayout === 'minimal' 
+                  ? 'bg-[var(--theme-accent-primary)] text-white' 
+                  : 'bg-[var(--theme-bg-surface)] brightness-125 hover:brightness-150 text-[var(--theme-text-primary)]'
+              }`}
+              title={settings.pcLayout === 'minimal' ? "Hiện các bảng dữ liệu" : "Ẩn các bảng dữ liệu (Chế độ tập trung)"}
+          >
+              {settings.pcLayout === 'minimal' ? <EyeSlashIcon className="w-6 h-6" /> : <EyeIcon className="w-6 h-6" />}
+          </button>
           <button onClick={() => setIsSettingsVisible(true)} disabled={isBusy && !isAnalyzing} className="flex-shrink-0 lg:hidden bg-[var(--theme-bg-surface)] brightness-125 hover:brightness-150 text-[var(--theme-text-primary)] p-2 rounded-lg transition-all duration-300 disabled:opacity-50"><CogIcon className="w-6 h-6" /></button>
           <button onClick={onPrev} disabled={isFirstChapter || (isBusy && !isAnalyzing)} className="whitespace-nowrap bg-[var(--theme-bg-surface)] brightness-125 hover:brightness-150 text-[var(--theme-text-primary)] font-bold text-xs sm:text-sm py-2 px-3 sm:px-4 rounded-lg transition-all duration-300 disabled:opacity-50"><span className="md:hidden"><BackwardStepIcon className="w-6 h-6" /></span><span className="hidden md:inline">Chương trước</span></button>
           <button onClick={() => setIsListVisible(true)} disabled={isBusy && !isAnalyzing} className="flex-shrink-0 bg-[var(--theme-text-primary)] text-[var(--theme-bg-surface)] hover:brightness-90 font-bold p-2 rounded-lg transition-all duration-300 disabled:opacity-50"><ListIcon className="h-6 w-6" /></button>
@@ -929,14 +940,7 @@ const ChapterContent: React.FC<ChapterContentProps> = ({
 
               {onContentUpdate && !isEditingContent && <button onClick={() => setIsEditingContent(true)} disabled={isBusy && !isAnalyzing} className="p-2 text-[var(--theme-text-secondary)] hover:text-[var(--theme-accent-primary)] hover:bg-[var(--theme-border)] rounded-full transition-colors disabled:opacity-50"><EditIcon className="w-6 h-6" /></button>}
               
-              {/* FOCUS MODE TOGGLE BUTTON - HIDDEN ON MOBILE (md:block) */}
-              <button 
-                  onClick={handleToggleFocusMode}
-                  className={`hidden md:block p-2 rounded-full transition-colors ${settings.pcLayout === 'minimal' ? 'text-[var(--theme-accent-primary)] hover:brightness-110' : 'text-[var(--theme-text-secondary)] hover:text-[var(--theme-text-primary)] hover:bg-[var(--theme-border)]'}`}
-                  title={settings.pcLayout === 'minimal' ? "Hiện các bảng dữ liệu" : "Ẩn các bảng dữ liệu (Chế độ tập trung)"}
-              >
-                  {settings.pcLayout === 'minimal' ? <EyeSlashIcon className="w-6 h-6" /> : <EyeIcon className="w-6 h-6" />}
-              </button>
+
 
               {onOpenAddChapterModal && <button onClick={onOpenAddChapterModal} disabled={isBusy && !isAnalyzing} className="p-2 text-[var(--theme-text-secondary)] hover:text-green-500 hover:bg-[var(--theme-border)] rounded-full transition-colors disabled:opacity-50"><PlusIcon className="w-6 h-6" /></button>}
           </div>
