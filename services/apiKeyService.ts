@@ -181,6 +181,7 @@ export const setActiveModel = (modelId: string): void => {
 
 // --- Auto-Prefetch Management ---
 const DISABLE_AUTO_PREFETCH_KEY = 'disable_auto_prefetch_next_chapter';
+const DISABLE_AUTO_ANALYZE_ON_CHAPTER_CHANGE_KEY = 'disable_auto_analyze_on_chapter_change';
 
 export const isAutoPrefetchDisabled = (): boolean => {
     return localStorage.getItem(DISABLE_AUTO_PREFETCH_KEY) === 'true';
@@ -188,5 +189,13 @@ export const isAutoPrefetchDisabled = (): boolean => {
 
 export const setAutoPrefetchDisabled = (disabled: boolean): void => {
     localStorage.setItem(DISABLE_AUTO_PREFETCH_KEY, disabled ? 'true' : 'false');
+};
+
+export const isAutoAnalyzeOnChapterChangeDisabled = (): boolean => {
+    return localStorage.getItem(DISABLE_AUTO_ANALYZE_ON_CHAPTER_CHANGE_KEY) === 'true';
+};
+
+export const setAutoAnalyzeOnChapterChangeDisabled = (disabled: boolean): void => {
+    localStorage.setItem(DISABLE_AUTO_ANALYZE_ON_CHAPTER_CHANGE_KEY, disabled ? 'true' : 'false');
 };
 

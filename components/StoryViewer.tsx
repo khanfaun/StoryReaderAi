@@ -372,6 +372,9 @@ const StoryViewer: React.FC<StoryViewerProps> = ({
         setChapterContent(content);
         setIsChapterLoading(false);
         
+        // SỬA ĐỔI: Phục hồi stats trước làm context hoặc hiển thị nền
+        const baseStats = overrideBaseStats !== undefined ? (overrideBaseStats || {}) : (cumulativeStats || {});
+        
         try {
             await setCachedChapter(storyToLoad.url, chapterUrl, { content, stats: null });
             // DRIVE SYNC: Sau khi có nội dung mới, đẩy lên Drive nếu đã đăng nhập
@@ -381,16 +384,21 @@ const StoryViewer: React.FC<StoryViewerProps> = ({
         } catch (e) {
             console.error("Failed to initial cache chapter", e);
         }
+
+        // KIỂM TRA TỰ ĐỘNG PHÂN TÍCH: Nếu tắt tự động phân tích khi qua chương mới
+        if (apiKeyService.isAutoAnalyzeOnChapterChangeDisabled()) {
+            setCumulativeStats(baseStats);
+            return;
+        }
         
         const currentApiKey = apiKeyService.getApiKey();
-        if (!content || content.trim().length === 0 || !currentApiKey) return;
+        if (!content || content.trim().length === 0 || !currentApiKey) {
+            setCumulativeStats(baseStats);
+            return;
+        }
 
         setIsAnalyzing(true);
         try {
-            // SỬA ĐỔI: Sử dụng baseStats được truyền vào (từ chương trước) thay vì state hiện tại
-            // Điều này đảm bảo phân tích dựa trên snapshot quá khứ chứ không phải tương lai
-            const baseStats = overrideBaseStats !== undefined ? (overrideBaseStats || {}) : (cumulativeStats || {});
-            
             // Debounce analysis to prevent rate limit pile-up when rapidly switching chapters
             await new Promise(resolve => setTimeout(resolve, 1500));
             if (currentOpId !== operationIdRef.current) {

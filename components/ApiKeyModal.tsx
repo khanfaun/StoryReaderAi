@@ -31,6 +31,7 @@ const ApiKeyModal: React.FC<ApiKeyModalProps> = ({ isOpen, onClose, onValidateKe
   const [activeKeyId, setActiveKeyId] = useState<string | null>(null);
   const [activeModelId, setActiveModelId] = useState<string>(apiKeyService.getActiveModel());
   const [isPrefetchEnabled, setIsPrefetchEnabled] = useState<boolean>(!apiKeyService.isAutoPrefetchDisabled());
+  const [isChapterChangeAnalysisEnabled, setIsChapterChangeAnalysisEnabled] = useState<boolean>(!apiKeyService.isAutoAnalyzeOnChapterChangeDisabled());
   
   const [newKeyInputs, setNewKeyInputs] = useState<Array<{ id: number; value: string }>>([{ id: Date.now(), value: '' }]);
   const [validationResults, setValidationResults] = useState<Record<number, { status: ValidationStatus; message?: string }>>({});
@@ -38,19 +39,20 @@ const ApiKeyModal: React.FC<ApiKeyModalProps> = ({ isOpen, onClose, onValidateKe
   const [isBatchValidating, setIsBatchValidating] = useState(false);
   const [keyToDelete, setKeyToDelete] = useState<ApiKeyInfo | null>(null);
   const [isLoadingDemo, setIsLoadingDemo] = useState(false);
-
+ 
   const TOKEN_FREE_TIER_BENCHMARK = 1000000;
   const tokenUsagePercentage = Math.min((tokenUsage.totalTokens / TOKEN_FREE_TIER_BENCHMARK) * 100, 100);
   
   const inAiStudio = isAiStudio();
-
+ 
   const refreshKeys = () => {
     setKeys(apiKeyService.getApiKeys());
     setActiveKeyId(apiKeyService.getActiveApiKeyId());
     setActiveModelId(apiKeyService.getActiveModel());
     setIsPrefetchEnabled(!apiKeyService.isAutoPrefetchDisabled());
+    setIsChapterChangeAnalysisEnabled(!apiKeyService.isAutoAnalyzeOnChapterChangeDisabled());
   };
-
+ 
   useEffect(() => {
     if (isOpen) {
       refreshKeys();
@@ -59,11 +61,18 @@ const ApiKeyModal: React.FC<ApiKeyModalProps> = ({ isOpen, onClose, onValidateKe
       setIsBatchValidating(false);
     }
   }, [isOpen]);
-
+ 
   const handleTogglePrefetch = () => {
     const newValue = !isPrefetchEnabled;
     setIsPrefetchEnabled(newValue);
     apiKeyService.setAutoPrefetchDisabled(!newValue);
+    onDataChange();
+  };
+
+  const handleToggleChapterChangeAnalysis = () => {
+    const newValue = !isChapterChangeAnalysisEnabled;
+    setIsChapterChangeAnalysisEnabled(newValue);
+    apiKeyService.setAutoAnalyzeOnChapterChangeDisabled(!newValue);
     onDataChange();
   };
 
@@ -271,6 +280,23 @@ const ApiKeyModal: React.FC<ApiKeyModalProps> = ({ isOpen, onClose, onValidateKe
                                 </span>
                             </div>
                         </div>
+
+                        {!isPrefetchEnabled && (
+                            <div 
+                                className="flex items-center justify-between p-3 bg-[var(--theme-bg-base)] rounded-lg border border-[var(--theme-border)] hover:border-gray-500 transition-all cursor-pointer animate-fade-in pl-5 border-l-2 border-l-[var(--theme-accent-primary)]"
+                                onClick={handleToggleChapterChangeAnalysis}
+                            >
+                                <div className="flex flex-col gap-0.5 select-none pr-3">
+                                    <span className="text-xs font-semibold text-[var(--theme-text-primary)] font-medium">Tự động phân tích khi qua chương mới</span>
+                                    <span className="text-[10px] text-[var(--theme-text-secondary)] leading-relaxed">Khi bạn chọn sang chương mới, hệ thống sẽ tự động phân tích để cập nhật bảng thông tin nhân vật ngay lập tức. Nếu tắt, chỉ hiển thị nội dung chương cho đến khi bạn nhấn nút "Phân tích lại".</span>
+                                </div>
+                                <div className="flex-shrink-0 relative">
+                                    <span className={`inline-block w-10 h-6 rounded-full transition-colors duration-200 relative ${isChapterChangeAnalysisEnabled ? 'bg-[var(--theme-accent-primary)]' : 'bg-gray-600'}`}>
+                                        <span className={`absolute top-0.5 left-0.5 bg-white w-5 h-5 rounded-full transition-transform duration-200 ${isChapterChangeAnalysisEnabled ? 'transform translate-x-4' : 'transform translate-x-0'}`}></span>
+                                    </span>
+                                </div>
+                            </div>
+                        )}
                     </div>
 
                     {inAiStudio && (
