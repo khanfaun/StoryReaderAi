@@ -78,6 +78,9 @@ interface ChapterContentProps {
 
   // NEW: Manual Add Entity Trigger
   onAddEntity?: (type: EntityType, name: string) => void;
+
+  // NEW: Prefetch Next Chapter Trigger
+  onPrefetchNextChapter?: () => void;
 }
 
 // Helper format thời gian mm:ss
@@ -120,7 +123,8 @@ const ChapterContent: React.FC<ChapterContentProps> = ({
     onOpenAddChapterModal,
     isMainHeaderVisible = true,
     isPanelOpen = false,
-    onAddEntity
+    onAddEntity,
+    onPrefetchNextChapter
 }) => {
   const [isListVisible, setIsListVisible] = useState(false);
   const [isNavBarVisible, setIsNavBarVisible] = useState(true);
@@ -170,6 +174,9 @@ const ChapterContent: React.FC<ChapterContentProps> = ({
   // Ref để theo dõi giá trị cuộn hiện tại realtime (dùng cho cleanup)
   // FIX: Khởi tạo bằng initialScrollPercentage để nếu người dùng không cuộn tí nào mà thoát ra, vẫn lưu đúng vị trí cũ
   const latestScrollPercentRef = useRef(initialScrollPercentage);
+  
+  // Ref để tránh tải trước (prefetch) nhiều lần cho cùng một chương
+  const hasPrefetchedRef = useRef(false);
 
   // Ref để lưu lại layout trước đó khi chuyển sang chế độ tập trung
   const lastNonMinimalLayoutRef = useRef<ReadingSettings['pcLayout']>('default');
@@ -216,6 +223,7 @@ const ChapterContent: React.FC<ChapterContentProps> = ({
       setEditableContent(content);
       setIsEditingContent(false);
       setSelectionMenu(null); // Clear selection menu on content change
+      hasPrefetchedRef.current = false; // Reset prefetch flag
   }, [content]);
 
   // Handle Manual Scroll Restoration Control
@@ -350,6 +358,12 @@ const ChapterContent: React.FC<ChapterContentProps> = ({
           
           // Cập nhật ref để dùng cho cleanup (Unmount)
           latestScrollPercentRef.current = safePercentage;
+
+          // PREFETCH NEXT CHAPTER
+          if (safePercentage >= 0.8 && !hasPrefetchedRef.current && onPrefetchNextChapter) {
+              hasPrefetchedRef.current = true;
+              onPrefetchNextChapter();
+          }
 
           // Debounce việc lưu xuống DB
           if (scrollTimeoutRef.current) clearTimeout(scrollTimeoutRef.current);

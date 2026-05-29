@@ -613,6 +613,88 @@ const StoryViewer: React.FC<StoryViewerProps> = ({
         }
     };
 
+    const handlePrefetchNextChapter = useCallback(async () => {
+        if (!story.chapters || selectedChapterIndex === null || selectedChapterIndex >= story.chapters.length - 1) return;
+        const nextChapterIndex = selectedChapterIndex + 1;
+        const nextChapter = story.chapters[nextChapterIndex];
+        
+        try {
+            // Check if already completely cached
+            const cachedData = await getCachedChapter(story.url, nextChapter.url);
+            if (cachedData && cachedData.content && cachedData.stats) {
+                return; // Everything is ready
+            }
+
+            let content = cachedData?.content || "";
+            
+            // 1. Fetch content if missing
+            if (!content) {
+                if (syncService.isAuthenticated()) {
+                    const driveData = await syncService.fetchChapterContentFromDrive(story.url, nextChapter.url, nextChapterIndex);
+                    if (driveData && driveData.content) {
+                        content = driveData.content;
+                        if (driveData.stats) {
+                            await setCachedChapter(story.url, nextChapter.url, driveData);
+                            return; // Got from drive, stop here
+                        }
+                    }
+                }
+                
+                if (!content) {
+                    if (story.source === 'Ebook' && initialEbookInstance) {
+                        const { zip } = initialEbookInstance;
+                        const [filePath] = nextChapter.url.split('#');
+                        const decodedUrl = decodeURIComponent(filePath);
+                        const chapterFile = zip.file(decodedUrl);
+                        if (chapterFile) {
+                            const rawHtml = await chapterFile.async('string');
+                            const doc = parseHtml(rawHtml);
+                            const contentEl = doc.body;
+                            contentEl.querySelectorAll('a, sup, sub, script, style, img, svg').forEach((el: HTMLElement) => el.remove());
+                            contentEl.innerHTML = contentEl.innerHTML.replace(/<br\s*\/?>/gi, '\n');
+                            let text = (contentEl.textContent ?? '').trim();
+                            content = (text || "Nội dung chương trống.").replace(/\n\s*\n/g, '\n\n');
+                        }
+                    } else if (story.source !== 'Local') {
+                         content = await getChapterContent(nextChapter, story.source);
+                    }
+                }
+            }
+            
+            if (!content) return; // Cannot fetch
+
+            // Check if we need to analyze
+            if (!cachedData?.stats) {
+                const currentApiKey = apiKeyService.getApiKey();
+                if (currentApiKey) {
+                    // Try to get prev stats for context
+                    let prevStats = cumulativeStats; // Best guess since we are reading the previous chapter right now
+                    
+                    apiKeyService.rotateActiveApiKey();
+                    const { data: deltaStats, usage } = await analyzeChapterForCharacterStats(content, prevStats || {});
+                    
+                    onTokenUsageUpdate({ totalTokens: usage.totalTokens });
+                    
+                    const fullChapterState = mergeChapterStats(prevStats || {}, deltaStats ?? {});
+                    const dataToSave = { content, stats: fullChapterState };
+                    
+                    await setCachedChapter(story.url, nextChapter.url, dataToSave);
+                    if (syncService.isAuthenticated()) {
+                        syncService.saveChapterContentToDrive(story.url, nextChapter.url, dataToSave).catch(console.error);
+                    }
+                } else {
+                     // Just cache content
+                     await setCachedChapter(story.url, nextChapter.url, { content, stats: null });
+                }
+            } else {
+                 // Update cache with fetched content but keep stats
+                 await setCachedChapter(story.url, nextChapter.url, { content, stats: cachedData.stats });
+            }
+        } catch (e) {
+            console.warn("Background prefetch failed:", e);
+        }
+    }, [story, selectedChapterIndex, cumulativeStats, initialEbookInstance]);
+
     const handleUpdateChapterContent = async (newContent: string) => {
         if (selectedChapterIndex === null || !story.chapters) return;
         const chapter = story.chapters[selectedChapterIndex];
@@ -869,6 +951,7 @@ const StoryViewer: React.FC<StoryViewerProps> = ({
                     <ChapterContent
                         story={story} currentChapterIndex={selectedChapterIndex!} content={chapterContent || ''}
                         onBack={handleBackToStory} onPrev={handlePrevChapter} onNext={handleNextChapter}
+                        onPrefetchNextChapter={handlePrefetchNextChapter}
                         onSelectChapter={handleSelectChapter} readChapters={readChapters} settings={settings}
                         onSettingsChange={onSettingsChange} onNavBarVisibilityChange={setIsBottomNavForReadingVisible}
                         cumulativeStats={cumulativeStats} onStatsChange={handleStatsChange}
